@@ -64,3 +64,27 @@ func TestSeedDetectedCLIAndPersona(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldOpenBrowser(t *testing.T) {
+	tests := []struct {
+		name               string
+		configured, noOpen bool
+		terminal           bool
+		display, wayland   string
+		want               bool
+	}{
+		{name: "X display", configured: true, terminal: true, display: ":0", want: true},
+		{name: "Wayland display", configured: true, terminal: true, wayland: "wayland-0", want: true},
+		{name: "disabled in config", terminal: true, display: ":0"},
+		{name: "flag override", configured: true, noOpen: true, terminal: true, display: ":0"},
+		{name: "stdout is not a terminal", configured: true, display: ":0"},
+		{name: "no display", configured: true, terminal: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldOpenBrowser(tt.configured, tt.noOpen, tt.terminal, tt.display, tt.wayland); got != tt.want {
+				t.Fatalf("shouldOpenBrowser() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

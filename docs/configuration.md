@@ -29,6 +29,10 @@ default_timeout = "30m"
 context_messages = 40       # recent messages sent to an agent
 ```
 
+`faztudo serve` opens the URL with `xdg-open` after binding when
+`open_browser` is true, stdout is a terminal, and `DISPLAY` or
+`WAYLAND_DISPLAY` is set. Use `faztudo serve --no-open` to skip this.
+
 ## lanes.toml
 
 A lane is one agent CLI with one model route. A persona is a name you can

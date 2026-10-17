@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/thiagodefreitas/faztudo/internal/agentsdetect"
 	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/app"
@@ -59,6 +60,7 @@ func run(args []string) error {
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		listen := fs.String("listen", "", "listen address override")
+		noOpen := fs.Bool("no-open", false, "do not open the browser")
 		if err := fs.Parse(args[1:]); err != nil {
 			if err == flag.ErrHelp {
 				return nil
@@ -101,12 +103,29 @@ func run(args []string) error {
 		handler := api.New(s, humanID, version.Get().Version)
 		application.Bind(handler)
 		server := &http.Server{Addr: c.Server.Listen, Handler: webui.Mount(handler), ReadHeaderTimeout: 5 * time.Second}
-		logger.Info("serving", "listen", c.Server.Listen, "url", "http://"+c.Server.Listen)
-		return server.ListenAndServe()
+		listener, err := net.Listen("tcp", c.Server.Listen)
+		if err != nil {
+			return err
+		}
+		url := "http://" + listener.Addr().String()
+		logger.Info("serving", "listen", listener.Addr().String(), "url", url)
+		if shouldOpenBrowser(c.Server.OpenBrowser, *noOpen, isatty.IsTerminal(os.Stdout.Fd()), os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY")) {
+			go func() {
+				if err := exec.Command("xdg-open", url).Run(); err != nil {
+					logger.Debug("could not open browser", "error", err)
+				}
+			}()
+		}
+		return server.Serve(listener)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
 }
+
+func shouldOpenBrowser(configured, noOpen, terminal bool, display, wayland string) bool {
+	return configured && !noOpen && terminal && (display != "" || wayland != "")
+}
+
 func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) {
 	members, err := s.Members(ctx)
 	if err != nil {
