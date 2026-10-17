@@ -30,6 +30,8 @@ script:
   - test -z "$(gofmt -l .)"
   - go vet ./...
   - go test -race ./...
+  - python3 -B -m unittest discover -s scripts -p 'test_*.py'
+  - scripts/check_licenses.sh
   - make build
 
 notifications:

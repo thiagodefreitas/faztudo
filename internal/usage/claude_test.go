@@ -116,7 +116,7 @@ func TestReadClaudeCapsFileSize(t *testing.T) {
 }
 
 func TestReadClaudeMissingDirIsNotAnError(t *testing.T) {
-	res, err := ReadClaude(t.TempDir(), Options{Now: testNow})
+	res, err := ReadClaude(t.TempDir(), Options{Now: testNow, PlanLimitTokens: 10000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +126,9 @@ func TestReadClaudeMissingDirIsNotAnError(t *testing.T) {
 	for _, w := range res.Windows {
 		if w.UsedPct != nil {
 			t.Errorf("window %q UsedPct set with no data", w.Name)
+		}
+		if w.Source != domain.SourceUnknown {
+			t.Errorf("window %q source = %q, want unknown", w.Name, w.Source)
 		}
 	}
 }

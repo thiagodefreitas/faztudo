@@ -135,7 +135,10 @@ func addTokens(a, b TokenUsage) TokenUsage {
 
 func claudeWindow(name string, tu TokenUsage, opts Options) domain.LaneWindow {
 	w := domain.LaneWindow{Name: name, Source: domain.SourceCLILog}
-	if opts.PlanLimitTokens > 0 {
+	if tu.Entries == 0 {
+		w.Source = domain.SourceUnknown
+	}
+	if opts.PlanLimitTokens > 0 && tu.Entries > 0 {
 		pct := 100 * float64(tu.Total()) / float64(opts.PlanLimitTokens)
 		w.UsedPct = &pct
 	}

@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 GO ?= go
 
-.PHONY: help setup check lint lint-prose authorship secrets test site build release-check web dev
+.PHONY: help setup check lint lint-prose authorship secrets test licenses site build release-check web dev
 
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null)
@@ -18,7 +18,11 @@ setup: ## install git hooks and web dependencies
 	@if [ -f web/package.json ]; then npm --prefix web ci; fi
 	@if [ -f site/package.json ]; then npm --prefix site ci; fi
 
-check: lint-prose authorship secrets test ## everything CI runs
+check: lint-prose authorship secrets test licenses ## everything CI runs
+
+licenses: ## check production Go and npm dependency licenses
+	python3 -B -m unittest discover -s scripts -p 'test_*.py'
+	scripts/check_licenses.sh
 
 lint-prose: ## writing rules for docs
 	python3 scripts/lint_prose.py

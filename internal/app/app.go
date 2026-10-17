@@ -50,8 +50,16 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		return nil, err
 	}
 	var lc []lanes.LaneConfig
+	configured := map[string]config.Lane{}
+	for _, l := range c.Lanes.Lane {
+		configured[l.ID] = l
+	}
 	for _, l := range stored {
-		lc = append(lc, lanes.LaneConfig{ID: l.ID, CLI: l.CLI, Model: l.Model, CostClass: l.CostClass, Capacity: l.Capacity})
+		threshold := 0
+		if v := configured[l.ID].ConserveAt; v != nil {
+			threshold = *v
+		}
+		lc = append(lc, lanes.LaneConfig{ID: l.ID, CLI: l.CLI, Model: l.Model, CostClass: l.CostClass, Capacity: l.Capacity, ConserveAt: threshold})
 	}
 	var pc []lanes.PersonaConfig
 	byID := map[string]string{}
@@ -147,7 +155,7 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 		windows, err = usage.ReadCodex(home, usage.Options{})
 	case "claude":
 		var result usage.ClaudeResult
-		result, err = usage.ReadClaude(home, usage.Options{})
+		result, err = usage.ReadClaude(home, usage.Options{PlanLimitTokens: a.planLimit(id)})
 		windows = result.Windows
 	default:
 		return domain.Lane{}, fmt.Errorf("%w: usage reader unavailable for lane", store.ErrConflict)
@@ -159,6 +167,15 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 		return domain.Lane{}, err
 	}
 	return a.Store.Lane(ctx, id)
+}
+
+func (a *App) planLimit(id string) int64 {
+	for _, l := range a.Config.Lanes.Lane {
+		if l.ID == id {
+			return l.PlanLimitTokens
+		}
+	}
+	return 0
 }
 
 func (a *App) OnMessage(_ context.Context, m domain.Message, agents []domain.Member) {

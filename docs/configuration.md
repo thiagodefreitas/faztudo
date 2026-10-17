@@ -45,18 +45,22 @@ cli = "claude"
 model = "opus"
 cost_class = "premium"
 capacity = 1
+conserve_at = 80
+# plan_limit_tokens = 1000000 # optional manual limit for Claude's token-based daily usage
 
 [[lane]]
 id = "codex/default"
 cli = "codex"
 cost_class = "standard"
 capacity = 2
+conserve_at = 80
 
 [[lane]]
 id = "kimi/default"
 cli = "kimi"
 cost_class = "cheap"
 capacity = 1
+conserve_at = 80
 
 [[persona]]
 handle = "coder"
@@ -77,6 +81,14 @@ Supported `cli` values: `claude`, `codex`, `grok`, `kimi`, `agy`,
 `opencode`. Kimi and Antigravity have no read-only mode, so personas that
 use them must be `mode = "write"`. OpenCode's print mode produced no answer
 in testing (opencode 1.16.2); treat that lane as experimental.
+
+`conserve_at` is a per-lane percentage from 1 to 100. It defaults to 80.
+Fresh measured usage below the threshold is available; usage at or above it
+is conserve, and 100 percent is exhausted. Measurements are fresh for less
+than 15 minutes. Missing or older percentages keep health unknown. Claude
+logs token totals without a quota percentage, so its health stays unknown
+unless `plan_limit_tokens` sets a manual daily plan limit. This produces a
+percentage estimate from local token totals.
 
 Every detected CLI also gets a plain persona with its own name (`@claude`,
 `@codex`, ...) bound to its default lane.

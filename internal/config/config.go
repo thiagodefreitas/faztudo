@@ -41,11 +41,13 @@ type Runs struct {
 	ContextMessages int    `toml:"context_messages"`
 }
 type Lane struct {
-	ID        string `toml:"id"`
-	CLI       string `toml:"cli"`
-	Model     string `toml:"model"`
-	CostClass string `toml:"cost_class"`
-	Capacity  int    `toml:"capacity"`
+	ID              string `toml:"id"`
+	CLI             string `toml:"cli"`
+	Model           string `toml:"model"`
+	CostClass       string `toml:"cost_class"`
+	Capacity        int    `toml:"capacity"`
+	ConserveAt      *int   `toml:"conserve_at"`
+	PlanLimitTokens int64  `toml:"plan_limit_tokens"`
 }
 type Persona struct {
 	Handle      string   `toml:"handle"`
@@ -105,6 +107,12 @@ func (c Config) Validate() error {
 		if l.Capacity < 1 {
 			return fmt.Errorf("lane[%d].capacity: must be positive", i)
 		}
+		if l.ConserveAt != nil && (*l.ConserveAt < 1 || *l.ConserveAt > 100) {
+			return fmt.Errorf("lane[%d].conserve_at: must be between 1 and 100", i)
+		}
+		if l.PlanLimitTokens < 0 {
+			return fmt.Errorf("lane[%d].plan_limit_tokens: must be nonnegative", i)
+		}
 		if seen[l.ID] {
 			return fmt.Errorf("lane[%d].id: duplicate", i)
 		}
@@ -128,7 +136,7 @@ func WriteDefaults(p Paths) error {
 			return err
 		}
 	}
-	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
+	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
 		h, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if errors.Is(err, os.ErrExist) {
 			continue
