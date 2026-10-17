@@ -194,12 +194,12 @@ func TestExecuteWriteVerification(t *testing.T) {
 	for _, tc := range []struct {
 		id, verify string
 		wantOK     bool
-	}{{"pass", "test -f added.txt", true}, {"fail", "exit 7", false}} {
+	}{{"pass", "test -f added.txt", true}, {"fail", "exit 7", false}, {"mutates", "printf changed >> added.txt", false}} {
 		t.Setenv("FAKE_WRITE_FILE", filepath.Join(m.BaseDir, tc.id, "added.txt"))
 		t.Setenv("FAKE_WRITE_CONTENT", "hello\n")
 		run := domain.Run{ID: tc.id, Mode: domain.RunWrite, State: domain.RunQueued}
 		err := r.ExecuteWrite(context.Background(), &run, fakeAdapter{path}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{Repo: repo, Worktrees: m, TestCommand: tc.verify, TestTimeout: time.Second})
-		if tc.wantOK && (err != nil || run.State != domain.RunDone || run.DiffStat == nil || run.DiffStat.Files != 1) {
+		if tc.wantOK && (err != nil || run.State != domain.RunWaitingApproval || run.DiffStat == nil || run.DiffStat.Files != 1) {
 			t.Fatalf("%s: %+v %v", tc.id, run, err)
 		}
 		if !tc.wantOK && (err == nil || run.State != domain.RunFailed || run.FailureClass != domain.FailureSemantic) {

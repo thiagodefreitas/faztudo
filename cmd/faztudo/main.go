@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/thiagodefreitas/faztudo/internal/agentsdetect"
 	"github.com/thiagodefreitas/faztudo/internal/api"
+	"github.com/thiagodefreitas/faztudo/internal/app"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -50,8 +52,7 @@ func run(args []string) error {
 	case "doctor":
 		return doctor(p)
 	case "lanes":
-		fmt.Println("lanes: not wired yet")
-		return nil
+		return printLanes(p)
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		listen := fs.String("listen", "", "listen address override")
@@ -87,7 +88,16 @@ func run(args []string) error {
 			return err
 		}
 		logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-		server := &http.Server{Addr: c.Server.Listen, Handler: api.New(s, humanID, version), ReadHeaderTimeout: 5 * time.Second}
+		application, err := app.New(context.Background(), s, c, p)
+		if err != nil {
+			return err
+		}
+		if err := application.Start(context.Background()); err != nil {
+			return err
+		}
+		handler := api.New(s, humanID, version)
+		application.Bind(handler)
+		server := &http.Server{Addr: c.Server.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 		logger.Info("serving", "listen", c.Server.Listen)
 		return server.ListenAndServe()
 	default:
@@ -99,9 +109,12 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 	if err != nil {
 		return "", err
 	}
+	byHandle := map[string]domain.Member{}
+	humanID := ""
 	for _, m := range members {
+		byHandle[m.Handle] = m
 		if m.Kind == domain.MemberHuman {
-			return m.ID, nil
+			humanID = m.ID
 		}
 	}
 	handle := os.Getenv("USER")
@@ -114,38 +127,64 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 	if handle == "" {
 		handle = "local"
 	}
-	h := domain.Member{ID: store.NewID(), Kind: domain.MemberHuman, Handle: handle, DisplayName: handle, Presence: domain.PresenceOnline}
-	if _, err = s.Append(ctx, events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: h}); err != nil {
-		return "", err
-	}
-	for _, det := range agentsdetect.Local() {
-		if det.Path == "" && len(det.ConfigDirs) == 0 {
-			continue
-		}
-		lane := domain.Lane{ID: det.Name + "/default", CLI: det.Name, CostClass: domain.CostStandard, Capacity: 1, Health: domain.LaneUnknown, Windows: []domain.LaneWindow{}}
-		for _, configured := range c.Lanes.Lane {
-			if configured.CLI == det.Name {
-				lane.ID = configured.ID
-				lane.Model = configured.Model
-				lane.Capacity = configured.Capacity
-				if configured.CostClass != "" {
-					lane.CostClass = domain.CostClass(configured.CostClass)
-				}
-			}
-		}
-		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: det.Name, DisplayName: strings.ToUpper(det.Name[:1]) + det.Name[1:], Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: []string{lane.ID}}}
-		if _, err = s.Append(ctx, events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: m}); err != nil {
+	if humanID == "" {
+		h := domain.Member{ID: store.NewID(), Kind: domain.MemberHuman, Handle: handle, DisplayName: handle, Presence: domain.PresenceOnline}
+		if _, err = s.Append(ctx, events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: h}); err != nil {
 			return "", err
+		}
+		humanID = h.ID
+	}
+	configured := map[string][]string{}
+	for _, l := range c.Lanes.Lane {
+		configured[l.CLI] = append(configured[l.CLI], l.ID)
+		lane := domain.Lane{ID: l.ID, CLI: l.CLI, Model: l.Model, CostClass: domain.CostClass(l.CostClass), Capacity: l.Capacity, Health: domain.LaneUnknown, Windows: []domain.LaneWindow{}}
+		if lane.CostClass == "" {
+			lane.CostClass = domain.CostStandard
+		}
+		if existing, getErr := s.Lane(ctx, l.ID); getErr == nil {
+			lane.Health = existing.Health
+			lane.HealthReason = existing.HealthReason
+			lane.Windows = existing.Windows
+			lane.LastError = existing.LastError
+		} else if !errors.Is(getErr, store.ErrNotFound) {
+			return "", getErr
 		}
 		if _, err = s.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: lane}); err != nil {
 			return "", err
 		}
 	}
-	for _, persona := range c.Lanes.Persona {
-		if _, err := s.MemberByHandle(ctx, persona.Handle); err == nil {
+	for _, det := range agentsdetect.Local() {
+		if det.Path == "" && len(det.ConfigDirs) == 0 && len(configured[det.Name]) == 0 {
 			continue
 		}
+		if len(configured[det.Name]) == 0 {
+			id := det.Name + "/default"
+			configured[det.Name] = []string{id}
+			if _, getErr := s.Lane(ctx, id); errors.Is(getErr, store.ErrNotFound) {
+				lane := domain.Lane{ID: id, CLI: det.Name, CostClass: domain.CostStandard, Capacity: 1, Health: domain.LaneUnknown, Windows: []domain.LaneWindow{}}
+				if _, err = s.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: lane}); err != nil {
+					return "", err
+				}
+			} else if getErr != nil {
+				return "", getErr
+			}
+		}
+	}
+	for cli, ids := range configured {
+		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: cli, DisplayName: strings.ToUpper(cli[:1]) + cli[1:], Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: ids}}
+		if existing, exists := byHandle[cli]; exists {
+			m.ID = existing.ID
+		}
+		if _, err = s.Append(ctx, events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: m}); err != nil {
+			return "", err
+		}
+		byHandle[cli] = m
+	}
+	for _, persona := range c.Lanes.Persona {
 		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: persona.Handle, DisplayName: persona.DisplayName, Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: persona.Lanes, Role: persona.Role, Mode: domain.RunMode(persona.Mode)}}
+		if existing, ok := byHandle[persona.Handle]; ok {
+			m.ID = existing.ID
+		}
 		if m.DisplayName == "" {
 			m.DisplayName = persona.Handle
 		}
@@ -153,11 +192,17 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 			return "", err
 		}
 	}
-	ch := domain.Channel{ID: store.NewID(), Name: "general", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic, MemberIDs: []string{h.ID}}
-	if _, err = s.Append(ctx, events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch}); err != nil {
+	channels, err := s.Channels(ctx)
+	if err != nil {
 		return "", err
 	}
-	return h.ID, nil
+	if len(channels) == 0 {
+		ch := domain.Channel{ID: store.NewID(), Name: "general", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic, MemberIDs: []string{humanID}}
+		if _, err = s.Append(ctx, events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch}); err != nil {
+			return "", err
+		}
+	}
+	return humanID, nil
 }
 func doctor(p config.Paths) error {
 	c, err := config.Load(p)

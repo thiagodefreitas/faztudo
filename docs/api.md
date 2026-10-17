@@ -34,6 +34,7 @@ interface Member {
   agent?: {
     lanes: string[];        // ordered fallback chain of lane ids
     role?: string;          // short description shown in the UI
+    mode?: "read" | "write"; // default mode for runs this agent starts
   };
   presence: "online" | "idle" | "busy" | "offline";
 }

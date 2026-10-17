@@ -31,6 +31,8 @@ type API struct {
 	Store            *store.Store
 	HumanID, Version string
 	Trigger          RunTrigger
+	ResolveApproval  func(context.Context, domain.Approval, string) (string, error)
+	ReadDiff         func(string) ([]byte, error)
 }
 type actorKey struct{}
 
@@ -172,12 +174,13 @@ func validChannel(c domain.Channel) bool {
 }
 func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 	var v struct {
-		Name       string             `json:"name"`
-		Kind       domain.ChannelKind `json:"kind"`
-		Visibility domain.Visibility  `json:"visibility"`
-		Topic      string             `json:"topic"`
-		RepoPath   string             `json:"repo_path"`
-		MemberIDs  []string           `json:"member_ids"`
+		Name        string             `json:"name"`
+		Kind        domain.ChannelKind `json:"kind"`
+		Visibility  domain.Visibility  `json:"visibility"`
+		Topic       string             `json:"topic"`
+		RepoPath    string             `json:"repo_path"`
+		TestCommand string             `json:"test_command"`
+		MemberIDs   []string           `json:"member_ids"`
 	}
 	if !decode(w, r, &v) {
 		return
@@ -186,7 +189,7 @@ func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", "name required")
 		return
 	}
-	c := domain.Channel{ID: store.NewID(), Name: v.Name, Kind: v.Kind, Visibility: v.Visibility, Topic: v.Topic, RepoPath: v.RepoPath, MemberIDs: v.MemberIDs}
+	c := domain.Channel{ID: store.NewID(), Name: v.Name, Kind: v.Kind, Visibility: v.Visibility, Topic: v.Topic, RepoPath: v.RepoPath, TestCommand: v.TestCommand, MemberIDs: v.MemberIDs}
 	if c.Kind == "" {
 		c.Kind = domain.ChannelTeam
 	}
@@ -200,6 +203,10 @@ func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", "invalid channel name, kind or visibility")
 		return
 	}
+	if err := validateRepo(r.Context(), c.RepoPath); err != nil {
+		fail(w, 400, "bad_request", err.Error())
+		return
+	}
 	if _, ok := a.append(w, r, events.ChannelCreated, c.ID, "", c); ok {
 		respond(w, 201, c)
 	}
@@ -211,10 +218,11 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var v struct {
-		Name      *string   `json:"name"`
-		Topic     *string   `json:"topic"`
-		RepoPath  *string   `json:"repo_path"`
-		MemberIDs *[]string `json:"member_ids"`
+		Name        *string   `json:"name"`
+		Topic       *string   `json:"topic"`
+		RepoPath    *string   `json:"repo_path"`
+		TestCommand *string   `json:"test_command"`
+		MemberIDs   *[]string `json:"member_ids"`
 	}
 	if !decode(w, r, &v) {
 		return
@@ -228,6 +236,9 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 	if v.RepoPath != nil {
 		c.RepoPath = *v.RepoPath
 	}
+	if v.TestCommand != nil {
+		c.TestCommand = *v.TestCommand
+	}
 	if v.MemberIDs != nil {
 		c.MemberIDs = *v.MemberIDs
 	}
@@ -235,9 +246,24 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", "invalid channel name, kind or visibility")
 		return
 	}
+	if err := validateRepo(r.Context(), c.RepoPath); err != nil {
+		fail(w, 400, "bad_request", err.Error())
+		return
+	}
 	if _, ok := a.append(w, r, events.ChannelUpdated, c.ID, "", c); ok {
 		respond(w, 200, c)
 	}
+}
+func validateRepo(ctx context.Context, path string) error {
+	if path == "" {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--is-inside-work-tree")
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		return errors.New("repo_path must be an existing git work tree")
+	}
+	return nil
 }
 func (a *API) messages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -405,6 +431,16 @@ func (a *API) diff(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "conflict", "run has no worktree")
 		return
 	}
+	if a.ReadDiff != nil {
+		b, err := a.ReadDiff(v.ID)
+		if err != nil {
+			fail(w, 500, "internal", "diff unavailable")
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write(b)
+		return
+	}
 	cmd := exec.CommandContext(r.Context(), "git", "-C", v.Worktree, "diff", "--no-ext-diff", "HEAD")
 	b, e := cmd.Output()
 	if e != nil {
@@ -466,6 +502,14 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		fail(w, 400, "bad_request", "invalid option")
 		return
+	}
+	if a.ResolveApproval != nil && v.RunID != "" {
+		outcome, err := a.ResolveApproval(r.Context(), v, req.Option)
+		if err != nil {
+			fail(w, 409, "conflict", err.Error())
+			return
+		}
+		req.Note = outcome
 	}
 	v.State = domain.ApprovalResolved
 	v.Resolution = &domain.ApprovalResolution{Option: req.Option, By: current(r).ID, At: time.Now().UTC(), Note: req.Note}

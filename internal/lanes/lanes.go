@@ -100,15 +100,19 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 }
 func (r *Registry) Acquire(id string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	l := r.lanes[id]
 	if l == nil {
+		r.mu.Unlock()
 		return fmt.Errorf("unknown lane %s", id)
 	}
 	if l.Running >= l.Capacity || l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable {
+		r.mu.Unlock()
 		return fmt.Errorf("lane %s unavailable", id)
 	}
 	l.Running++
+	copyLane := *l
+	r.mu.Unlock()
+	r.emit(copyLane)
 	return nil
 }
 func (r *Registry) WaitAcquire(ctx context.Context, id string) error {
@@ -125,7 +129,9 @@ func (r *Registry) WaitAcquire(ctx context.Context, id string) error {
 		}
 		if l.Running < l.Capacity {
 			l.Running++
+			copyLane := *l
 			r.mu.Unlock()
+			r.emit(copyLane)
 			return nil
 		}
 		changed := r.changed
@@ -139,11 +145,20 @@ func (r *Registry) WaitAcquire(ctx context.Context, id string) error {
 }
 func (r *Registry) Release(id string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if l := r.lanes[id]; l != nil && l.Running > 0 {
 		l.Running--
+		copyLane := *l
 		close(r.changed)
 		r.changed = make(chan struct{})
+		r.mu.Unlock()
+		r.emit(copyLane)
+		return
+	}
+	r.mu.Unlock()
+}
+func (r *Registry) emit(l domain.Lane) {
+	if r.app != nil {
+		_, _ = r.app.Append(context.Background(), events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: l})
 	}
 }
 func (r *Registry) Snapshot(id string) (domain.Lane, bool) {
@@ -154,6 +169,36 @@ func (r *Registry) Snapshot(id string) (domain.Lane, bool) {
 		return domain.Lane{}, false
 	}
 	return *l, true
+}
+
+// Restore keeps persisted health when the daemon starts again.
+func (r *Registry) Restore(lane domain.Lane) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current := r.lanes[lane.ID]; current != nil {
+		current.Health = lane.Health
+		current.HealthReason = lane.HealthReason
+		current.Windows = lane.Windows
+		current.LastError = lane.LastError
+	}
+}
+
+// UpdateUsage refreshes readings without clearing a hard failure signal.
+func (r *Registry) UpdateUsage(ctx context.Context, id string, windows []domain.LaneWindow) error {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil {
+		r.mu.Unlock()
+		return fmt.Errorf("unknown lane %s", id)
+	}
+	l.Windows = windows
+	copyLane := *l
+	r.mu.Unlock()
+	if r.app == nil {
+		return nil
+	}
+	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
+	return err
 }
 func (r *Registry) ApplySignal(ctx context.Context, runID, persona, laneID string, signal adapters.LaneSignal, reason string) error {
 	return r.ApplySignalForChannel(ctx, runID, "", persona, laneID, signal, reason)

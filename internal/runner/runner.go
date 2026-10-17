@@ -27,7 +27,7 @@ import (
 var transitions = map[domain.RunState]map[domain.RunState]bool{
 	domain.RunQueued:          {domain.RunRunning: true, domain.RunCancelled: true},
 	domain.RunRunning:         {domain.RunVerifying: true, domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true, domain.RunWaitingApproval: true},
-	domain.RunVerifying:       {domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true},
+	domain.RunVerifying:       {domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true, domain.RunWaitingApproval: true},
 	domain.RunWaitingApproval: {domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true},
 }
 
@@ -177,6 +177,9 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if diff == "" {
 			return errors.New("write run produced no diff")
 		}
+		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
+			return err
+		}
 		verifyTimeout := opts.TestTimeout
 		if verifyTimeout <= 0 {
 			verifyTimeout = 5 * time.Minute
@@ -184,22 +187,29 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if err := opts.Worktrees.Verify(ctx, w, opts.TestCommand, verifyTimeout); err != nil {
 			return err
 		}
+		_, after, err := opts.Worktrees.Diff(ctx, w)
+		if err != nil {
+			return err
+		}
+		if after != diff {
+			return errors.New("verification changed the worktree diff")
+		}
 		detail := "diff exists"
 		if opts.TestCommand != "" {
 			detail = "diff exists and verification passed"
 		}
 		run.Verification = &domain.Verification{OK: true, Detail: detail}
 		return nil
-	})
+	}, domain.RunWaitingApproval)
 }
 
 func (r *Runner) Execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request) error {
 	if run.Mode == domain.RunWrite || req.Mode == domain.RunWrite {
 		return errors.New("write runs require ExecuteWrite")
 	}
-	return r.execute(ctx, run, adapter, req, nil)
+	return r.execute(ctx, run, adapter, req, nil, domain.RunDone)
 }
-func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, verify func() error) error {
+func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, verify func() error, successState domain.RunState) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -272,7 +282,7 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 					return errors.Join(err, r.finish(context.Background(), run, state, class, err.Error(), &code))
 				}
 			}
-			return r.finish(ctx, run, domain.RunDone, "", "", &code)
+			return r.finish(ctx, run, successState, "", "", &code)
 		}
 		class, signal, reason := adapter.Classify(code, tail)
 		if errors.Is(execErr, context.DeadlineExceeded) {
