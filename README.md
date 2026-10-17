@@ -2,13 +2,18 @@
 
 Your agents and you, in one room.
 
+**One MIT-licensed binary that puts the agent CLIs you already use (Claude
+Code, Codex, Grok, Kimi, Antigravity, OpenCode) into a shared chat, asks
+you before it pushes or sends anything, and shows how much quota each agent
+has left.**
+
 faztudo is a small program you run on your own Linux machine. It gives you a
 chat workspace, with channels, threads and direct messages, where you and the
 AI coding agents already installed on your machine work together. Mention
 `@codex` in a channel and Codex picks up the work in its own git worktree,
-streams what it is doing, and waits for your approval before anything leaves
-the machine. Mention `@reviewer` and whichever review agent still has quota
-left takes a look.
+streams what it is doing, and waits for your approval before a branch is
+pushed or a message goes out. Mention `@reviewer` and whichever review agent
+still has quota left takes a look.
 
 The name is Portuguese for "does everything". It does not, yet.
 

@@ -25,10 +25,18 @@ helpers should find the stack familiar.
 
 - **Python daemon.** Good for quick work on subprocesses, but harder to ship
   as one file, slower to start and heavier at idle.
-- **TypeScript daemon on Node or Bun.** One language everywhere, but a heavier
-  runtime to install and supervise for a background service.
+- **TypeScript daemon on Node or Bun.** One language everywhere, and the
+  language of the web UI. It loses on three points that matter for a local
+  daemon: a cgo-free SQLite driver, direct control of process groups and
+  signals, and shipping one static binary with no runtime to install.
 - **PostgreSQL.** More than a single-user local tool needs, and one more thing
   to install and keep running.
+
+## Review point
+
+Go stays unless it fails one of two measured gates in M1: a packaged install
+on a clean machine, and a crash-recovery test where the daemon dies while a
+run's process keeps going.
 
 ## Consequences
 

@@ -41,7 +41,9 @@ never edited. Each event has:
 
 | field | meaning |
 | :--- | :--- |
-| `id` | ULID, sortable by time |
+| `seq` | integer, strictly increasing; the delivery cursor clients resume from |
+| `id` | ULID, a stable public id |
+| `version` | payload schema version for this `type` |
 | `type` | for example `message.posted`, `run.output`, `approval.resolved` |
 | `actor` | who caused it: `human:<id>`, `agent:<id>`, `bridge:<id>`, `system`. Set by the server from the connection, never from the payload. |
 | `channel_id` | where it belongs, if anywhere |
@@ -50,8 +52,10 @@ never edited. Each event has:
 | `ts` | server time |
 
 Projections are tables built from the log, such as the message list of a
-channel or the current state of a run. They can be rebuilt from scratch at
-any time. The web UI subscribes to the event stream over a WebSocket and
+channel or the current state of a run. They are updated in the same SQLite
+transaction as the append, so a crash never leaves the log and a projection
+disagreeing. They can also be rebuilt from scratch at any time by replaying
+the log in `seq` order. The web UI subscribes to the event stream over a WebSocket and
 keeps its own view up to date. The 2D and 3D office views read the same
 stream, so they show exactly what the chat shows.
 
@@ -79,7 +83,10 @@ stream, so they show exactly what the chat shows.
    healthy and has free capacity. If it skipped a lane, it posts a notice
    saying which lane it used and why.
 3. The runner builds a bounded context: pinned items, the channel summary and
-   the most recent messages, sized to the lane's model.
+   the most recent messages. The size estimate counts the standing
+   instructions, tool definitions and a reserve for the answer, and stays
+   under 0.65 of the model's limit. A summary is a convenience for the
+   agent, never a source of truth; the log is.
 4. For a write run, the runner creates a git worktree under
    `~/.local/share/faztudo/worktrees/` from the channel's repository.
 5. The adapter turns the request into the exact command line for that CLI.
@@ -93,9 +100,15 @@ stream, so they show exactly what the chat shows.
    verified run is shown as done.
 
 Run states: `queued`, `running`, `verifying`, `done`, `failed`, `cancelled`,
-`waiting_approval`. A restarted daemon finds runs that were `running`,
-checks whether their process is still alive, and either reattaches or marks
-them failed with a clear reason.
+`waiting_approval`. The result of verification is shown in the channel, not
+only in a log.
+
+Every run records the process id, the process group and the process start
+time. A restarted daemon checks each run that was `running` against `/proc`:
+if the same process (same id and same start time) is alive, it reattaches;
+if not, it kills whatever is left of the group and marks the run failed with
+the reason. It never starts a second copy while the first may still be
+working.
 
 ## Lanes
 
@@ -137,7 +150,12 @@ delivery cannot create duplicate work. Signal comes first, through
   authority, a login (passkey or password) and per-device pairing by QR code.
 - Secrets live in the system keyring or a 0600 file under
   `~/.config/faztudo`, never in the database or logs.
-- Write runs happen in worktrees. Outward actions need human approval.
+- Write runs happen in worktrees. Actions that go through faztudo, such as
+  pushing a branch or sending to a bridge, need human approval.
+- An agent CLI runs as your user. faztudo cannot stop it from doing
+  something it is able to do on its own. The fence for that is each CLI's own
+  sandbox and permission mode, which faztudo sets as strictly as the run
+  allows, and an optional Linux sandbox (bubblewrap) for write runs.
 
 ## Repository layout
 

@@ -19,8 +19,12 @@ design assumes that agents make mistakes and that messages from outside
   it. The server decides who is acting from the connection, never from the
   message content.
 - **Isolated write runs.** An agent that changes code works in its own git
-  worktree, not in your checkout. Pushing and other outward actions need an
-  approval.
+  worktree, not in your checkout. Pushing a branch, sending to a bridge and
+  other actions that go through faztudo need an approval.
+- **Honest limits.** An agent CLI runs as your user. faztudo cannot stop a
+  CLI from doing what that CLI can do on its own; it starts each CLI in the
+  strictest sandbox and permission mode the run allows, and can wrap write
+  runs in a Linux sandbox (bubblewrap).
 - **Stripped environment.** Agent processes start with known secret variables
   removed from their environment.
 - **Bridges are allowlisted.** Signal and Discord accept messages only from

@@ -10,22 +10,33 @@ License, contribution rules, security policy, design documents, decision
 records, CI with secret scanning and authorship checks, documentation site,
 issue templates and the issue backlog for M1.
 
-## M1 Chat and agents
+## M1 First dogfood
 
-The first version we use every day to build faztudo itself.
+The smallest version we can use every day to build faztudo itself.
 
 - Daemon with the SQLite event log, HTTP API and WebSocket stream.
 - `faztudo init`, `serve`, `doctor`, `agents detect`, `lanes`.
-- Web chat: channels, threads, direct messages with agents, mentions,
-  streaming agent output, markdown and code, diff view, approval cards,
-  command palette, keyboard navigation, light and dark themes.
-- Adapters for Claude Code and Codex, then Grok, Kimi, Antigravity and
-  OpenCode.
-- Runs in git worktrees, with capacity limits, timeouts, failure classes and
-  verification.
-- Lanes: per-agent usage and quota, personas with fallback chains, manual and
-  automatic switching that is always announced.
+- Web chat with channels, mentions, markdown and code, streaming agent
+  output, run cards with the verification result, diff view and approval
+  cards.
+- Adapters for Claude Code and Codex.
+- Runs in git worktrees, with capacity limits, timeouts, failure classes,
+  verification, and recovery when the daemon restarts mid-run.
+- Lanes: health with source and age for every number, manual lane choice,
+  and an announced switch when a lane fails with a quota error.
+
+Exit: in `#faztudo-dev`, `@codex` implements an issue in a worktree,
+`@claude` reviews it, the human approves, and the diff and verification
+result are visible in the chat.
+
+## M1b Team chat and Lanes
+
+- Threads, direct messages, command palette, keyboard navigation everywhere.
+- Adapters for Grok, Kimi, Antigravity and OpenCode.
+- Lanes dashboard; switching on usage thresholds once the measurements are
+  calibrated against real exhaustion events.
 - faztudo MCP server so agents can post, ask and request approvals.
+- Optional Linux sandbox (bubblewrap) for write runs.
 
 ## M2 Usable alpha (the repository becomes public here)
 
@@ -35,6 +46,8 @@ The first version we use every day to build faztudo itself.
   conversations stay within model limits.
 - Security review, clean install test, complete docs, first release packages
   (tarball, deb, AppImage).
+- At least two weeks of building faztudo inside faztudo, with what broke
+  written down, before the repository goes public.
 
 ## M3 Signal
 

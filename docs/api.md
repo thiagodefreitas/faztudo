@@ -151,15 +151,18 @@ interface Lane {
 `GET /api/v1/stream` upgrades to a WebSocket. The client sends:
 
 ```json
-{ "op": "subscribe", "after": "<last event id seen, optional>" }
+{ "op": "subscribe", "after_seq": 1234 }
 ```
 
-The server first replays every event after that id, then streams new ones.
+`after_seq` is the `seq` of the last event the client saw, or 0. The server
+first replays every event after it in order, then streams new ones.
 Every frame is one event:
 
 ```json
 {
+  "seq": 1235,
   "id": "01JABC...",
+  "version": 1,
   "type": "message.posted",
   "actor": "agent:01JXYZ...",
   "channel_id": "01JCH...",
@@ -184,5 +187,6 @@ Event types in version 1:
 | `lane.switched` | `{run_id, from, to, reason}` |
 | `notice` | `{level: "info" or "warn" or "error", text}` |
 
-Clients keep the id of the last event they saw and pass it on reconnect, so
-nothing is lost while a phone sleeps.
+Clients keep the `seq` of the last event they saw and pass it on reconnect,
+so nothing is lost while a phone sleeps. Events with the same `seq` are the
+same event; clients ignore repeats.
