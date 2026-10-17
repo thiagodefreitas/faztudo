@@ -1,0 +1,344 @@
+/*
+ * faztudo design tokens.
+ * Calm slate neutrals, one teal accent, semantic status pairs, and six
+ * color-blind-distinguishable agent avatar hues in light and dark themes.
+ * Contrast ratios are documented in docs/design.md.
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Font stacks */
+  --fz-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --fz-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* Type scale */
+  --fz-text-xs: 0.75rem;      /* 12px - badges, timestamps, source/age tags */
+  --fz-text-sm: 0.8125rem;    /* 13px - dense sidebar, metadata, run headers */
+  --fz-text-base: 0.9375rem;  /* 15px - channel messages and composer */
+  --fz-text-lg: 1.0625rem;    /* 17px - section and dialog titles */
+  --fz-text-xl: 1.25rem;      /* 20px - page headings */
+  --fz-text-2xl: 1.5rem;      /* 24px - workspace and onboarding titles */
+
+  /* Line heights */
+  --fz-leading-tight: 1.25;
+  --fz-leading-snug: 1.375;
+  --fz-leading-normal: 1.5;
+  --fz-leading-relaxed: 1.65;
+
+  /* Font weights */
+  --fz-weight-normal: 400;
+  --fz-weight-medium: 500;
+  --fz-weight-semibold: 600;
+  --fz-weight-bold: 700;
+
+  /* Spacing scale (4px base grid with 2px and 6px dense steps) */
+  --fz-space-0: 0rem;
+  --fz-space-0-5: 0.125rem;   /* 2px */
+  --fz-space-1: 0.25rem;      /* 4px */
+  --fz-space-1-5: 0.375rem;   /* 6px */
+  --fz-space-2: 0.5rem;       /* 8px */
+  --fz-space-3: 0.75rem;      /* 12px */
+  --fz-space-4: 1rem;         /* 16px */
+  --fz-space-5: 1.25rem;      /* 20px */
+  --fz-space-6: 1.5rem;       /* 24px */
+  --fz-space-8: 2rem;         /* 32px */
+  --fz-space-10: 2.5rem;      /* 40px */
+  --fz-space-12: 3rem;        /* 48px */
+
+  /* Border radii */
+  --fz-radius-none: 0px;
+  --fz-radius-xs: 2px;
+  --fz-radius-sm: 4px;
+  --fz-radius-md: 6px;
+  --fz-radius-lg: 8px;
+  --fz-radius-xl: 12px;
+  --fz-radius-full: 9999px;
+
+  /* Motion and focus */
+  --fz-duration-fast: 100ms;
+  --fz-duration-normal: 160ms;
+  --fz-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --fz-focus-ring-width: 2px;
+  --fz-focus-ring-offset: 2px;
+
+  /* Neutrals - Light */
+  --fz-bg-canvas: #f7f9fa;
+  --fz-bg-surface: #ffffff;
+  --fz-bg-subtle: #eef2f5;
+  --fz-bg-muted: #e3e9ed;
+  --fz-bg-sunken: #f1f5f7;
+  --fz-bg-overlay: rgba(15, 20, 23, 0.45);
+
+  --fz-border-subtle: #dfe6eb;
+  --fz-border-default: #cbd5dc;
+  --fz-border-strong: #9aaab5;
+
+  --fz-text-primary: #11181c;
+  --fz-text-secondary: #3f4d56;
+  --fz-text-muted: #576670;
+  --fz-text-on-accent: #ffffff;
+
+  /* Accent (Teal) - Light */
+  --fz-accent: #0e7c74;
+  --fz-accent-hover: #0a635c;
+  --fz-accent-active: #09504b;
+  --fz-accent-text: #0a635c;
+  --fz-accent-subtle: #dff3f0;
+  --fz-accent-border: #9ad9d1;
+  --fz-focus-ring: #0e7c74;
+
+  /* Semantic status - Light */
+  --fz-success: #1b7f46;
+  --fz-success-text: #156839;
+  --fz-success-subtle: #e3f5ea;
+  --fz-success-border: #9ddbb5;
+
+  --fz-warn: #b86200;
+  --fz-warn-text: #8a4b08;
+  --fz-warn-subtle: #fef0db;
+  --fz-warn-border: #f5c982;
+
+  --fz-danger: #c92a1d;
+  --fz-danger-text: #b42318;
+  --fz-danger-subtle: #fde8e6;
+  --fz-danger-border: #f7b2ab;
+
+  /*
+   * Six agent avatar hues - Light
+   * Chosen along separated hue and luminance axes (Okabe-Ito derived)
+   * so protanopia, deuteranopia, and tritanopia users can tell them apart.
+   */
+  /* 1: Cobalt (claude default) */
+  --fz-agent-1: #1d5bbf;
+  --fz-agent-1-bg: #e6effc;
+  --fz-agent-1-fg: #143e82;
+  --fz-agent-1-border: #acc8f7;
+
+  /* 2: Amber (codex default) */
+  --fz-agent-2: #a85800;
+  --fz-agent-2-bg: #fdf0de;
+  --fz-agent-2-fg: #7a4000;
+  --fz-agent-2-border: #f2c68a;
+
+  /* 3: Teal (agy default) */
+  --fz-agent-3: #0e7c74;
+  --fz-agent-3-bg: #dff3f0;
+  --fz-agent-3-fg: #09504b;
+  --fz-agent-3-border: #9ad9d1;
+
+  /* 4: Plum (kimi default) */
+  --fz-agent-4: #8f3270;
+  --fz-agent-4-bg: #f9e8f3;
+  --fz-agent-4-fg: #63204c;
+  --fz-agent-4-border: #e3afd1;
+
+  /* 5: Sky (opencode default) */
+  --fz-agent-5: #0b729c;
+  --fz-agent-5-bg: #e1f3fa;
+  --fz-agent-5-fg: #074d6b;
+  --fz-agent-5-border: #9bd5ed;
+
+  /* 6: Terracotta (grok default) */
+  --fz-agent-6: #b83b1b;
+  --fz-agent-6-bg: #fceae4;
+  --fz-agent-6-fg: #7d2610;
+  --fz-agent-6-border: #f2b6a5;
+
+  /* Named CLI aliases */
+  --fz-agent-claude: var(--fz-agent-1);
+  --fz-agent-claude-bg: var(--fz-agent-1-bg);
+  --fz-agent-claude-fg: var(--fz-agent-1-fg);
+  --fz-agent-claude-border: var(--fz-agent-1-border);
+
+  --fz-agent-codex: var(--fz-agent-2);
+  --fz-agent-codex-bg: var(--fz-agent-2-bg);
+  --fz-agent-codex-fg: var(--fz-agent-2-fg);
+  --fz-agent-codex-border: var(--fz-agent-2-border);
+
+  --fz-agent-agy: var(--fz-agent-3);
+  --fz-agent-agy-bg: var(--fz-agent-3-bg);
+  --fz-agent-agy-fg: var(--fz-agent-3-fg);
+  --fz-agent-agy-border: var(--fz-agent-3-border);
+
+  --fz-agent-kimi: var(--fz-agent-4);
+  --fz-agent-kimi-bg: var(--fz-agent-4-bg);
+  --fz-agent-kimi-fg: var(--fz-agent-4-fg);
+  --fz-agent-kimi-border: var(--fz-agent-4-border);
+
+  --fz-agent-opencode: var(--fz-agent-5);
+  --fz-agent-opencode-bg: var(--fz-agent-5-bg);
+  --fz-agent-opencode-fg: var(--fz-agent-5-fg);
+  --fz-agent-opencode-border: var(--fz-agent-5-border);
+
+  --fz-agent-grok: var(--fz-agent-6);
+  --fz-agent-grok-bg: var(--fz-agent-6-bg);
+  --fz-agent-grok-fg: var(--fz-agent-6-fg);
+  --fz-agent-grok-border: var(--fz-agent-6-border);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Neutrals - Dark */
+  --fz-bg-canvas: #0f1417;
+  --fz-bg-surface: #151c21;
+  --fz-bg-subtle: #1c252b;
+  --fz-bg-muted: #253038;
+  --fz-bg-sunken: #0b0f12;
+  --fz-bg-overlay: rgba(5, 8, 10, 0.70);
+
+  --fz-border-subtle: #222c33;
+  --fz-border-default: #2e3b44;
+  --fz-border-strong: #485b68;
+
+  --fz-text-primary: #edf2f4;
+  --fz-text-secondary: #a8b6bf;
+  --fz-text-muted: #84949e;
+  --fz-text-on-accent: #071f1d;
+
+  /* Accent (Teal) - Dark */
+  --fz-accent: #2bb5a8;
+  --fz-accent-hover: #45c7ba;
+  --fz-accent-active: #14998f;
+  --fz-accent-text: #5cd6c8;
+  --fz-accent-subtle: #102a29;
+  --fz-accent-border: #1d524e;
+  --fz-focus-ring: #5cd6c8;
+
+  /* Semantic status - Dark */
+  --fz-success: #38c172;
+  --fz-success-text: #5dd98c;
+  --fz-success-subtle: #11291c;
+  --fz-success-border: #1f5233;
+
+  --fz-warn: #e69d25;
+  --fz-warn-text: #f5b942;
+  --fz-warn-subtle: #2b200d;
+  --fz-warn-border: #5c4318;
+
+  --fz-danger: #e5483b;
+  --fz-danger-text: #f97066;
+  --fz-danger-subtle: #2d1615;
+  --fz-danger-border: #612825;
+
+  /* Six agent avatar hues - Dark */
+  /* 1: Cobalt (claude default) */
+  --fz-agent-1: #5899f7;
+  --fz-agent-1-bg: #142238;
+  --fz-agent-1-fg: #9ec5fc;
+  --fz-agent-1-border: #274675;
+
+  /* 2: Amber (codex default) */
+  --fz-agent-2: #f09c38;
+  --fz-agent-2-bg: #2b1f10;
+  --fz-agent-2-fg: #f8c98c;
+  --fz-agent-2-border: #5e411c;
+
+  /* 3: Teal (agy default) */
+  --fz-agent-3: #2bb5a8;
+  --fz-agent-3-bg: #102a28;
+  --fz-agent-3-fg: #7ce3d8;
+  --fz-agent-3-border: #1f544f;
+
+  /* 4: Plum (kimi default) */
+  --fz-agent-4: #d975b6;
+  --fz-agent-4-bg: #2a1724;
+  --fz-agent-4-fg: #f0b6dc;
+  --fz-agent-4-border: #592e4b;
+
+  /* 5: Sky (opencode default) */
+  --fz-agent-5: #3eb4e6;
+  --fz-agent-5-bg: #102630;
+  --fz-agent-5-fg: #95dcf7;
+  --fz-agent-5-border: #1f4e63;
+
+  /* 6: Terracotta (grok default) */
+  --fz-agent-6: #ed7353;
+  --fz-agent-6-bg: #2c1813;
+  --fz-agent-6-fg: #f7b5a3;
+  --fz-agent-6-border: #5e3024;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --fz-bg-canvas: #0f1417;
+    --fz-bg-surface: #151c21;
+    --fz-bg-subtle: #1c252b;
+    --fz-bg-muted: #253038;
+    --fz-bg-sunken: #0b0f12;
+    --fz-bg-overlay: rgba(5, 8, 10, 0.70);
+
+    --fz-border-subtle: #222c33;
+    --fz-border-default: #2e3b44;
+    --fz-border-strong: #485b68;
+
+    --fz-text-primary: #edf2f4;
+    --fz-text-secondary: #a8b6bf;
+    --fz-text-muted: #84949e;
+    --fz-text-on-accent: #071f1d;
+
+    --fz-accent: #2bb5a8;
+    --fz-accent-hover: #45c7ba;
+    --fz-accent-active: #14998f;
+    --fz-accent-text: #5cd6c8;
+    --fz-accent-subtle: #102a29;
+    --fz-accent-border: #1d524e;
+    --fz-focus-ring: #5cd6c8;
+
+    --fz-success: #38c172;
+    --fz-success-text: #5dd98c;
+    --fz-success-subtle: #11291c;
+    --fz-success-border: #1f5233;
+
+    --fz-warn: #e69d25;
+    --fz-warn-text: #f5b942;
+    --fz-warn-subtle: #2b200d;
+    --fz-warn-border: #5c4318;
+
+    --fz-danger: #e5483b;
+    --fz-danger-text: #f97066;
+    --fz-danger-subtle: #2d1615;
+    --fz-danger-border: #612825;
+
+    --fz-agent-1: #5899f7;
+    --fz-agent-1-bg: #142238;
+    --fz-agent-1-fg: #9ec5fc;
+    --fz-agent-1-border: #274675;
+
+    --fz-agent-2: #f09c38;
+    --fz-agent-2-bg: #2b1f10;
+    --fz-agent-2-fg: #f8c98c;
+    --fz-agent-2-border: #5e411c;
+
+    --fz-agent-3: #2bb5a8;
+    --fz-agent-3-bg: #102a28;
+    --fz-agent-3-fg: #7ce3d8;
+    --fz-agent-3-border: #1f544f;
+
+    --fz-agent-4: #d975b6;
+    --fz-agent-4-bg: #2a1724;
+    --fz-agent-4-fg: #f0b6dc;
+    --fz-agent-4-border: #592e4b;
+
+    --fz-agent-5: #3eb4e6;
+    --fz-agent-5-bg: #102630;
+    --fz-agent-5-fg: #95dcf7;
+    --fz-agent-5-border: #1f4e63;
+
+    --fz-agent-6: #ed7353;
+    --fz-agent-6-bg: #2c1813;
+    --fz-agent-6-fg: #f7b5a3;
+    --fz-agent-6-border: #5e3024;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fz-duration-fast: 0ms;
+    --fz-duration-normal: 0ms;
+  }
+}
