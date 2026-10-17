@@ -6,7 +6,7 @@ project_name: faztudo
 before:
   hooks:
     # The web UI is embedded; build it first once web/ exists.
-    - sh -c 'if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi'
+    - make web
 
 builds:
   - id: faztudo

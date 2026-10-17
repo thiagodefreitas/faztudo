@@ -24,6 +24,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/version"
+	"github.com/thiagodefreitas/faztudo/internal/webui"
 )
 
 func main() {
@@ -99,8 +100,8 @@ func run(args []string) error {
 		}
 		handler := api.New(s, humanID, version.Get().Version)
 		application.Bind(handler)
-		server := &http.Server{Addr: c.Server.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-		logger.Info("serving", "listen", c.Server.Listen)
+		server := &http.Server{Addr: c.Server.Listen, Handler: webui.Mount(handler), ReadHeaderTimeout: 5 * time.Second}
+		logger.Info("serving", "listen", c.Server.Listen, "url", "http://"+c.Server.Listen)
 		return server.ListenAndServe()
 	default:
 		return fmt.Errorf("unknown command %q", args[0])

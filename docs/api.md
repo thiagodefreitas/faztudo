@@ -135,7 +135,7 @@ interface Lane {
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of messages, newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
 | POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side |
-| POST | `/api/v1/channels/{id}/read` | mark read up to `{event_id}` |
+| POST | `/api/v1/channels/{id}/read` | mark read up to `{seq}` (the channel's `last_seq`); `{event_id}` is also accepted |
 | GET | `/api/v1/runs?channel_id=&state=` | runs |
 | GET | `/api/v1/runs/{id}` | one run |
 | GET | `/api/v1/runs/{id}/output?after=` | raw output lines |

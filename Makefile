@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 GO ?= go
 
-.PHONY: help setup check lint lint-prose authorship secrets test site build release-check
+.PHONY: help setup check lint lint-prose authorship secrets test site build release-check web dev
 
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null)
@@ -36,7 +36,16 @@ test: ## Go and web tests
 site: ## build the documentation site
 	npm --prefix site run build
 
-build: ## build bin/faztudo with version information
+web: ## build the web app and stage it for embedding
+	npm --prefix web ci
+	npm --prefix web run build
+	find internal/webui/dist -mindepth 1 ! -name .keep -exec rm -rf {} +
+	cp -r web/dist/. internal/webui/dist/
+
+dev: ## run the daemon and the web dev server (proxying /api) together
+	@trap 'kill 0' INT TERM; $(GO) run ./cmd/faztudo serve & npm --prefix web run dev; wait
+
+build: web ## build bin/faztudo with the web app and version information
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/faztudo ./cmd/faztudo
 	@bin/faztudo version
 

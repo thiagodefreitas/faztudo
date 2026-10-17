@@ -1,0 +1,151 @@
+import { useQuery } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+import { motion } from "motion/react"
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
+import { api } from "../api/client"
+import { cx } from "../lib/cx"
+import { qk } from "../state/keys"
+import { useOutput, useRuns } from "../state/queries"
+import { DiffView } from "./diff-view"
+
+function useReducedMotion(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      if (typeof matchMedia !== "function") return () => undefined
+      const media = matchMedia("(prefers-reduced-motion: reduce)")
+      media.addEventListener?.("change", listener)
+      return () => media.removeEventListener?.("change", listener)
+    },
+    () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches,
+    () => false,
+  )
+}
+
+export function RunPanel({
+  channelId,
+  runId,
+  view,
+}: {
+  channelId: string
+  runId: string
+  view?: "diff"
+}) {
+  const navigate = useNavigate()
+  const reduced = useReducedMotion()
+  const runs = useRuns()
+  const output = useOutput(runId)
+  const diff = useQuery({
+    queryKey: qk.diff(runId),
+    queryFn: () => api.diff(runId),
+    enabled: view === "diff",
+    retry: false,
+  })
+  const run = runs.data?.find((item) => item.id === runId)
+  const boxRef = useRef<HTMLPreElement>(null)
+  const lines = output.data ?? []
+  const tail = lines.map((line) => line.seq).join(",")
+
+  useEffect(() => {
+    const el = boxRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [tail, view])
+
+  function close() {
+    void navigate({
+      to: "/c/$channelId",
+      params: { channelId },
+      search: {},
+    })
+  }
+
+  function show(next: "output" | "diff") {
+    void navigate({
+      to: "/c/$channelId",
+      params: { channelId },
+      search: next === "diff" ? { run: runId, view: "diff" } : { run: runId },
+    })
+  }
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest("input, textarea, select")) return
+      void navigate({
+        to: "/c/$channelId",
+        params: { channelId },
+        search: {},
+      })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [channelId, navigate])
+
+  const body = (
+    <>
+      <header className="flex items-center gap-2 border-b border-line px-3 py-2">
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium">{run ? `Run ${run.state}` : "Run"}</h2>
+        <button type="button" onClick={close} className="min-h-8 rounded px-2 text-[12px]">
+          Close
+        </button>
+      </header>
+      <div className="flex gap-1 border-b border-line px-2 py-1">
+        <Tab pressed={view !== "diff"} onClick={() => show("output")}>
+          Output
+        </Tab>
+        <Tab pressed={view === "diff"} onClick={() => show("diff")}>
+          Diff
+        </Tab>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        {view === "diff" ? (
+          <div className="p-2">
+            {diff.isPending && <p className="text-[13px] text-muted">Loading diff</p>}
+            {diff.isError && <p className="text-[13px] text-muted">The diff is not ready.</p>}
+            {diff.data && <DiffView diff={diff.data.diff} />}
+          </div>
+        ) : (
+          <pre ref={boxRef} className="h-full overflow-auto px-3 py-2 font-mono text-[12px] leading-5">
+            {lines.length === 0 ? (
+              <span className="text-faint">No output yet.</span>
+            ) : (
+              lines.map((line) => (
+                <span key={line.seq} className={line.stream === "stderr" ? "text-danger" : undefined}>
+                  {line.text}
+                </span>
+              ))
+            )}
+          </pre>
+        )}
+      </div>
+    </>
+  )
+
+  const className =
+    "fixed inset-0 z-30 flex min-h-0 flex-col bg-surface xl:static xl:z-auto xl:w-[22rem] xl:shrink-0 xl:border-l xl:border-line"
+
+  if (reduced) return <aside className={className}>{body}</aside>
+  return (
+    <motion.aside
+      className={className}
+      initial={{ opacity: 0, x: 12 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.16 }}
+    >
+      {body}
+    </motion.aside>
+  )
+}
+
+function Tab({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cx("min-h-8 rounded px-2 text-[12px]", pressed ? "bg-accent-soft text-ink" : "text-muted")}
+    >
+      {children}
+    </button>
+  )
+}

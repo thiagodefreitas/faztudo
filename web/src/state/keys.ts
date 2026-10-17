@@ -1,0 +1,14 @@
+export const qk = {
+  me: ["me"] as const,
+  members: ["members"] as const,
+  channels: ["channels"] as const,
+  messages: (id: string) => ["messages", id] as const,
+  runs: ["runs"] as const,
+  output: (id: string) => ["output", id] as const,
+  diff: (id: string) => ["diff", id] as const,
+  approvals: ["approvals"] as const,
+  lanes: ["lanes"] as const,
+  notices: ["notices"] as const,
+  seq: ["seq"] as const,
+  pending: (id: string) => ["pending", id] as const,
+}

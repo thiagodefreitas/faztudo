@@ -392,17 +392,23 @@ func (a *API) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var v struct {
+		Seq     int64  `json:"seq"`
 		EventID string `json:"event_id"`
 	}
 	if !decode(w, r, &v) {
 		return
 	}
-	evt, e := a.Store.Event(r.Context(), v.EventID)
-	if e != nil || evt.ChannelID != c.ID {
-		fail(w, 404, "not_found", "event not found")
-		return
+	// seq is the cursor clients already hold (Channel.last_seq); event_id
+	// is accepted for older clients.
+	seq := v.Seq
+	if seq <= 0 {
+		evt, e := a.Store.Event(r.Context(), v.EventID)
+		if e != nil || evt.ChannelID != c.ID {
+			fail(w, 404, "not_found", "event not found")
+			return
+		}
+		seq = evt.Seq
 	}
-	seq := evt.Seq
 	if e = a.Store.Read(r.Context(), c.ID, current(r).ID, seq); e != nil {
 		failErr(w, e)
 		return

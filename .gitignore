@@ -76,3 +76,7 @@ Thumbs.db
 
 # Test fixtures may mimic agent config directories
 !internal/**/testdata/**
+
+# Built web app copied in by `make web`; only the placeholder is tracked
+internal/webui/dist/*
+!internal/webui/dist/.keep
