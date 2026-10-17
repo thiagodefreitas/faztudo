@@ -172,7 +172,8 @@ func TestWireWriteRunAndMergeApproval(t *testing.T) {
 	if err != nil || len(messages) != 2 || messages[1].RunID != run.ID || !strings.Contains(messages[1].Body, "Added a synthetic file") {
 		t.Fatalf("messages: %+v %v", messages, err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("local\n"), 0600); err != nil {
+	// A local edit to a tracked file blocks the merge; untracked files do not.
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("local edit\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 409, nil)
@@ -180,7 +181,7 @@ func TestWireWriteRunAndMergeApproval(t *testing.T) {
 	if err != nil || stillPending.State != domain.ApprovalPending {
 		t.Fatalf("failed merge resolved approval: %+v %v", stillPending, err)
 	}
-	if err := os.Remove(filepath.Join(repo, "dirty.txt")); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 200, nil)

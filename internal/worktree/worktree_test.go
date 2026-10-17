@@ -73,3 +73,54 @@ func TestWorktreeDiffVerifyCleanup(t *testing.T) {
 		t.Fatalf("worktree still exists: %v", err)
 	}
 }
+
+func TestDiffAndStageSkipBuildLeftovers(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "init", "-q")
+	gitTest(t, repo, "config", "user.name", "Test")
+	gitTest(t, repo, "config", "user.email", "test@example.invalid")
+	if err := os.WriteFile(filepath.Join(repo, "calc.py"), []byte("x = 1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "calc.py")
+	gitTest(t, repo, "commit", "-q", "-m", "base")
+	m := Manager{BaseDir: filepath.Join(root, "worktrees")}
+	w, err := m.Create(context.Background(), repo, "run2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent edits a file and adds one; running the tests leaves caches.
+	write := func(rel, body string) {
+		p := filepath.Join(w.Path, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("calc.py", "x = 2\n")
+	write("test_calc.py", "assert True\n")
+	write("__pycache__/calc.cpython-310.pyc", "bytecode")
+	write("pkg/node_modules/dep/index.js", "module.exports = 1\n")
+	write("stray.pyc", "bytecode")
+
+	stat, diff, err := m.Diff(context.Background(), w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stat.Files != 2 || strings.Contains(diff, "__pycache__") || strings.Contains(diff, "node_modules") || strings.Contains(diff, "stray.pyc") {
+		t.Fatalf("diff shows leftovers: files=%d\n%s", stat.Files, diff)
+	}
+	if err := m.Stage(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	staged := gitTest(t, w.Path, "diff", "--cached", "--name-only")
+	if staged != "calc.py\ntest_calc.py" {
+		t.Fatalf("staged %q, want only the agent's two files", staged)
+	}
+}

@@ -48,24 +48,74 @@ func (m Manager) Create(ctx context.Context, repo, id string) (Worktree, error) 
 	}
 	return w, nil
 }
+
+// artifactDirs and artifactSuffixes name build and test leftovers that a
+// run can create (often by running the tests) and that must never be shown
+// as the agent's change or committed, even when the repository has no
+// .gitignore entry for them.
+var (
+	artifactDirs = map[string]bool{
+		"__pycache__": true, "node_modules": true, ".pytest_cache": true,
+		".mypy_cache": true, ".ruff_cache": true, ".venv": true, ".tox": true,
+		".gradle": true,
+	}
+	artifactSuffixes = []string{".pyc", ".pyo"}
+)
+
+// IsArtifact reports whether an untracked path is a build or test leftover.
+func IsArtifact(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if artifactDirs[part] {
+			return true
+		}
+	}
+	for _, suf := range artifactSuffixes {
+		if strings.HasSuffix(path, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// untracked lists new files in the worktree that respect .gitignore and are
+// not build or test leftovers.
+func untracked(ctx context.Context, w Worktree) ([]string, error) {
+	out, err := run(ctx, w.Path, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" && !IsArtifact(p) {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// Stage stages the agent's change for a commit: modifications and deletions
+// of tracked files, plus new files that are not build or test leftovers.
+func (m Manager) Stage(ctx context.Context, w Worktree) error {
+	if _, err := run(ctx, w.Path, "add", "-u", "--", "."); err != nil {
+		return err
+	}
+	paths, err := untracked(ctx, w)
+	if err != nil || len(paths) == 0 {
+		return err
+	}
+	_, err = run(ctx, w.Path, append([]string{"add", "--"}, paths...)...)
+	return err
+}
+
 func (m Manager) Diff(ctx context.Context, w Worktree) (domain.DiffStat, string, error) {
 	// Intent-to-add includes untracked files in git diff without staging content.
-	untracked, err := run(ctx, w.Path, "ls-files", "--others", "--exclude-standard", "-z")
+	paths, err := untracked(ctx, w)
 	if err != nil {
 		return domain.DiffStat{}, "", err
 	}
-	if untracked != "" {
-		parts := strings.Split(untracked, "\x00")
-		args := []string{"add", "-N", "--"}
-		for _, p := range parts {
-			if p != "" {
-				args = append(args, p)
-			}
-		}
-		if len(args) > 3 {
-			if _, err = run(ctx, w.Path, args...); err != nil {
-				return domain.DiffStat{}, "", err
-			}
+	if len(paths) > 0 {
+		if _, err = run(ctx, w.Path, append([]string{"add", "-N", "--"}, paths...)...); err != nil {
+			return domain.DiffStat{}, "", err
 		}
 	}
 	statText, err := run(ctx, w.Path, "diff", "--numstat", w.BaseCommit, "--")

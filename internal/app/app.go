@@ -299,21 +299,19 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 	var outcome string
 	switch option {
 	case "merge":
-		out, err := git(ctx, w.Repo, "status", "--porcelain")
+		// Untracked files in the channel repo do not block a fast-forward;
+		// uncommitted changes to tracked files do.
+		out, err := git(ctx, w.Repo, "status", "--porcelain", "--untracked-files=no")
 		if err != nil {
 			return "", err
 		}
 		if out != "" {
 			return "", errors.New("channel repo has uncommitted changes; clean it before merge")
 		}
-		out, err = git(ctx, w.Path, "status", "--porcelain")
-		if err != nil {
+		if err := (worktree.Manager{BaseDir: a.Paths.WorktreesDir}).Stage(ctx, w); err != nil {
 			return "", err
 		}
-		if out != "" {
-			if _, err := git(ctx, w.Path, "add", "-A", "--"); err != nil {
-				return "", err
-			}
+		if _, err := git(ctx, w.Path, "diff", "--cached", "--quiet"); err != nil {
 			// A normal commit, not plumbing, so the repository's own hooks
 			// (secret scanning, message rules) see agent changes before they
 			// land. The author is the human's Git identity: they approved it.
