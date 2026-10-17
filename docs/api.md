@@ -45,6 +45,7 @@ interface Channel {
   visibility: "public" | "private" | "direct";
   topic?: string;
   repo_path?: string;       // local git repo that write runs in this channel use
+  test_command?: string;    // optional verification command run in the worktree
   member_ids: ID[];
   unread: number;
   last_event_id?: ID;
