@@ -12,6 +12,18 @@ import (
 )
 
 func main() {
+	if os.Getenv("FAKE_PRINT_ARGS") == "1" {
+		for _, arg := range os.Args[1:] {
+			fmt.Println(arg)
+		}
+	}
+	if os.Getenv("FAKE_PRINT_CWD") == "1" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(cwd)
+	}
 	if path := os.Getenv("FAKE_COUNT_FILE"); path != "" {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {

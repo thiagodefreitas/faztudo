@@ -68,7 +68,14 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 	for _, l := range stored {
 		reg.Restore(l)
 	}
-	a := &App{Store: s, Config: c, Paths: p, Registry: reg, Adapters: map[string]adapters.Adapter{"claude": adapters.Claude{}, "codex": adapters.Codex{}}}
+	a := &App{Store: s, Config: c, Paths: p, Registry: reg, Adapters: map[string]adapters.Adapter{
+		"claude":   adapters.Claude{},
+		"codex":    adapters.Codex{},
+		"grok":     adapters.Grok{},
+		"kimi":     adapters.Kimi{},
+		"agy":      adapters.Agy{},
+		"opencode": adapters.OpenCode{},
+	}}
 	a.Runner = &runner.Runner{RunDir: p.RunsDir, Appender: s, Lanes: reg, PersonaForRun: func(r domain.Run) string { return byID[r.AgentID] }}
 	return a, nil
 }
@@ -247,7 +254,7 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run})
 	}
 	if run.StartedAt != nil {
-		answer := a.answer(run.ID)
+		answer := adapters.CleanAnswer(adapter, a.answer(run.ID))
 		if err != nil {
 			if answer != "" {
 				answer = "Run failed: " + run.FailureReason + "\n\n" + answer

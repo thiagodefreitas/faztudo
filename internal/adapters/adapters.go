@@ -49,6 +49,20 @@ type Adapter interface {
 	Classify(exitCode int, stderrTail string) (domain.FailureClass, LaneSignal, string)
 }
 
+// AnswerCleaner is implemented by adapters whose CLI decorates its final
+// answer (bullets, banners) in print mode.
+type AnswerCleaner interface {
+	CleanAnswer(stdout string) string
+}
+
+// CleanAnswer returns the answer text for a.
+func CleanAnswer(a Adapter, stdout string) string {
+	if c, ok := a.(AnswerCleaner); ok {
+		return c.CleanAnswer(stdout)
+	}
+	return stdout
+}
+
 type Claude struct{}
 
 func (Claude) Name() string { return "claude" }

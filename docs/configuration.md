@@ -73,6 +73,11 @@ lanes = ["claude/opus", "codex/default"]
 mode = "read"
 ```
 
+Supported `cli` values: `claude`, `codex`, `grok`, `kimi`, `agy`,
+`opencode`. Kimi and Antigravity have no read-only mode, so personas that
+use them must be `mode = "write"`. OpenCode's print mode produced no answer
+in testing (opencode 1.16.2); treat that lane as experimental.
+
 Every detected CLI also gets a plain persona with its own name (`@claude`,
 `@codex`, ...) bound to its default lane.
 

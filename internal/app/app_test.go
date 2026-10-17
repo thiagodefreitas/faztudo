@@ -6,10 +6,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
+
+func TestNewRegistersAdditionalAdapters(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a, err := New(context.Background(), s, config.Config{}, config.Paths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"claude", "codex", "grok", "kimi", "agy", "opencode"} {
+		adapter := a.Adapters[name]
+		if adapter == nil || adapter.Name() != name {
+			t.Fatalf("adapter %s: %v", name, adapter)
+		}
+	}
+}
 
 func TestCommitMessageEndsAtWordBoundary(t *testing.T) {
 	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
