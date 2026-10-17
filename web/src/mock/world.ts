@@ -37,6 +37,14 @@ interface Subscriber {
 }
 
 const TERMINAL = new Set<RunState>(["done", "failed", "cancelled"])
+const REPO_ERROR = "repo_path is not a git work tree"
+
+// The mock has no filesystem: an absolute path counts as a git work tree
+// unless it ends in "not-a-repo".
+function isMockGitPath(path: string): boolean {
+  return path.startsWith("/") && !path.endsWith("not-a-repo")
+}
+
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 function terminal(state: RunState): boolean {
@@ -304,6 +312,7 @@ export class MockWorld {
 
   createChannel(body: ChannelCreate): Result<Channel> {
     if (!NAME_RE.test(body.name)) return err(400, "bad_request", "name must be lowercase words separated by dashes")
+    if (body.repo_path && !isMockGitPath(body.repo_path)) return err(400, "bad_request", REPO_ERROR)
     if (this.channels.some((channel) => channel.name === body.name)) return err(409, "conflict", "channel name already used")
     const channel: Channel = {
       id: ulid(this.clock.now()),
@@ -328,7 +337,11 @@ export class MockWorld {
       channel.name = body.name
     }
     if (body.topic !== undefined) channel.topic = body.topic
-    if (body.repo_path !== undefined) channel.repo_path = body.repo_path
+    if (body.repo_path !== undefined) {
+      if (body.repo_path !== "" && !isMockGitPath(body.repo_path)) return err(400, "bad_request", REPO_ERROR)
+      channel.repo_path = body.repo_path || undefined
+    }
+    if (body.test_command !== undefined) channel.test_command = body.test_command || undefined
     if (body.member_ids !== undefined) channel.member_ids = body.member_ids
     this.emit("channel.updated", channel.id, channel, `human:${this.me.id}`)
     return ok(structuredClone(channel))

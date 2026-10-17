@@ -123,4 +123,15 @@ describe("mock world", () => {
     const health = handleMock(mock, "GET", new URL("http://127.0.0.1/api/v1/health"))
     expect(health.body).toMatchObject({ ok: true, version: "0.0.0-mock" })
   })
+
+  it("patches channel settings and rejects a non-git repo path", () => {
+    const { world: mock } = world()
+    const url = new URL(`http://x/api/v1/channels/${IDS.dev}`)
+    const ok = handleMock(mock, "PATCH", url, JSON.stringify({ repo_path: "/home/me/repo", test_command: "go test ./..." }))
+    expect(ok.status).toBe(200)
+    expect(ok.body).toMatchObject({ repo_path: "/home/me/repo", test_command: "go test ./..." })
+    const bad = handleMock(mock, "PATCH", url, JSON.stringify({ repo_path: "/tmp/not-a-repo" }))
+    expect(bad.status).toBe(400)
+    expect(bad.body).toMatchObject({ error: { message: "repo_path is not a git work tree" } })
+  })
 })

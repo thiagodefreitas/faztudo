@@ -1,0 +1,101 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { ApiError, api } from "../api/client"
+import { qk } from "../state/keys"
+import type { Channel } from "../types"
+import { ChannelSettingsDialog, CreateChannelDialog } from "./channel-dialogs"
+
+const channel: Channel = {
+  id: "01BRZ3NDEKTSV4RRFFQ69G5BB1",
+  name: "faztudo-dev",
+  kind: "team",
+  visibility: "public",
+  topic: "old topic",
+  member_ids: [],
+  unread: 0,
+}
+
+function wrap(node: React.ReactNode) {
+  const qc = new QueryClient()
+  qc.setQueryData(qk.channels, [channel])
+  render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>)
+  return qc
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe("ChannelSettingsDialog", () => {
+  it("saves topic, repo_path and test_command", async () => {
+    const user = userEvent.setup()
+    const next = { ...channel, topic: "new", repo_path: "/r", test_command: "go test ./..." }
+    const spy = vi.spyOn(api, "patchChannel").mockResolvedValue(next)
+    const onOpenChange = vi.fn()
+    const qc = wrap(<ChannelSettingsDialog channel={channel} open onOpenChange={onOpenChange} />)
+    expect(screen.getByText(/Local git repository that write runs/)).toBeInTheDocument()
+    expect(screen.getByText(/for example go test/)).toBeInTheDocument()
+    const topic = screen.getByLabelText("Topic")
+    await user.clear(topic)
+    await user.type(topic, "new")
+    await user.type(screen.getByLabelText("Repository path"), "/r")
+    await user.type(screen.getByLabelText("Test command"), "go test ./...")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(spy).toHaveBeenCalledWith(channel.id, { topic: "new", repo_path: "/r", test_command: "go test ./..." })
+    expect(qc.getQueryData<Channel[]>(qk.channels)?.[0]?.topic).toBe("new")
+  })
+
+  it("shows the server error inline for an invalid repo path and stays open", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, "patchChannel").mockRejectedValue(new ApiError(400, "bad_request", "repo_path is not a git work tree"))
+    const onOpenChange = vi.fn()
+    wrap(<ChannelSettingsDialog channel={channel} open onOpenChange={onOpenChange} />)
+    await user.type(screen.getByLabelText("Repository path"), "/nope")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("repo_path is not a git work tree")
+    expect(screen.getByLabelText("Repository path")).toHaveAttribute("aria-invalid", "true")
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+describe("CreateChannelDialog", () => {
+  it("rejects a bad name without calling the server", async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(api, "createChannel")
+    wrap(<CreateChannelDialog open onOpenChange={() => undefined} onCreated={() => undefined} />)
+    await user.type(screen.getByLabelText("Name"), "Bad Name")
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/lowercase letters, digits and dashes/i)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("creates a channel and reports it", async () => {
+    const user = userEvent.setup()
+    const created = { ...channel, id: "01BRZ3NDEKTSV4RRFFQ69G5BB2", name: "new-room" }
+    const spy = vi.spyOn(api, "createChannel").mockResolvedValue(created)
+    const onCreated = vi.fn()
+    const qc = wrap(<CreateChannelDialog open onOpenChange={() => undefined} onCreated={onCreated} />)
+    await user.type(screen.getByLabelText("Name"), "new-room")
+    await user.type(screen.getByLabelText("Topic"), "hello")
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created))
+    expect(spy).toHaveBeenCalledWith({ name: "new-room", kind: "team", visibility: "public", topic: "hello" })
+    expect(qc.getQueryData<Channel[]>(qk.channels)).toHaveLength(2)
+  })
+
+  it("shows a server error for a bad repo path", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, "createChannel").mockRejectedValue(new ApiError(400, "bad_request", "repo_path is not a git work tree"))
+    const onCreated = vi.fn()
+    wrap(<CreateChannelDialog open onOpenChange={() => undefined} onCreated={onCreated} />)
+    await user.type(screen.getByLabelText("Name"), "room")
+    await user.type(screen.getByLabelText("Repository path (optional)"), "/x")
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("not a git work tree")
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+})

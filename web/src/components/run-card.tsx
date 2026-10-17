@@ -124,7 +124,7 @@ export function RunCardView({
   const tail = lines.slice(-12)
   const ended = live ? undefined : run.ended_at
   const lanes = retryLanes ?? agent?.agent?.lanes ?? []
-  const terminal = !live
+  const retryable = run.state === "failed" || run.state === "cancelled"
 
   return (
     <article
@@ -189,7 +189,7 @@ export function RunCardView({
               Cancel
             </button>
           )}
-          {terminal && lanes.length > 0 && (
+          {retryable && lanes.length > 0 && (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger className="min-h-8 rounded-md border border-line px-2 text-[12px]">Retry</DropdownMenu.Trigger>
               <DropdownMenu.Portal>

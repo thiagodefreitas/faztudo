@@ -91,4 +91,17 @@ describe("RunCardView", () => {
     expect(screen.getByRole("button", { name: /View diff/ })).toHaveTextContent("+2")
     expect(screen.getByText(/available · cli-log · 12m ago/)).toBeInTheDocument()
   })
+
+  it("offers Retry only for failed and cancelled runs", () => {
+    for (const state of ["queued", "running", "waiting_approval", "verifying", "done"] as const) {
+      const view = renderCard({ ...failed, state })
+      expect(screen.queryByRole("button", { name: "Retry" }), state).not.toBeInTheDocument()
+      view.unmount()
+    }
+    for (const state of ["failed", "cancelled"] as const) {
+      const view = renderCard({ ...failed, state })
+      expect(screen.getByRole("button", { name: "Retry" }), state).toBeInTheDocument()
+      view.unmount()
+    }
+  })
 })

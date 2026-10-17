@@ -12,6 +12,7 @@ import type { Channel, Message } from "../types"
 import { Composer } from "./composer"
 import { MessageList } from "./message-list"
 import { RunPanel } from "./run-panel"
+import { ChannelSettingsDialog } from "./channel-dialogs"
 import { WorkspaceNav } from "./sidebar"
 
 const channelApi = getRouteApi("/c/$channelId")
@@ -30,6 +31,18 @@ export function ChannelPage() {
   const members = useMembers()
   const channel = channels.data?.find((item) => item.id === channelId)
   const [navOpen, setNavOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+        event.preventDefault()
+        setSettingsOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
 
   useEffect(() => {
     if (!channel || channel.unread <= 0 || !channel.last_seq) return
@@ -101,6 +114,16 @@ export function ChannelPage() {
           {channel.repo_path && (
             <p className="hidden max-w-48 truncate font-mono text-[12px] text-faint sm:block">{channel.repo_path}</p>
           )}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-keyshortcuts="Control+Comma Meta+Comma"
+            title="Channel settings (Ctrl+, or Cmd+,)"
+            className="min-h-8 shrink-0 rounded border border-line px-2 text-[12px]"
+          >
+            Settings <kbd className="ml-1 hidden font-mono text-[11px] text-faint sm:inline">Ctrl+,</kbd>
+          </button>
+          <ChannelSettingsDialog channel={channel} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
         <MessageList key={channelId} channelId={channelId} onRetry={(item) => send(item.body, item.key)} />
         <Composer members={members.data ?? []} channelName={channel.name} onSend={(body) => send(body)} />

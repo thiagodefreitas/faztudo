@@ -1,5 +1,6 @@
 import * as Tooltip from "@radix-ui/react-tooltip"
-import { Link, useRouterState } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
+import { useState } from "react"
 import { cx } from "../lib/cx"
 import { primaryWindow } from "../lib/lanes"
 import { useTheme } from "../lib/theme"
@@ -9,6 +10,7 @@ import { useChannels, useLanes, useMembers } from "../state/queries"
 import { useStreamStatus } from "../state/status"
 import type { Lane, LaneHealth, Member, Presence } from "../types"
 import { WORKSPACE_NAME } from "../types"
+import { CreateChannelDialog } from "./channel-dialogs"
 import { healthDotClass } from "./lane-chip"
 
 const PRESENCE: Record<Presence, string> = {
@@ -39,6 +41,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const now = useNow()
   const status = useStreamStatus()
   const theme = useTheme()
+  const navigate = useNavigate()
+  const [creating, setCreating] = useState(false)
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const people = (members.data ?? []).filter((member) => member.kind === "human")
   const agents = (members.data ?? []).filter((member) => member.kind === "agent")
@@ -47,7 +51,26 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
     <div className="flex min-h-0 flex-1 flex-col">
       <p className="px-3 py-3 text-[14px] font-semibold tracking-tight">{WORKSPACE_NAME}</p>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Channels</p>
+        <div className="flex items-center justify-between pb-1 pl-2">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Channels</p>
+          <button
+            type="button"
+            aria-label="Create channel"
+            title="Create channel"
+            onClick={() => setCreating(true)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas"
+          >
+            +
+          </button>
+        </div>
+        <CreateChannelDialog
+          open={creating}
+          onOpenChange={setCreating}
+          onCreated={(channel) => {
+            onNavigate?.()
+            void navigate({ to: "/c/$channelId", params: { channelId: channel.id } })
+          }}
+        />
         <ul className="flex flex-col gap-0.5">
           {(channels.data ?? []).map((channel) => {
             const active = pathname === `/c/${channel.id}`

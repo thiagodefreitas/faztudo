@@ -131,7 +131,7 @@ interface Lane {
 | GET | `/api/v1/members` | all members, humans and agents |
 | GET | `/api/v1/channels` | channels the caller can see |
 | POST | `/api/v1/channels` | create `{name, kind, visibility, topic?, repo_path?, member_ids?}` |
-| PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, members |
+| PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, members; a non-empty `repo_path` must be a git work tree (400 otherwise) |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of messages, newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
 | POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side |

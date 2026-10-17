@@ -236,6 +236,7 @@ export interface ChannelPatch {
   name?: string
   topic?: string
   repo_path?: string
+  test_command?: string
   member_ids?: ID[]
 }
 
