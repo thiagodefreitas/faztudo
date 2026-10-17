@@ -1,0 +1,9 @@
+{"type":"summary","summary":"synthetic session fixture, no real content"}
+{"type":"user","timestamp":"2026-10-18T11:30:00.000Z","message":{"role":"user"}}
+{"type":"assistant","timestamp":"2026-10-18T11:31:00.000Z","message":{"role":"assistant","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}
+{"type":"assistant","timestamp":"2026-10-18T11:45:00.000Z","message":{"role":"assistant","usage":{"input_tokens":200,"output_tokens":100,"cache_read_input_tokens":20,"cache_creation_input_tokens":10}}}
+{"type":"assistant","timestamp":"2026-10-18T06:30:00.000Z","message":{"role":"assistant","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"assistant","timestamp":"2026-10-18T12:00:00.000Z","message":{"role":"assistant","model":"synth","usage":{"input_tokens":300,"output_tokens":150,"cache_read_input_tokens":30,"cache_creation_input_tokens":15}}}
+{"type":"assistant","timestamp":"not-a-time","message":{"role":"assistant","usage":{"input_tokens":1,"output_tokens":1}}}
+{"type":"assistant","timestamp":"2026-10-18T12:00:00.000Z","message":{"role":"assistant"}}
+not json at all

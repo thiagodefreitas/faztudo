@@ -1,0 +1,1 @@
+{"conversation_id":"00000000-0000-0000-0000-000000000000","status":"SUCCESS","response":"synthetic","duration_seconds":1.5,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":50,"thinking_tokens":10,"cache_read_tokens":5,"total_tokens":165},"quota":{"five_hour":{"used_percent":12.5,"resets_in_seconds":7200},"weekly":{"used_percent":30.0,"resets_at":1893456000}}}
