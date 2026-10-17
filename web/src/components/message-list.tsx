@@ -17,7 +17,15 @@ type Row =
   | { kind: "notice"; key: string; at: string; notice: NoticeItem }
   | { kind: "pending"; key: string; at: string; pending: PendingMessage }
 
-export function MessageList({ channelId, onRetry }: { channelId: string; onRetry: (item: PendingMessage) => void }) {
+export function MessageList({
+  channelId,
+  onRetry,
+  onOpenThread,
+}: {
+  channelId: string
+  onRetry: (item: PendingMessage) => void
+  onOpenThread?: (message: Message) => void
+}) {
   const qc = useQueryClient()
   const messagesQuery = useMessages(channelId)
   const members = useMembers()
@@ -25,7 +33,8 @@ export function MessageList({ channelId, onRetry }: { channelId: string; onRetry
   const runs = useRuns()
   const notices = useNotices()
   const pending = usePending(channelId)
-  const messages = messagesQuery.data ?? []
+  // Replies live in the thread panel; the cache also holds streamed replies.
+  const messages = (messagesQuery.data ?? []).filter((message) => !message.thread_id)
   const parentRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const stuckRef = useRef(true)
@@ -149,6 +158,7 @@ export function MessageList({ channelId, onRetry }: { channelId: string; onRetry
                       channelId={channelId}
                       authorName={members.data?.find((member) => member.id === row.message.author_id)?.display_name ?? "Member"}
                       run={runs.data?.find((entry) => entry.id === row.message.run_id)}
+                      onOpenThread={onOpenThread}
                     />
                   )}
                   {row.kind === "notice" && <NoticeRow notice={row.notice} />}
@@ -177,12 +187,15 @@ function MessageRow({
   channelId,
   authorName,
   run,
+  onOpenThread,
 }: {
   message: Message
   channelId: string
   authorName: string
   run: Run | undefined
+  onOpenThread: ((message: Message) => void) | undefined
 }) {
+  const replies = message.reply_count ?? 0
   return (
     <article>
       <header className="flex items-baseline gap-2">
@@ -196,6 +209,27 @@ function MessageRow({
         <Markdown text={message.body} />
       </div>
       {run && <RunCard run={run} channelId={channelId} />}
+      {onOpenThread && (
+        <p className="mt-1 flex items-center gap-3 text-[12px]">
+          {replies > 0 && (
+            <button
+              type="button"
+              onClick={() => onOpenThread(message)}
+              className="min-h-8 rounded px-1 font-medium text-accent hover:underline"
+            >
+              {replies} {replies === 1 ? "reply" : "replies"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onOpenThread(message)}
+            aria-label={`Reply in thread to ${authorName}`}
+            className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline"
+          >
+            Reply in thread
+          </button>
+        </p>
+      )}
     </article>
   )
 }

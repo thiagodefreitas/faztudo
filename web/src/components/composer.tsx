@@ -1,16 +1,21 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react"
 import { applyMention, filterMembers, mentionQuery } from "../lib/mentions"
 import type { Member } from "../types"
 
 export function Composer({
   members,
   channelName,
+  placeholder,
+  label = "Message",
   onSend,
 }: {
   members: Member[]
   channelName: string
+  placeholder?: string
+  label?: string
   onSend: (body: string) => void
 }) {
+  const listId = useId()
   const [text, setText] = useState("")
   const [cursor, setCursor] = useState(0)
   const [active, setActive] = useState(0)
@@ -97,7 +102,7 @@ export function Composer({
       <div className="relative">
         {menuOpen && (
           <ul
-            id="mention-list"
+            id={listId}
             role="listbox"
             aria-label="Members"
             className="absolute bottom-full left-0 z-20 mb-1 max-h-56 w-full max-w-sm overflow-auto rounded-md border border-line bg-surface py-1 shadow-lg"
@@ -108,7 +113,7 @@ export function Composer({
                   type="button"
                   role="option"
                   aria-selected={member.id === selected?.id}
-                  id={`mention-${member.id}`}
+                  id={`${listId}-${member.id}`}
                   className="flex w-full items-baseline gap-2 px-2 py-1.5 text-left text-[13px] aria-selected:bg-accent-soft"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pick(member)}
@@ -122,17 +127,17 @@ export function Composer({
           </ul>
         )}
         <label className="block">
-          <span className="sr-only">Message</span>
+          <span className="sr-only">{label}</span>
           <textarea
             ref={boxRef}
             value={text}
             rows={2}
-            placeholder={`Message #${channelName}`}
-            aria-label="Message"
+            placeholder={placeholder ?? `Message #${channelName}`}
+            aria-label={label}
             aria-autocomplete="list"
             aria-expanded={menuOpen}
-            aria-controls={menuOpen ? "mention-list" : undefined}
-            aria-activedescendant={menuOpen && selected ? `mention-${selected.id}` : undefined}
+            aria-controls={menuOpen ? listId : undefined}
+            aria-activedescendant={menuOpen && selected ? `${listId}-${selected.id}` : undefined}
             className="w-full resize-none rounded-md border border-line bg-canvas px-3 py-2 text-[16px] leading-5 text-ink outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent md:text-[14px]"
             onChange={(event) => {
               setText(event.target.value)

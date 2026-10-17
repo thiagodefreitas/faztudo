@@ -105,4 +105,14 @@ describe("reduce", () => {
     expect(state.notices[0]?.text).toContain("claude/opus")
     expect(state.notices[0]?.text).toContain("no capacity")
   })
+
+  it("counts a new reply on its cached root once", () => {
+    const reply: Message = { ...message, id: "01CRZ3NDEKTSV4RRFFQ69G5CC9", thread_id: messageId, body: "reply" }
+    let state = reduce(emptySnapshot(), envelope(1, "message.posted", message))
+    state = reduce(state, envelope(2, "message.posted", reply))
+    expect(state.messages[channelId]?.find((item) => item.id === messageId)?.reply_count).toBe(1)
+    state = reduce(state, envelope(3, "message.posted", reply))
+    expect(state.messages[channelId]?.find((item) => item.id === messageId)?.reply_count).toBe(1)
+    expect(state.messages[channelId]).toHaveLength(2)
+  })
 })

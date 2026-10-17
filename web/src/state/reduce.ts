@@ -108,7 +108,16 @@ export function reduce(state: Snapshot, event: StreamEvent): Snapshot {
       if (!isMessage(event.payload)) return next
       const channelId = event.payload.channel_id
       const current = state.messages[channelId] ?? []
-      next.messages = { ...state.messages, [channelId]: sortMessages(upsert(current, event.payload)) }
+      const incoming = event.payload
+      const known = current.some((item) => item.id === incoming.id)
+      let list = upsert(current, incoming)
+      // The stream carries the message as posted, without a count. A new reply
+      // bumps its cached root; a replayed reply is already known and does not.
+      if (incoming.thread_id && !known) {
+        const rootId = incoming.thread_id
+        list = list.map((item) => (item.id === rootId ? { ...item, reply_count: (item.reply_count ?? 0) + 1 } : item))
+      }
+      next.messages = { ...state.messages, [channelId]: sortMessages(list) }
       return next
     }
     case "message.edited": {

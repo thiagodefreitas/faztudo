@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { Approval, NoticeItem, OutputLine } from "../types"
+import type { Approval, Message, NoticeItem, OutputLine, ThreadPage } from "../types"
 import { qk } from "./keys"
 import { mergeById } from "./merge"
 import { sortMessages } from "./reduce"
@@ -105,4 +105,29 @@ export interface PendingMessage {
 export function approvalForRun(approvals: Approval[] | undefined, runId: string): Approval | null {
   const related = (approvals ?? []).filter((approval) => approval.run_id === runId)
   return related.find((approval) => approval.state === "pending") ?? related.at(-1) ?? null
+}
+
+// A thread is its root plus replies. Replies seen on the stream sit in the
+// channel cache, replies this client posted sit in the thread cache; both are
+// merged over the server page.
+export function useThread(channelId: string, rootId: string) {
+  const qc = useQueryClient()
+  const page = useQuery({
+    queryKey: qk.thread(rootId),
+    queryFn: async () => {
+      const server = await api.thread(rootId)
+      const local = qc.getQueryData<ThreadPage>(qk.thread(rootId))
+      return { root: server.root, replies: mergeById(server.replies, local?.replies ?? []) }
+    },
+  })
+  const cached = useQuery({
+    queryKey: qk.messages(channelId),
+    queryFn: () => Promise.resolve([] as Message[]),
+    enabled: false,
+  })
+  const cachedRoot = cached.data?.find((item) => item.id === rootId)
+  const live = (cached.data ?? []).filter((item) => item.thread_id === rootId)
+  const replies = sortMessages(mergeById(page.data?.replies ?? [], live))
+  const root = cachedRoot ?? page.data?.root
+  return { root, replies, isPending: page.isPending && !root, isError: page.isError && !root }
 }

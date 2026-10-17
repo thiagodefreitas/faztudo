@@ -1,19 +1,23 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { getRouteApi } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { ApiError, api } from "../api/client"
+import { directPeer, isDirect } from "../lib/direct"
 import { ulid } from "../lib/id"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { sortMessages } from "../state/reduce"
-import { useChannels, useMembers, type PendingMessage } from "../state/queries"
+import { useChannels, useMe, useMembers, type PendingMessage } from "../state/queries"
 import type { Channel, Message } from "../types"
 import { Composer } from "./composer"
 import { MessageList } from "./message-list"
 import { RunPanel } from "./run-panel"
 import { ChannelSettingsDialog } from "./channel-dialogs"
 import { WorkspaceNav } from "./sidebar"
+import { ThreadPanel } from "./thread-panel"
+import { OPEN_SETTINGS_EVENT } from "./palette"
 
 const channelApi = getRouteApi("/c/$channelId")
 
@@ -29,6 +33,8 @@ export function ChannelPage() {
   const qc = useQueryClient()
   const channels = useChannels()
   const members = useMembers()
+  const me = useMe()
+  const navigate = useNavigate()
   const channel = channels.data?.find((item) => item.id === channelId)
   const [navOpen, setNavOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -40,8 +46,15 @@ export function ChannelPage() {
         setSettingsOpen(true)
       }
     }
+    function onPalette() {
+      setSettingsOpen(true)
+    }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener(OPEN_SETTINGS_EVENT, onPalette)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener(OPEN_SETTINGS_EVENT, onPalette)
+    }
   }, [])
 
   useEffect(() => {
@@ -87,8 +100,16 @@ export function ChannelPage() {
     )
   }
 
+  function openThread(message: Message) {
+    void navigate({ to: "/c/$channelId", params: { channelId }, search: { thread: message.id } })
+  }
+
   if (channels.isPending) return <p className="p-4 text-[13px] text-muted">Loading channel</p>
   if (!channel) return <p className="p-4 text-[13px] text-muted">Channel not found.</p>
+
+  const peer = directPeer(channel, me.data?.id, members.data ?? [])
+  const direct = isDirect(channel)
+  const title = direct ? (peer?.display_name ?? channel.name) : channel.name
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -106,8 +127,8 @@ export function ChannelPage() {
           </Dialog.Root>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[15px] font-semibold">
-              <span className="text-faint"># </span>
-              {channel.name}
+              <span className="text-faint">{direct ? "@ " : "# "}</span>
+              {title}
             </h1>
             {channel.topic && <p className="truncate text-[13px] text-muted">{channel.topic}</p>}
           </div>
@@ -125,10 +146,24 @@ export function ChannelPage() {
           </button>
           <ChannelSettingsDialog channel={channel} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
-        <MessageList key={channelId} channelId={channelId} onRetry={(item) => send(item.body, item.key)} />
-        <Composer members={members.data ?? []} channelName={channel.name} onSend={(body) => send(body)} />
+        <MessageList
+          key={channelId}
+          channelId={channelId}
+          onRetry={(item) => send(item.body, item.key)}
+          onOpenThread={openThread}
+        />
+        <Composer
+          members={members.data ?? []}
+          channelName={channel.name}
+          {...(direct ? { placeholder: `Message ${title}` } : {})}
+          onSend={(body) => send(body)}
+        />
       </section>
-      {search.run && <RunPanel channelId={channelId} runId={search.run} view={search.view} />}
+      {search.thread ? (
+        <ThreadPanel key={search.thread} channelId={channelId} rootId={search.thread} />
+      ) : (
+        search.run && <RunPanel channelId={channelId} runId={search.run} view={search.view} />
+      )}
     </div>
   )
 }

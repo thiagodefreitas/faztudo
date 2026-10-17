@@ -2,11 +2,13 @@ import * as Tooltip from "@radix-ui/react-tooltip"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { useState } from "react"
 import { cx } from "../lib/cx"
+import { directPeer, isDirect } from "../lib/direct"
 import { primaryWindow } from "../lib/lanes"
 import { useTheme } from "../lib/theme"
 import { formatAge } from "../lib/time"
 import { useNow } from "../state/now"
-import { useChannels, useLanes, useMembers } from "../state/queries"
+import { useOpenDirect } from "../state/direct"
+import { useChannels, useLanes, useMe, useMembers } from "../state/queries"
 import { useStreamStatus } from "../state/status"
 import type { Lane, LaneHealth, Member, Presence } from "../types"
 import { WORKSPACE_NAME } from "../types"
@@ -39,6 +41,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const channels = useChannels()
   const members = useMembers()
   const lanes = useLanes()
+  const me = useMe()
+  const openDirect = useOpenDirect()
   const now = useNow()
   const status = useStreamStatus()
   const theme = useTheme()
@@ -47,6 +51,13 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const people = (members.data ?? []).filter((member) => member.kind === "human")
   const agents = (members.data ?? []).filter((member) => member.kind === "agent")
+  const rooms = (channels.data ?? []).filter((channel) => !isDirect(channel))
+  const directs = (channels.data ?? []).filter(isDirect)
+  const meId = me.data?.id
+  function startDirect(member: Member) {
+    onNavigate?.()
+    void openDirect(member)
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -73,7 +84,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
           }}
         />
         <ul className="flex flex-col gap-0.5">
-          {(channels.data ?? []).map((channel) => {
+          {rooms.map((channel) => {
             const active = pathname === `/c/${channel.id}`
             return (
               <li key={channel.id}>
@@ -96,8 +107,41 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
             )
           })}
         </ul>
-        <MemberList title="Agents" members={agents} lanes={lanes.data ?? []} now={now} />
-        <MemberList title="People" members={people} lanes={lanes.data ?? []} now={now} />
+        {directs.length > 0 && (
+          <div className="mt-4">
+            <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Direct messages</p>
+            <ul className="flex flex-col gap-0.5">
+              {directs.map((channel) => {
+                const active = pathname === `/c/${channel.id}`
+                const peer = directPeer(channel, meId, members.data ?? [])
+                return (
+                  <li key={channel.id}>
+                    <Link
+                      to="/c/$channelId"
+                      params={{ channelId: channel.id }}
+                      onClick={onNavigate}
+                      className={cx(
+                        "flex min-h-8 items-center gap-2 rounded px-2 text-[13px]",
+                        active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas",
+                      )}
+                    >
+                      <span
+                        className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[peer?.presence ?? "offline"])}
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{peer?.display_name ?? channel.name}</span>
+                      {channel.unread > 0 && (
+                        <span className="rounded-full bg-accent px-1.5 text-[11px] text-canvas">{channel.unread}</span>
+                      )}
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+        <MemberList title="Agents" members={agents} lanes={lanes.data ?? []} now={now} meId={meId} onOpen={startDirect} />
+        <MemberList title="People" members={people} lanes={lanes.data ?? []} now={now} meId={meId} onOpen={startDirect} />
       </div>
       <div className="border-t border-line px-3 py-2">
         <LanesGauge lanes={lanes.data ?? []} />
@@ -119,11 +163,15 @@ function MemberList({
   members,
   lanes,
   now,
+  meId,
+  onOpen,
 }: {
   title: string
   members: Member[]
   lanes: Lane[]
   now: number
+  meId: string | undefined
+  onOpen: (member: Member) => void
 }) {
   if (!members || members.length === 0) return null
   return (
@@ -133,10 +181,28 @@ function MemberList({
         {members.map((member) => {
           const laneId = member.agent?.lanes[0]
           const lane = lanes.find((item) => item.id === laneId)
+          const dot = (
+            <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
+          )
           return (
-            <li key={member.id} className="flex min-h-8 items-center gap-2 px-2 text-[13px]">
-              <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
-              <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
+            <li key={member.id} className="flex min-h-8 items-center gap-1 text-[13px]">
+              {member.id === meId ? (
+                <span className="flex min-h-8 min-w-0 flex-1 items-center gap-2 px-2">
+                  {dot}
+                  <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpen(member)}
+                  title={`Message ${member.display_name}`}
+                  className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left hover:bg-canvas"
+                >
+                  {dot}
+                  <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
+                  <span className="sr-only">Open direct message</span>
+                </button>
+              )}
               {member.kind === "agent" && <LaneDot lane={lane} now={now} />}
             </li>
           )

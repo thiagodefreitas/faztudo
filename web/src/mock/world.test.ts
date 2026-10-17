@@ -134,4 +134,42 @@ describe("mock world", () => {
     expect(bad.status).toBe(400)
     expect(bad.body).toMatchObject({ error: { message: "repo_path is not a git work tree" } })
   })
+
+  it("keeps thread replies out of the channel list and counts them on the root", () => {
+    const { world: mock } = world()
+    const root = mock.postMessage(IDS.dev, { body: "root" })
+    if (!root.ok) throw new Error("post failed")
+    const reply = mock.postMessage(IDS.dev, { body: "reply", thread_id: root.data.id })
+    if (!reply.ok) throw new Error("reply failed")
+    const nested = mock.postMessage(IDS.dev, { body: "nested", thread_id: reply.data.id })
+    expect(nested.ok && nested.data.thread_id).toBe(root.data.id)
+    const list = mock.getMessages(IDS.dev)
+    if (!list.ok) throw new Error("list failed")
+    expect(list.data.some((message) => message.thread_id)).toBe(false)
+    expect(list.data.find((message) => message.id === root.data.id)?.reply_count).toBe(2)
+    const thread = mock.getThread(root.data.id)
+    expect(thread.ok && thread.data.replies).toHaveLength(2)
+    expect(mock.postMessage(IDS.general, { body: "x", thread_id: root.data.id }).ok).toBe(false)
+  })
+
+  it("routes a DM message to its sole agent without a mention", () => {
+    const { clock, world: mock } = world()
+    const created = handleMock(
+      mock,
+      "POST",
+      new URL("http://x/api/v1/channels"),
+      JSON.stringify({ name: "dm-ada-coder", kind: "direct", visibility: "direct", member_ids: [IDS.ada, IDS.coder] }),
+    )
+    expect(created.status).toBe(200)
+    const dm = created.body as { id: string }
+    const posted = mock.postMessage(dm.id, { body: "please add a chip" })
+    if (!posted.ok) throw new Error("post failed")
+    clock.advance(300)
+    const runs = mock.getRuns(dm.id)
+    expect(runs.ok && runs.data.some((run) => run.trigger_message_id === posted.data.id && run.agent_id === IDS.coder)).toBe(true)
+    const quiet = mock.postMessage(IDS.dev, { body: "no mention in a team channel" })
+    if (!quiet.ok) throw new Error("post failed")
+    const after = mock.getRuns(IDS.dev)
+    expect(after.ok && after.data.some((run) => run.trigger_message_id === quiet.data.id)).toBe(false)
+  })
 })

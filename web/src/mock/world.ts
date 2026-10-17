@@ -296,7 +296,7 @@ export class MockWorld {
     if (!channel) return err(404, "not_found", "channel not found")
     if (!Number.isFinite(limit) || limit < 1) return err(400, "bad_request", "limit must be at least 1")
     const capped = Math.min(200, Math.floor(limit))
-    const all = this.messages.filter((message) => message.channel_id === channelId).sort(byTime)
+    const all = this.messages.filter((message) => message.channel_id === channelId && !message.thread_id).sort(byTime)
     let pool = all
     if (before) {
       const pivot = all.find((message) => message.id === before)
@@ -354,8 +354,12 @@ export class MockWorld {
     const channel = this.channels.find((item) => item.id === channelId)
     if (!channel) return err(404, "not_found", "channel not found")
     if (!body.body.trim()) return err(400, "bad_request", "body is empty")
-    if (body.thread_id && !this.messages.some((message) => message.id === body.thread_id)) {
-      return err(400, "bad_request", "thread not found")
+    // Replies attach to the thread root, one level deep, as the server does.
+    let rootId: ID | undefined
+    if (body.thread_id) {
+      const parent = this.messages.find((message) => message.id === body.thread_id && message.channel_id === channelId)
+      if (!parent) return err(400, "bad_request", "invalid thread_id")
+      rootId = parent.thread_id ?? parent.id
     }
     if (body.idempotency_key) {
       const existing = this.idempotency.get(body.idempotency_key)
@@ -368,20 +372,28 @@ export class MockWorld {
     const message: Message = {
       id: ulid(this.clock.now()),
       channel_id: channelId,
-      ...(body.thread_id ? { thread_id: body.thread_id } : {}),
+      ...(rootId ? { thread_id: rootId } : {}),
       author_id: this.me.id,
       body: body.body,
       mentions,
       created_at: iso(this.clock.now()),
     }
-    this.messages.push(message)
+    this.addMessage(message)
     if (body.idempotency_key) this.idempotency.set(body.idempotency_key, message)
     this.emit("message.posted", channelId, message, `human:${this.me.id}`)
-    const agent = handles
+    const mentioned = handles
       .map((handle) => this.members.find((member) => member.kind === "agent" && member.handle === handle))
       .find((member): member is Member => Boolean(member))
+    // A direct channel with exactly one agent needs no @mention.
+    const agent = mentioned ?? this.directAgent(channel)
     if (agent) this.startRun(channel, message, agent, /verify-fail/i.test(body.body) || agent.handle === "reviewer")
     return ok(structuredClone(message))
+  }
+
+  private directAgent(channel: Channel): Member | undefined {
+    if (channel.kind !== "direct" && channel.visibility !== "direct") return undefined
+    const agents = this.members.filter((member) => member.kind === "agent" && channel.member_ids.includes(member.id))
+    return agents.length === 1 ? agents[0] : undefined
   }
 
   createChannel(body: ChannelCreate): Result<Channel> {
@@ -659,8 +671,16 @@ export class MockWorld {
     }
   }
 
-  private insertMessage(message: Message): void {
+  // Stores a message and keeps the root's reply_count, as the server does.
+  private addMessage(message: Message): void {
     this.messages.push(message)
+    if (!message.thread_id) return
+    const root = this.messages.find((item) => item.id === message.thread_id)
+    if (root) root.reply_count = (root.reply_count ?? 0) + 1
+  }
+
+  private insertMessage(message: Message): void {
+    this.addMessage(message)
     const author = this.members.find((member) => member.id === message.author_id)
     const actor = author?.kind === "agent" ? `agent:${author.id}` : `human:${message.author_id}`
     this.emit("message.posted", message.channel_id, message, actor)
@@ -702,13 +722,14 @@ export class MockWorld {
     const followup: Message = {
       id: ulid(this.clock.now()),
       channel_id: channel.id,
+      ...(trigger.thread_id ? { thread_id: trigger.thread_id } : {}),
       author_id: agent.id,
       body: mode === "write" ? "Started a write run." : "Started a read run.",
       mentions: [],
       run_id: run.id,
       created_at: iso(this.clock.now()),
     }
-    this.messages.push(followup)
+    this.addMessage(followup)
     this.emit("message.posted", channel.id, followup, `agent:${agent.id}`)
     this.bumpUnread(channel.id)
     this.script(run.id, fail ? "fail" : "approval", picked.laneId)

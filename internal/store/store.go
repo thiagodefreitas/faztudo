@@ -448,6 +448,14 @@ func (s *Store) Message(ctx context.Context, id string) (domain.Message, error) 
 	return oneJSON[domain.Message](ctx, s.db, "SELECT data FROM messages WHERE id=?", id)
 }
 func (s *Store) Messages(ctx context.Context, channelID, before string, limit int) ([]domain.Message, error) {
+	return s.messages(ctx, channelID, before, limit, false)
+}
+
+// RootMessages is Messages without thread replies: the channel transcript.
+func (s *Store) RootMessages(ctx context.Context, channelID, before string, limit int) ([]domain.Message, error) {
+	return s.messages(ctx, channelID, before, limit, true)
+}
+func (s *Store) messages(ctx context.Context, channelID, before string, limit int, rootsOnly bool) ([]domain.Message, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -467,7 +475,7 @@ func (s *Store) Messages(ctx context.Context, channelID, before string, limit in
 		cutoff = m.CreatedAt.Format(time.RFC3339Nano)
 		cutoffID = m.ID
 	}
-	return queryJSON[domain.Message](ctx, s.db, "SELECT data FROM (SELECT data,created_at,id FROM messages WHERE channel_id=? AND (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT ?) ORDER BY created_at,id", channelID, cutoff, cutoff, cutoffID, limit)
+	return queryJSON[domain.Message](ctx, s.db, "SELECT data FROM (SELECT data,created_at,id FROM messages WHERE channel_id=? AND (?=0 OR thread_id='') AND (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT ?) ORDER BY created_at,id", channelID, rootsOnly, cutoff, cutoff, cutoffID, limit)
 }
 func (s *Store) Thread(ctx context.Context, id string) ([]domain.Message, error) {
 	return queryJSON[domain.Message](ctx, s.db, "SELECT data FROM messages WHERE id=? OR thread_id=? ORDER BY created_at,id", id, id)

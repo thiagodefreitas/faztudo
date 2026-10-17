@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, createRoute, createRouter, redirect } from "@tanstack/react-router"
 import { api } from "./api/client"
+import { isDirect } from "./lib/direct"
 import { ChannelPage } from "./components/channel"
 import { LanesPage } from "./components/lanes"
 import { Shell } from "./components/shell"
@@ -14,12 +15,14 @@ export interface RouterContext {
 
 export interface ChannelSearch {
   run?: string
+  thread?: string
   view?: "diff"
 }
 
 function validateSearch(search: Record<string, unknown>): ChannelSearch {
   const result: ChannelSearch = {}
   if (typeof search.run === "string" && search.run) result.run = search.run
+  if (typeof search.thread === "string" && search.thread) result.thread = search.thread
   if (search.view === "diff") result.view = "diff"
   return result
 }
@@ -36,7 +39,7 @@ const indexRoute = createRoute({
       queryKey: qk.channels,
       queryFn: () => api.channels(),
     })
-    const first = channels[0]
+    const first = channels.find((channel) => !isDirect(channel)) ?? channels[0]
     if (!first) return
     throw redirect({
       to: "/c/$channelId",

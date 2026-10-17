@@ -286,7 +286,7 @@ func (a *API) messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	v, e := a.Store.Messages(r.Context(), id, r.URL.Query().Get("before"), limit)
+	v, e := a.Store.RootMessages(r.Context(), id, r.URL.Query().Get("before"), limit)
 	if e != nil {
 		failErr(w, e)
 		return
@@ -362,6 +362,9 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "bad_request", "invalid thread_id")
 			return
 		}
+		if root.ThreadID != "" {
+			v.ThreadID = root.ThreadID // replies attach to the root, one level deep
+		}
 	}
 	members, e := a.Store.Members(r.Context())
 	if e != nil {
@@ -369,6 +372,9 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids, agents := mentioned(v.Body, members)
+	if len(agents) == 0 {
+		agents = directAgent(c, members)
+	}
 	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, CreatedAt: time.Now().UTC()}
 	newMessageID := m.ID
 	evt, ok := a.append(w, r, events.MessagePosted, c.ID, v.IdempotencyKey, m)
@@ -384,6 +390,29 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	if newMessageID == m.ID && len(agents) > 0 {
 		a.Trigger.OnMessage(r.Context(), m, agents)
 	}
+}
+
+// directAgent returns the sole agent of a direct channel, so a human message
+// there needs no @mention. Other channels, and DMs with several agents, need
+// an explicit mention.
+func directAgent(c domain.Channel, members []domain.Member) []domain.Member {
+	if c.Kind != domain.ChannelDirect && c.Visibility != domain.VisibilityDirect {
+		return nil
+	}
+	in := map[string]bool{}
+	for _, id := range c.MemberIDs {
+		in[id] = true
+	}
+	var found []domain.Member
+	for _, m := range members {
+		if in[m.ID] && m.Kind == domain.MemberAgent {
+			found = append(found, m)
+		}
+	}
+	if len(found) != 1 {
+		return nil
+	}
+	return found
 }
 func (a *API) read(w http.ResponseWriter, r *http.Request) {
 	c, e := a.Store.Channel(r.Context(), r.PathValue("id"))
