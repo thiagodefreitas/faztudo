@@ -49,7 +49,7 @@ interface Channel {
   test_command?: string;    // optional verification command run in the worktree
   member_ids: ID[];
   unread: number;
-  last_event_id?: ID;
+  last_seq?: number;
 }
 
 interface Message {
@@ -77,6 +77,7 @@ interface Run {
   mode: "read" | "write";
   state: RunState;
   worktree?: string;
+  base_commit?: string;     // commit the write run started from
   started_at?: string;
   ended_at?: string;
   exit_code?: number;

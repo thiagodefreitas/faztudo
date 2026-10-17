@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
+	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
 type RunTrigger interface {
@@ -33,6 +35,11 @@ type API struct {
 	Trigger          RunTrigger
 	ResolveApproval  func(context.Context, domain.Approval, string) (string, error)
 	ReadDiff         func(string) ([]byte, error)
+	CancelRun        func(context.Context, string) error
+	RetryRun         func(context.Context, string, string) error
+	ProbeLane        func(context.Context, string) (domain.Lane, error)
+	actorForRequest  func(*http.Request) (domain.Member, error)
+	resolveMu        sync.Mutex
 }
 type actorKey struct{}
 
@@ -91,7 +98,12 @@ func (a *API) authenticated() http.Handler {
 				return
 			}
 		}
-		member, err := a.Store.Member(r.Context(), a.HumanID)
+		var member domain.Member
+		if a.actorForRequest != nil {
+			member, err = a.actorForRequest(r)
+		} else {
+			member, err = a.Store.Member(r.Context(), a.HumanID)
+		}
 		if err != nil {
 			failErr(w, err)
 			return
@@ -119,6 +131,8 @@ func fail(w http.ResponseWriter, status int, code, msg string) {
 func failErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		fail(w, 404, "not_found", "resource not found")
+	} else if errors.Is(err, store.ErrConflict) {
+		fail(w, 409, "conflict", "resource conflict")
 	} else {
 		fail(w, 500, "internal", "internal error")
 	}
@@ -141,7 +155,7 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 func (a *API) append(w http.ResponseWriter, r *http.Request, typ events.Type, channel, key string, v any) (events.Event, bool) {
 	e, err := a.Store.Append(r.Context(), events.Draft{Type: typ, Actor: events.Human(current(r).ID), ChannelID: channel, IdempotencyKey: key, Payload: v})
 	if err != nil {
-		fail(w, 409, "conflict", err.Error())
+		failErr(w, err)
 		return e, false
 	}
 	return e, true
@@ -361,6 +375,10 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if evt.ChannelID != c.ID {
+		fail(w, 409, "conflict", "idempotency key belongs to another channel")
+		return
+	}
 	_ = json.Unmarshal(evt.Payload, &m)
 	respond(w, 201, m)
 	if newMessageID == m.ID && len(agents) > 0 {
@@ -441,28 +459,55 @@ func (a *API) diff(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(b)
 		return
 	}
-	cmd := exec.CommandContext(r.Context(), "git", "-C", v.Worktree, "diff", "--no-ext-diff", "HEAD")
-	b, e := cmd.Output()
+	if v.BaseCommit == "" {
+		fail(w, 409, "conflict", "run has no base commit")
+		return
+	}
+	_, diff, e := (worktree.Manager{}).Diff(r.Context(), worktree.Worktree{Path: v.Worktree, BaseCommit: v.BaseCommit})
 	if e != nil {
 		fail(w, 500, "internal", "diff unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write(b)
+	_, _ = w.Write([]byte(diff))
 }
 func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.Store.Run(r.Context(), r.PathValue("id")); err != nil {
+	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
+	if err != nil {
 		failErr(w, err)
 		return
 	}
-	fail(w, 409, "conflict", "run cancellation is not wired yet")
+	if run.State.Terminal() || a.CancelRun == nil {
+		fail(w, 409, "conflict", "run cannot be cancelled")
+		return
+	}
+	if err := a.CancelRun(r.Context(), run.ID); err != nil {
+		fail(w, 409, "conflict", "run cannot be cancelled")
+		return
+	}
+	respond(w, 202, map[string]bool{"ok": true})
 }
 func (a *API) retry(w http.ResponseWriter, r *http.Request) {
-	if _, err := a.Store.Run(r.Context(), r.PathValue("id")); err != nil {
+	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
+	if err != nil {
 		failErr(w, err)
 		return
 	}
-	fail(w, 409, "conflict", "run retry is not wired yet")
+	if !run.State.Terminal() || a.RetryRun == nil {
+		fail(w, 409, "conflict", "run cannot be retried")
+		return
+	}
+	var req struct {
+		LaneID string `json:"lane_id"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if err := a.RetryRun(r.Context(), run.ID, req.LaneID); err != nil {
+		fail(w, 409, "conflict", "run cannot be retried on that lane")
+		return
+	}
+	respond(w, 202, map[string]bool{"ok": true})
 }
 func (a *API) approvals(w http.ResponseWriter, r *http.Request) {
 	v, e := a.Store.Approvals(r.Context(), r.URL.Query().Get("state"))
@@ -473,6 +518,8 @@ func (a *API) approvals(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, v)
 }
 func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
+	a.resolveMu.Lock()
+	defer a.resolveMu.Unlock()
 	if current(r).Kind != domain.MemberHuman {
 		fail(w, 403, "forbidden", "human approval required")
 		return
@@ -511,11 +558,18 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Note = outcome
 	}
-	v.State = domain.ApprovalResolved
-	v.Resolution = &domain.ApprovalResolution{Option: req.Option, By: current(r).ID, At: time.Now().UTC(), Note: req.Note}
-	if _, ok := a.append(w, r, events.ApprovalResolved, v.ChannelID, "", v); ok {
-		respond(w, 200, v)
+	v, e = a.Store.ResolveApproval(r.Context(), v.ID, req.Option, req.Note, current(r).ID)
+	if e != nil {
+		if errors.Is(e, store.ErrConflict) {
+			fail(w, 409, "conflict", "approval is not pending")
+		} else if errors.Is(e, store.ErrInvalidOption) {
+			fail(w, 400, "bad_request", "invalid option")
+		} else {
+			failErr(w, e)
+		}
+		return
 	}
+	respond(w, 200, v)
 }
 func (a *API) lanes(w http.ResponseWriter, r *http.Request) {
 	v, e := a.Store.Lanes(r.Context())
@@ -527,7 +581,11 @@ func (a *API) lanes(w http.ResponseWriter, r *http.Request) {
 }
 func laneID(r *http.Request) string { return strings.TrimSuffix(r.PathValue("id"), "/probe") }
 func (a *API) patchLane(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.Lane(r.Context(), laneID(r))
+	if strings.HasSuffix(r.PathValue("id"), "/probe") {
+		fail(w, 404, "not_found", "endpoint not found")
+		return
+	}
+	v, e := a.Store.Lane(r.Context(), r.PathValue("id"))
 	if e != nil {
 		failErr(w, e)
 		return
@@ -567,7 +625,16 @@ func (a *API) probe(w http.ResponseWriter, r *http.Request) {
 		failErr(w, err)
 		return
 	}
-	fail(w, 409, "conflict", "lane probe is not wired yet")
+	if a.ProbeLane == nil {
+		fail(w, 409, "conflict", "lane probe is unavailable")
+		return
+	}
+	lane, err := a.ProbeLane(r.Context(), laneID(r))
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	respond(w, 200, lane)
 }
 func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")

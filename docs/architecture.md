@@ -91,7 +91,12 @@ stream, so they show exactly what the chat shows.
    `~/.local/share/faztudo/worktrees/` from the channel's repository.
 5. The adapter turns the request into the exact command line for that CLI.
    The process starts with stdin closed, in its own process group, with
-   secret variables removed from its environment, and with a timeout.
+   an allowlisted environment, and with a timeout. The common environment
+   names are `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`,
+   `TERM`, `TZ`, `TMPDIR`, and `XDG_*`. The Codex adapter also permits
+   `CODEX_HOME`; the Claude adapter also permits `CLAUDE_CONFIG_DIR` so
+   each CLI can find its local sign-in. Adapter-specific additions must be
+   explicitly named by the adapter. Other inherited variables are removed.
 6. Output streams into the channel as `run.output` events.
 7. When the process exits, the runner records the exit code and classifies
    any failure as transient (retry later), semantic (quota exhausted, test

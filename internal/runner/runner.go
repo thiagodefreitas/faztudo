@@ -138,6 +138,7 @@ type Runner struct {
 	mu             sync.Mutex
 	outputMu       sync.Mutex
 	active         map[string]bool
+	recovered      map[string]context.CancelFunc
 }
 
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -167,6 +168,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		return err
 	}
 	run.Worktree = w.Path
+	run.BaseCommit = w.BaseCommit
 	req.Workdir = w.Path
 	return r.execute(ctx, run, adapter, req, func() error {
 		stat, diff, err := opts.Worktrees.Diff(ctx, w)
@@ -254,6 +256,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 	}
 	var outputSeq atomic.Int64
 	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(err, r.finish(context.Background(), run, domain.RunCancelled, domain.FailureTransient, err.Error(), nil))
+		}
 		code, tail, execErr := r.executeOnce(ctx, run, command, req.Timeout, &outputSeq)
 		if ctx.Err() != nil {
 			state := domain.RunCancelled
@@ -306,11 +311,17 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 			return errors.Join(signalErr, r.finish(ctx, run, domain.RunFailed, class, reason, &code))
 		}
 		if class == domain.FailureTransient && attempt < len(backoff) {
+			timer := time.NewTimer(backoff[attempt])
 			select {
-			case <-time.After(backoff[attempt]):
+			case <-timer.C:
+				timer.Stop()
+				if err := ctx.Err(); err != nil {
+					return errors.Join(err, r.finish(context.Background(), run, domain.RunCancelled, domain.FailureTransient, err.Error(), &code))
+				}
 				continue
 			case <-ctx.Done():
-				continue
+				timer.Stop()
+				return errors.Join(ctx.Err(), r.finish(context.Background(), run, domain.RunCancelled, domain.FailureTransient, ctx.Err().Error(), &code))
 			}
 		}
 		finishErr := r.finish(ctx, run, domain.RunFailed, class, reason, &code)
@@ -383,7 +394,7 @@ func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cm
 	startErrOffset, _ := errFile.Seek(0, io.SeekEnd)
 	cmd := exec.Command(c.Path, c.Args...)
 	cmd.Dir = c.Dir
-	cmd.Env = stripEnv(os.Environ(), append(r.ExtraEnvRemove, c.EnvRemove...), c.EnvAdd)
+	cmd.Env = stripEnv(os.Environ(), append(r.ExtraEnvRemove, c.EnvRemove...), c.EnvAdd, c.EnvAllow...)
 	cmd.Stdin = nil
 	cmd.Stdout = out
 	cmd.Stderr = errFile
@@ -620,23 +631,30 @@ func processAlive(pid int) bool {
 	fields := strings.Fields(string(b[i+1:]))
 	return len(fields) > 0 && fields[0] != "Z" && fields[0] != "X"
 }
-func stripEnv(base, remove []string, add map[string]string) []string {
+func stripEnv(base, remove []string, add map[string]string, extraAllow ...string) []string {
 	blocked := map[string]bool{}
 	for _, k := range remove {
 		blocked[k] = true
 	}
 	out := make([]string, 0, len(base)+len(add))
 	seen := map[string]bool{}
+	allowed := map[string]bool{"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true, "LANG": true, "TERM": true, "TZ": true, "TMPDIR": true}
+	for _, k := range extraAllow {
+		allowed[k] = true
+	}
+	keep := func(k string) bool {
+		return !blocked[k] && (allowed[k] || strings.HasPrefix(k, "LC_") || strings.HasPrefix(k, "XDG_"))
+	}
 	for _, kv := range base {
-		k, _, _ := strings.Cut(kv, "=")
-		if seen[k] || blocked[k] || addHas(add, k) || k == "GH_TOKEN" || k == "GITHUB_TOKEN" || strings.HasPrefix(k, "AWS_") || strings.HasSuffix(k, "_API_KEY") || strings.HasSuffix(k, "_TOKEN") || strings.HasSuffix(k, "_SECRET") {
+		k, _, ok := strings.Cut(kv, "=")
+		if !ok || seen[k] || !keep(k) || addHas(add, k) {
 			continue
 		}
 		seen[k] = true
 		out = append(out, kv)
 	}
 	for k, v := range add {
-		if !blocked[k] && k != "GH_TOKEN" && k != "GITHUB_TOKEN" && !strings.HasPrefix(k, "AWS_") && !strings.HasSuffix(k, "_API_KEY") && !strings.HasSuffix(k, "_TOKEN") && !strings.HasSuffix(k, "_SECRET") {
+		if keep(k) {
 			out = append(out, k+"="+v)
 		}
 	}
@@ -680,8 +698,8 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 				cleanupGroup(m.PGID, m.StartTime, r.Grace)
 			}
 			m.Run.State = domain.RunFailed
-			m.Run.FailureClass = domain.FailureUnknown
-			m.Run.FailureReason = "process identity lost after restart"
+			m.Run.FailureClass = domain.FailureTransient
+			m.Run.FailureReason = "outcome unknown after daemon restart"
 			now := time.Now().UTC()
 			m.Run.EndedAt = &now
 			if err = r.save(m); err != nil {
@@ -707,7 +725,14 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 						return result, err
 					}
 				}
-				go r.monitorRecovered(ctx, m)
+				monitorCtx, cancel := context.WithCancel(ctx)
+				r.mu.Lock()
+				if r.recovered == nil {
+					r.recovered = map[string]context.CancelFunc{}
+				}
+				r.recovered[m.Run.ID] = cancel
+				r.mu.Unlock()
+				go r.monitorRecovered(monitorCtx, m)
 			}
 		}
 		result = append(result, m.Run)
@@ -715,8 +740,25 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 	return result, nil
 }
 
+// CancelRecovered stops a process reattached after daemon restart.
+func (r *Runner) CancelRecovered(id string) bool {
+	r.mu.Lock()
+	cancel := r.recovered[id]
+	r.mu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
+}
+
 func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 	defer r.releaseID(m.Run.ID)
+	defer func() {
+		r.mu.Lock()
+		delete(r.recovered, m.Run.ID)
+		r.mu.Unlock()
+	}()
 	if r.Lanes != nil {
 		defer r.Lanes.Release(m.Run.LaneID)
 	}
@@ -743,8 +785,10 @@ func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 	for {
 		select {
 		case <-ctx.Done():
+			cleanupGroup(m.PGID, m.StartTime, r.Grace)
 			close(stop)
 			wg.Wait()
+			_ = r.finish(context.Background(), &m.Run, domain.RunCancelled, domain.FailureTransient, "cancelled after daemon restart", nil)
 			return
 		case <-ticker.C:
 			actual, err := startTime(m.PID)
@@ -761,8 +805,8 @@ func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 				m.OutputSeq = latest.OutputSeq
 			}
 			m.Run.State = domain.RunFailed
-			m.Run.FailureClass = domain.FailureUnknown
-			m.Run.FailureReason = "recovered process exited; exit status unavailable"
+			m.Run.FailureClass = domain.FailureTransient
+			m.Run.FailureReason = "outcome unknown after daemon restart"
 			now := time.Now().UTC()
 			m.Run.EndedAt = &now
 			_ = r.save(m)

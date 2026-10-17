@@ -22,7 +22,17 @@ type fakeAdapter struct{ path string }
 
 func (a fakeAdapter) Name() string { return "fake" }
 func (a fakeAdapter) Command(r adapters.Request) (adapters.Cmd, error) {
-	return adapters.Cmd{Path: a.path, Dir: r.Workdir}, nil
+	c := adapters.Cmd{Path: a.path, Dir: r.Workdir}
+	for _, k := range []string{"FAKE_CHILD_PID_FILE", "FAKE_SLEEP_MS", "FAKE_EXIT", "FAKE_COUNT_FILE", "FAKE_STDERR", "FAKE_STDOUT", "FAKE_WRITE_FILE", "FAKE_WRITE_CONTENT", "FAKE_LONG_LINE"} {
+		if v, ok := os.LookupEnv(k); ok {
+			if c.EnvAdd == nil {
+				c.EnvAdd = map[string]string{}
+			}
+			c.EnvAdd[k] = v
+			c.EnvAllow = append(c.EnvAllow, k)
+		}
+	}
+	return c, nil
 }
 func (a fakeAdapter) Classify(code int, s string) (domain.FailureClass, adapters.LaneSignal, string) {
 	return (adapters.Codex{}).Classify(code, s)
@@ -163,9 +173,51 @@ func TestRecoveryIdentity(t *testing.T) {
 	if len(recovered) != 2 || recovered[1].State != domain.RunFailed {
 		t.Fatalf("%+v", recovered)
 	}
+	if recovered[1].FailureClass != domain.FailureTransient || recovered[1].FailureReason != "outcome unknown after daemon restart" {
+		t.Fatalf("stale recovery: %+v", recovered[1])
+	}
 	if !processAlive(cmd.Process.Pid) {
 		t.Fatal("killed reused process")
 	}
+}
+
+func TestCancelRecoveredRun(t *testing.T) {
+	path := fakeBinary(t)
+	dir := t.TempDir()
+	cmd := exec.Command(path)
+	cmd.Env = append(os.Environ(), "FAKE_SLEEP_MS=5000")
+	cmd.SysProcAttr = processGroup()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { killGroup(cmd.Process.Pid, 0); cmd.Wait() }()
+	start, err := startTime(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{RunDir: dir, Grace: 10 * time.Millisecond}
+	meta := Metadata{Run: domain.Run{ID: "recovered", State: domain.RunRunning}, PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartTime: start}
+	if err := r.save(meta); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !r.CancelRecovered("recovered") {
+		t.Fatal("recovered run was not cancellable")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m, err := r.load("recovered")
+		if err == nil && m.Run.State == domain.RunCancelled {
+			if processAlive(cmd.Process.Pid) {
+				t.Fatal("cancelled process is still alive")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("recovered run was not cancelled")
 }
 
 func gitRun(t *testing.T, dir string, args ...string) string {
@@ -224,8 +276,62 @@ func TestRetryAndSanitizedEnv(t *testing.T) {
 		t.Fatalf("attempts %q %v", b, err)
 	}
 	got := stripEnv([]string{"PATH=/bin", "ANTHROPIC_API_KEY=secret", "AWS_ACCESS_KEY_ID=secret", "GH_TOKEN=secret", "MY_TOKEN=secret", "OK=yes"}, []string{"OK"}, map[string]string{"MY_SECRET": "bad", "GOOD": "value"})
-	if len(got) != 2 || got[0] != "PATH=/bin" || got[1] != "GOOD=value" {
+	if len(got) != 1 || got[0] != "PATH=/bin" {
 		t.Fatalf("environment: %q", got)
+	}
+}
+
+func TestEnvironmentAllowlist(t *testing.T) {
+	got := stripEnv([]string{"PATH=/bin", "HOME=/tmp/home", "LANG=C", "LC_ALL=C", "XDG_CONFIG_HOME=/tmp/config", "SSH_AUTH_SOCK=/tmp/agent", "GOOGLE_APPLICATION_CREDENTIALS=/tmp/key", "GIT_ASKPASS=/tmp/askpass", "CUSTOM_PASSWORD=secret"}, nil, nil)
+	want := []string{"PATH=/bin", "HOME=/tmp/home", "LANG=C", "LC_ALL=C", "XDG_CONFIG_HOME=/tmp/config"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("child environment: %q, want %q", got, want)
+	}
+	got = stripEnv([]string{"CODEX_HOME=/tmp/codex", "CLAUDE_CONFIG_DIR=/tmp/claude", "ANTHROPIC_API_KEY=secret"}, nil, nil, "CODEX_HOME")
+	if len(got) != 1 || got[0] != "CODEX_HOME=/tmp/codex" {
+		t.Fatalf("adapter environment: %q", got)
+	}
+}
+
+func TestCancelDuringBackoffDoesNotRetry(t *testing.T) {
+	path := fakeBinary(t)
+	dir := t.TempDir()
+	count := filepath.Join(dir, "count")
+	t.Setenv("FAKE_COUNT_FILE", count)
+	t.Setenv("FAKE_STDERR", "HTTP 503")
+	t.Setenv("FAKE_EXIT", "1")
+	r := Runner{RunDir: dir, Backoff: []time.Duration{time.Second}, Grace: 300 * time.Millisecond}
+	run := domain.Run{ID: "backoff", Mode: domain.RunRead, State: domain.RunQueued}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Execute(ctx, &run, fakeAdapter{path}, adapters.Request{Mode: domain.RunRead, Prompt: "x", Workdir: dir})
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(count); err == nil && len(b) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if b, err := os.ReadFile(count); err != nil || len(b) != 1 {
+		cancel()
+		t.Fatalf("first attempt: %q %v", b, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	startedCancel := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancel did not finish")
+	}
+	b, err := os.ReadFile(count)
+	if err != nil || len(b) != 1 || run.State != domain.RunCancelled {
+		t.Fatalf("cancel state %s, attempts %q: %v", run.State, b, err)
+	}
+	if elapsed := time.Since(startedCancel); elapsed > 200*time.Millisecond {
+		t.Fatalf("cancel during backoff took %s; a new attempt may have started", elapsed)
 	}
 }
 
@@ -276,6 +382,9 @@ func TestDaemonKilledMidRun(t *testing.T) {
 	for time.Now().Before(deadline) {
 		m, err := r.load("orphan")
 		if err == nil && m.Run.State == domain.RunFailed {
+			if m.Run.FailureClass != domain.FailureTransient || m.Run.FailureReason != "outcome unknown after daemon restart" {
+				t.Fatalf("recovery classification: %s %q", m.Run.FailureClass, m.Run.FailureReason)
+			}
 			b, err := os.ReadFile(filepath.Join(dir, "orphan", "stdout.log"))
 			if err != nil || !strings.Contains(string(b), "recovered-output") {
 				t.Fatalf("output %q %v", b, err)

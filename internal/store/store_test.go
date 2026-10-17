@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -225,5 +227,121 @@ func TestProjectionRebuildWithUnread(t *testing.T) {
 	}
 	if got, err := s.Lane(ctx, lane.ID); err != nil || got.Capacity != lane.Capacity {
 		t.Fatalf("lane: %+v %v", got, err)
+	}
+}
+
+func TestIdempotencyScopedToChannel(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, id := range []string{"a", "b"} {
+		channel := domain.Channel{ID: id, Name: id, Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic}
+		if _, err := s.Append(ctx, events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: id, Payload: channel}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"a", "b"} {
+		message := domain.Message{ID: "message-" + id, ChannelID: id, Body: "synthetic " + id}
+		e, err := s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: id, IdempotencyKey: "same", Payload: message})
+		if err != nil || e.ChannelID != id {
+			t.Fatalf("channel %s returned event from %s: %v", id, e.ChannelID, err)
+		}
+	}
+	messages, err := s.Messages(ctx, "b", "", 10)
+	if err != nil || len(messages) != 1 || messages[0].ID != "message-b" {
+		t.Fatalf("channel b messages: %+v %v", messages, err)
+	}
+}
+
+func TestMigrationPreservesEventsAndScopesKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSchema, err := migrations.ReadFile("migrations/001.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(oldSchema)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO events(seq,id,version,type,actor,channel_id,idempotency_key,payload,ts) VALUES(7,'old',1,'notice','system','a','same',CAST('{}' AS BLOB),'2026-10-18T00:00:00Z')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	first, err := s.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: "a", IdempotencyKey: "same", Payload: events.NoticePayload{Level: "info", Text: "repeat"}})
+	if err != nil || first.ID != "old" || first.Seq != 7 {
+		t.Fatalf("old key changed: %+v %v", first, err)
+	}
+	second, err := s.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: "b", IdempotencyKey: "same", Payload: events.NoticePayload{Level: "info", Text: "new"}})
+	if err != nil || second.ChannelID != "b" || second.Seq <= first.Seq {
+		t.Fatalf("scoped key: %+v %v", second, err)
+	}
+}
+
+func TestResolveApprovalIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	approval := domain.Approval{ID: "approval", ChannelID: "channel", State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "yes", Label: "Yes"}}}
+	if _, err := s.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, Payload: approval}); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.ResolveApproval(ctx, approval.ID, "yes", "synthetic", "human")
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	success, conflict := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrConflict):
+			conflict++
+		default:
+			t.Fatalf("unexpected resolve error: %v", err)
+		}
+	}
+	if success != 1 || conflict != 1 {
+		t.Fatalf("resolve results: success %d conflict %d", success, conflict)
+	}
+	eventsSeen, err := s.EventsAfter(ctx, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := 0
+	for _, e := range eventsSeen {
+		if e.Type == events.ApprovalResolved {
+			resolved++
+		}
+	}
+	if resolved != 1 {
+		t.Fatalf("resolution events %d", resolved)
 	}
 }

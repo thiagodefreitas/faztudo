@@ -136,6 +136,7 @@ type Run struct {
 	Mode             RunMode       `json:"mode"`
 	State            RunState      `json:"state"`
 	Worktree         string        `json:"worktree,omitempty"`
+	BaseCommit       string        `json:"base_commit,omitempty"`
 	StartedAt        *time.Time    `json:"started_at,omitempty"`
 	EndedAt          *time.Time    `json:"ended_at,omitempty"`
 	ExitCode         *int          `json:"exit_code,omitempty"`

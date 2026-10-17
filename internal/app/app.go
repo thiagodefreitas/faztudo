@@ -36,6 +36,8 @@ type App struct {
 	Runner   *runner.Runner
 	Adapters map[string]adapters.Adapter
 	mu       sync.Mutex
+	activeMu sync.Mutex
+	active   map[string]context.CancelFunc
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (*App, error) {
@@ -77,6 +79,9 @@ func (a *App) Bind(h *api.API) {
 	h.ReadDiff = func(id string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(a.Paths.RunsDir, id, "diff.patch"))
 	}
+	h.CancelRun = a.CancelRun
+	h.RetryRun = a.RetryRun
+	h.ProbeLane = a.ProbeLane
 }
 
 func (a *App) Start(ctx context.Context) error {
@@ -105,50 +110,64 @@ func (a *App) Start(ctx context.Context) error {
 }
 
 func (a *App) RefreshUsage(ctx context.Context) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
 	ls, err := a.Store.Lanes(ctx)
 	if err != nil {
 		return err
 	}
 	for _, l := range ls {
-		var windows []domain.LaneWindow
-		switch l.CLI {
-		case "codex":
-			windows, err = usage.ReadCodex(home, usage.Options{})
-		case "claude":
-			var result usage.ClaudeResult
-			result, err = usage.ReadClaude(home, usage.Options{})
-			windows = result.Windows
-		default:
+		if l.CLI != "codex" && l.CLI != "claude" {
 			continue
 		}
-		if err != nil {
-			return err
-		}
-		if err = a.Registry.UpdateUsage(ctx, l.ID, windows); err != nil {
+		if _, err = a.ProbeLane(ctx, l.ID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
+	lane, err := a.Store.Lane(ctx, id)
+	if err != nil {
+		return domain.Lane{}, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return domain.Lane{}, err
+	}
+	var windows []domain.LaneWindow
+	switch lane.CLI {
+	case "codex":
+		windows, err = usage.ReadCodex(home, usage.Options{})
+	case "claude":
+		var result usage.ClaudeResult
+		result, err = usage.ReadClaude(home, usage.Options{})
+		windows = result.Windows
+	default:
+		return domain.Lane{}, fmt.Errorf("%w: usage reader unavailable for lane", store.ErrConflict)
+	}
+	if err != nil {
+		return domain.Lane{}, err
+	}
+	if err := a.Registry.UpdateUsage(ctx, id, windows); err != nil {
+		return domain.Lane{}, err
+	}
+	return a.Store.Lane(ctx, id)
+}
+
 func (a *App) OnMessage(_ context.Context, m domain.Message, agents []domain.Member) {
 	for _, agent := range agents {
 		agent := agent
-		go a.run(context.Background(), m, agent)
+		go a.run(context.Background(), m, agent, "")
 	}
 }
 
-func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member) {
-	if err := a.execute(ctx, m, agent); err != nil {
+func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member, override string) {
+	if err := a.execute(ctx, m, agent, override); err != nil {
 		a.notice(ctx, m.ChannelID, "error", err.Error())
 	}
 }
 
-func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member) error {
+func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member, override string) error {
 	if agent.Agent == nil {
 		return errors.New("agent has no lane chain")
 	}
@@ -164,7 +183,7 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		a.notice(ctx, channel.ID, "warn", "Write runs need a channel repo_path. Set it with PATCH /api/v1/channels/"+channel.ID+".")
 		return nil
 	}
-	lane, skipped, err := a.Registry.Pick(agent.Handle, "")
+	lane, skipped, err := a.Registry.Pick(agent.Handle, override)
 	if err != nil {
 		return err
 	}
@@ -179,11 +198,27 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	if err != nil {
 		return err
 	}
+	if mode == domain.RunWrite {
+		prompt += "\n\nDo not commit changes in the worktree."
+	}
 	timeout, err := time.ParseDuration(a.Config.Runs.DefaultTimeout)
 	if err != nil {
 		return err
 	}
 	run := domain.Run{ID: store.NewID(), ChannelID: channel.ID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: lane.ID, Mode: mode, State: domain.RunQueued}
+	runCtx, cancel := context.WithCancel(ctx)
+	a.activeMu.Lock()
+	if a.active == nil {
+		a.active = map[string]context.CancelFunc{}
+	}
+	a.active[run.ID] = cancel
+	a.activeMu.Unlock()
+	defer func() {
+		cancel()
+		a.activeMu.Lock()
+		delete(a.active, run.ID)
+		a.activeMu.Unlock()
+	}()
 	if _, err := a.Store.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: channel.ID, Payload: run}); err != nil {
 		return err
 	}
@@ -193,12 +228,15 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout}
 	if mode == domain.RunWrite {
-		err = a.Runner.ExecuteWrite(ctx, &run, adapter, req, runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand})
+		err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand})
 	} else {
-		err = a.Runner.Execute(ctx, &run, adapter, req)
+		err = a.Runner.Execute(runCtx, &run, adapter, req)
 	}
 	if run.StartedAt == nil && err != nil {
 		run.State = domain.RunFailed
+		if errors.Is(err, context.Canceled) {
+			run.State = domain.RunCancelled
+		}
 		run.FailureReason = err.Error()
 		_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run})
 	}
@@ -229,6 +267,43 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		}
 	}
 	return err
+}
+
+func (a *App) CancelRun(_ context.Context, id string) error {
+	a.activeMu.Lock()
+	cancel := a.active[id]
+	a.activeMu.Unlock()
+	if cancel == nil {
+		if a.Runner.CancelRecovered(id) {
+			return nil
+		}
+		return errors.New("run is not active")
+	}
+	cancel()
+	return nil
+}
+
+func (a *App) RetryRun(ctx context.Context, id, laneID string) error {
+	prior, err := a.Store.Run(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !prior.State.Terminal() {
+		return errors.New("run is not terminal")
+	}
+	message, err := a.Store.Message(ctx, prior.TriggerMessageID)
+	if err != nil {
+		return err
+	}
+	agent, err := a.Store.Member(ctx, prior.AgentID)
+	if err != nil {
+		return err
+	}
+	if _, _, err := a.Registry.Pick(agent.Handle, laneID); err != nil {
+		return err
+	}
+	go a.run(context.Background(), message, agent, laneID)
+	return nil
 }
 
 func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
@@ -308,6 +383,12 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 		if out != "" {
 			return "", errors.New("channel repo has uncommitted changes; clean it before merge")
 		}
+		if run.BaseCommit == "" {
+			return "", errors.New("run has no base commit")
+		}
+		if _, err := git(ctx, w.Path, "reset", "--soft", run.BaseCommit); err != nil {
+			return "", err
+		}
 		if err := (worktree.Manager{BaseDir: a.Paths.WorktreesDir}).Stage(ctx, w); err != nil {
 			return "", err
 		}
@@ -315,7 +396,7 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 			// A normal commit, not plumbing, so the repository's own hooks
 			// (secret scanning, message rules) see agent changes before they
 			// land. The author is the human's Git identity: they approved it.
-			if _, err := git(ctx, w.Path, "commit", "-q", "-m", a.commitMessage(ctx, run)); err != nil {
+			if err := gitHumanCommit(ctx, w.Path, a.commitMessage(ctx, run)); err != nil {
 				return "", fmt.Errorf("committing run changes (repository hooks may have refused them): %w", err)
 			}
 		}
@@ -350,10 +431,21 @@ func (a *App) commitMessage(ctx context.Context, run domain.Run) string {
 		line := strings.TrimSpace(strings.SplitN(m.Body, "\n", 2)[0])
 		line = strings.TrimSpace(mentionPrefix.ReplaceAllString(line, ""))
 		if line != "" {
-			if len(line) > 72 {
-				line = strings.TrimSpace(line[:69]) + "..."
+			words := strings.Fields(line)
+			line = ""
+			for _, word := range words {
+				candidate := word
+				if line != "" {
+					candidate = line + " " + word
+				}
+				if len(candidate) > 72 {
+					break
+				}
+				line = candidate
 			}
-			subject = strings.ToUpper(line[:1]) + line[1:]
+			if line != "" {
+				subject = strings.ToUpper(line[:1]) + line[1:]
+			}
 		}
 	}
 	return subject + "\n\nfaztudo run " + run.ID
@@ -368,4 +460,19 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func gitHumanCommit(ctx context.Context, dir, message string) error {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "commit", "-q", "-m", message)
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(key, "GIT_AUTHOR_") && !strings.HasPrefix(key, "GIT_COMMITTER_") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

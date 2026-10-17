@@ -130,6 +130,16 @@ func TestWireWriteRunAndMergeApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitTest(t, repo, "init", "-q")
+	identity, err := os.OpenFile(filepath.Join(repo, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identity.WriteString("\n[user]\n name = Synthetic Human\n email = human@example.invalid\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +213,184 @@ func TestWireWriteRunAndMergeApproval(t *testing.T) {
 	}
 	if _, err := os.Stat(run.Worktree); !os.IsNotExist(err) {
 		t.Fatalf("merged worktree still exists: %v", err)
+	}
+}
+
+func TestAgentCommitIsSquashedUnderHumanIdentity(t *testing.T) {
+	c := config.Defaults()
+	c.Lanes.Lane = []config.Lane{{ID: "codex/default", CLI: "codex", Capacity: 1}}
+	c.Lanes.Persona = []config.Persona{{Handle: "coder", Lanes: []string{"codex/default"}, Mode: "write"}}
+	s, a, srv, p := setupWire(t, c)
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "init", "-q")
+	configPath := filepath.Join(repo, ".git", "config")
+	f, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n[user]\n name = Synthetic Human\n email = human@example.invalid\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "base.txt")
+	base := gitTest(t, repo, "-c", "user.name=Base", "-c", "user.email=base@example.invalid", "commit-tree", gitTest(t, repo, "write-tree"), "-m", "base")
+	gitTest(t, repo, "update-ref", "HEAD", base)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := "#!/bin/sh\nprintf ran > '" + marker + "'\n"
+	if err := os.WriteFile(filepath.Join(repo, ".git", "hooks", "pre-commit"), []byte(hook), 0700); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(p.DataDir, "fake-agent")
+	script := "#!/bin/sh\ncase \"$*\" in *\"Do not commit changes in the worktree.\"*) ;; *) echo 'missing no-commit instruction' >&2; exit 9;; esac\nprintf 'synthetic change\\n' > added.txt\ngit add added.txt\ngit -c core.hooksPath=/tmp/no-hooks -c user.name=Agent -c user.email=agent@example.invalid commit -q -m 'agent change' -m 'Co-Authored-By: Agent <agent@example.invalid>'\nprintf 'synthetic answer\\n'\n"
+	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.Adapters["codex"] = fakeCodex{fake}
+	var ch domain.Channel
+	body, _ := json.Marshal(map[string]string{"name": "work", "repo_path": repo})
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels", string(body), 201, &ch)
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels/"+ch.ID+"/messages", `{"body":"@coder add a synthetic file"}`, 201, nil)
+	approval := waitFor(t, func() (domain.Approval, bool) {
+		v, _ := s.Approvals(context.Background(), "pending")
+		if len(v) == 1 {
+			return v[0], true
+		}
+		return domain.Approval{}, false
+	})
+	run, err := s.Run(context.Background(), approval.RunID)
+	if err != nil || run.BaseCommit != base {
+		t.Fatalf("base commit: %+v %v", run, err)
+	}
+	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 200, nil)
+	if got := gitTest(t, repo, "rev-list", "--count", base+"..HEAD"); got != "1" {
+		t.Fatalf("commit count %s", got)
+	}
+	if got := gitTest(t, repo, "log", "-1", "--format=%an <%ae>"); got != "Synthetic Human <human@example.invalid>" {
+		t.Fatalf("author %q", got)
+	}
+	if msg := gitTest(t, repo, "log", "-1", "--format=%B"); strings.Contains(msg, "Co-Authored-By") {
+		t.Fatalf("agent trailer survived: %q", msg)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("human commit hook: %v", err)
+	}
+}
+
+func TestWireCancelRetryAndProbe(t *testing.T) {
+	c := config.Defaults()
+	c.Lanes.Lane = []config.Lane{{ID: "codex/default", CLI: "codex", Capacity: 1}}
+	c.Lanes.Persona = []config.Persona{{Handle: "coder", Lanes: []string{"codex/default"}, Mode: "read"}}
+	s, a, srv, p := setupWire(t, c)
+	gate := filepath.Join(p.DataDir, "gate")
+	if err := os.WriteFile(gate, []byte("wait"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(p.DataDir, "fake-agent")
+	script := "#!/bin/sh\nif [ -f '" + gate + "' ]; then sleep 5; fi\nprintf 'synthetic answer\\n'\n"
+	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.Adapters["codex"] = fakeCodex{fake}
+	var ch domain.Channel
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels", `{"name":"work"}`, 201, &ch)
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels/"+ch.ID+"/messages", `{"body":"@coder synthetic work"}`, 201, nil)
+	first := waitFor(t, func() (domain.Run, bool) {
+		runs, _ := s.Runs(context.Background(), ch.ID, "running")
+		if len(runs) == 1 {
+			return runs[0], true
+		}
+		return domain.Run{}, false
+	})
+	eventsBefore, err := s.EventsAfter(context.Background(), 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := false
+	for _, e := range eventsBefore {
+		if e.Type == events.RunCreated {
+			created = true
+		}
+	}
+	if !created {
+		t.Fatal("run.created was not emitted")
+	}
+	requestJSON(t, "POST", srv.URL+"/api/v1/runs/"+first.ID+"/cancel", `{}`, 202, nil)
+	waitFor(t, func() (bool, bool) {
+		r, _ := s.Run(context.Background(), first.ID)
+		return true, r.State == domain.RunCancelled
+	})
+	if err := os.Remove(gate); err != nil {
+		t.Fatal(err)
+	}
+	requestJSON(t, "POST", srv.URL+"/api/v1/runs/"+first.ID+"/retry", `{}`, 202, nil)
+	second := waitFor(t, func() (domain.Run, bool) {
+		runs, _ := s.Runs(context.Background(), ch.ID, "done")
+		for _, run := range runs {
+			if run.ID != first.ID {
+				return run, true
+			}
+		}
+		return domain.Run{}, false
+	})
+	if second.ID == first.ID {
+		t.Fatal("retry reused run id")
+	}
+	before, err := s.EventsAfter(context.Background(), 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestJSON(t, "POST", srv.URL+"/api/v1/lanes/codex/default/probe", `{}`, 200, nil)
+	after, err := s.EventsAfter(context.Background(), 0, 500)
+	if err != nil || len(after) <= len(before) || after[len(after)-1].Type != events.LaneUpdated {
+		t.Fatalf("probe did not refresh lane: before %d after %d error %v", len(before), len(after), err)
+	}
+}
+
+func TestWireRetryOnAnotherLane(t *testing.T) {
+	c := config.Defaults()
+	c.Lanes.Lane = []config.Lane{{ID: "codex/default", CLI: "codex", Capacity: 1}, {ID: "claude/default", CLI: "claude", Capacity: 1}}
+	c.Lanes.Persona = []config.Persona{{Handle: "coder", Lanes: []string{"codex/default", "claude/default"}, Mode: "read"}}
+	s, a, srv, p := setupWire(t, c)
+	fail := filepath.Join(p.DataDir, "fail-agent")
+	ok := filepath.Join(p.DataDir, "ok-agent")
+	if err := os.WriteFile(fail, []byte("#!/bin/sh\necho 'synthetic failure' >&2\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ok, []byte("#!/bin/sh\necho 'synthetic answer'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.Adapters["codex"] = fakeCodex{fail}
+	a.Adapters["claude"] = fakeCodex{ok}
+	var ch domain.Channel
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels", `{"name":"work"}`, 201, &ch)
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels/"+ch.ID+"/messages", `{"body":"@coder synthetic work"}`, 201, nil)
+	first := waitFor(t, func() (domain.Run, bool) {
+		runs, _ := s.Runs(context.Background(), ch.ID, "failed")
+		if len(runs) == 1 {
+			return runs[0], true
+		}
+		return domain.Run{}, false
+	})
+	requestJSON(t, "POST", srv.URL+"/api/v1/runs/"+first.ID+"/retry", `{"lane_id":"claude/default"}`, 202, nil)
+	second := waitFor(t, func() (domain.Run, bool) {
+		runs, _ := s.Runs(context.Background(), ch.ID, "done")
+		for _, run := range runs {
+			if run.ID != first.ID {
+				return run, true
+			}
+		}
+		return domain.Run{}, false
+	})
+	if second.LaneID != "claude/default" {
+		t.Fatalf("retry lane %s", second.LaneID)
 	}
 }
 

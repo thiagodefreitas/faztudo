@@ -27,6 +27,7 @@ type Cmd struct {
 	Dir       string
 	EnvAdd    map[string]string
 	EnvRemove []string
+	EnvAllow  []string
 }
 
 type LaneSignalKind string
@@ -70,7 +71,7 @@ func (Claude) Command(r Request) (Cmd, error) {
 	for _, dir := range r.ExtraDirs {
 		args = append(args, "--add-dir", dir)
 	}
-	return Cmd{Path: "claude", Args: args, Dir: r.Workdir, EnvRemove: []string{"ANTHROPIC_API_KEY"}}, nil
+	return Cmd{Path: "claude", Args: args, Dir: r.Workdir, EnvAllow: []string{"CLAUDE_CONFIG_DIR"}}, nil
 }
 func (Claude) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)
@@ -98,7 +99,7 @@ func (Codex) Command(r Request) (Cmd, error) {
 		args = append(args, "--add-dir", dir)
 	}
 	args = append(args, r.Prompt)
-	return Cmd{Path: "codex", Args: args, Dir: r.Workdir}, nil
+	return Cmd{Path: "codex", Args: args, Dir: r.Workdir, EnvAllow: []string{"CODEX_HOME"}}, nil
 }
 func (Codex) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)

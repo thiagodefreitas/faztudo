@@ -15,13 +15,15 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
 var ErrNotFound = errors.New("not found")
+var ErrConflict = errors.New("conflict")
+var ErrInvalidOption = errors.New("invalid option")
 
 type Store struct{ db *sql.DB }
 
@@ -61,6 +63,21 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	var version int
+	if err = db.QueryRow("SELECT max(version) FROM schema_version").Scan(&version); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if version < 2 {
+		migration, err = migrations.ReadFile("migrations/002.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db: db}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
@@ -83,7 +100,7 @@ func (s *Store) Append(ctx context.Context, d events.Draft) (events.Event, error
 	}
 	defer tx.Rollback()
 	if d.IdempotencyKey != "" {
-		e, err := eventByKey(ctx, tx, d.IdempotencyKey)
+		e, err := eventByKey(ctx, tx, d.ChannelID, d.IdempotencyKey)
 		if err == nil {
 			return e, tx.Commit()
 		}
@@ -91,6 +108,22 @@ func (s *Store) Append(ctx context.Context, d events.Draft) (events.Event, error
 			return events.Event{}, err
 		}
 	}
+	e, err := appendTx(ctx, tx, d, payload)
+	if err != nil {
+		return events.Event{}, storeError(err)
+	}
+	return e, tx.Commit()
+}
+
+func storeError(err error) error {
+	var sqlErr *sqlite.Error
+	if errors.As(err, &sqlErr) && sqlErr.Code()&255 == 19 {
+		return fmt.Errorf("%w: %v", ErrConflict, err)
+	}
+	return err
+}
+
+func appendTx(ctx context.Context, tx *sql.Tx, d events.Draft, payload []byte) (events.Event, error) {
 	version := d.Version
 	if version == 0 {
 		version = 1
@@ -111,10 +144,10 @@ func (s *Store) Append(ctx context.Context, d events.Draft) (events.Event, error
 	if err = project(ctx, tx, e); err != nil {
 		return events.Event{}, err
 	}
-	return e, tx.Commit()
+	return e, nil
 }
-func eventByKey(ctx context.Context, tx *sql.Tx, key string) (events.Event, error) {
-	return scanEvent(tx.QueryRowContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE idempotency_key=?", key))
+func eventByKey(ctx context.Context, tx *sql.Tx, channel, key string) (events.Event, error) {
+	return scanEvent(tx.QueryRowContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE channel_id=? AND idempotency_key=?", channel, key))
 }
 func scanEvent(row interface{ Scan(...any) error }) (events.Event, error) {
 	var e events.Event
@@ -450,6 +483,46 @@ func (s *Store) Approvals(ctx context.Context, state string) ([]domain.Approval,
 }
 func (s *Store) Approval(ctx context.Context, id string) (domain.Approval, error) {
 	return oneJSON[domain.Approval](ctx, s.db, "SELECT data FROM approvals WHERE id=?", id)
+}
+
+// ResolveApproval checks pending state and appends its resolution in one transaction.
+func (s *Store) ResolveApproval(ctx context.Context, id, option, note, by string) (domain.Approval, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Approval{}, err
+	}
+	defer tx.Rollback()
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, "SELECT data FROM approvals WHERE id=?", id).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Approval{}, ErrNotFound
+		}
+		return domain.Approval{}, err
+	}
+	var approval domain.Approval
+	if err := json.Unmarshal(raw, &approval); err != nil {
+		return domain.Approval{}, err
+	}
+	if approval.State != domain.ApprovalPending {
+		return domain.Approval{}, ErrConflict
+	}
+	valid := false
+	for _, o := range approval.Options {
+		valid = valid || o.Key == option
+	}
+	if !valid {
+		return domain.Approval{}, ErrInvalidOption
+	}
+	approval.State = domain.ApprovalResolved
+	approval.Resolution = &domain.ApprovalResolution{Option: option, By: by, At: time.Now().UTC(), Note: note}
+	payload, err := json.Marshal(approval)
+	if err != nil {
+		return domain.Approval{}, err
+	}
+	if _, err := appendTx(ctx, tx, events.Draft{Type: events.ApprovalResolved, Actor: events.Human(by), ChannelID: approval.ChannelID}, payload); err != nil {
+		return domain.Approval{}, storeError(err)
+	}
+	return approval, tx.Commit()
 }
 func (s *Store) Lanes(ctx context.Context) ([]domain.Lane, error) {
 	return queryJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes ORDER BY id")
