@@ -73,3 +73,6 @@ Thumbs.db
 
 # Source package, not runtime secrets
 !internal/secrets/
+
+# Test fixtures may mimic agent config directories
+!internal/**/testdata/**
