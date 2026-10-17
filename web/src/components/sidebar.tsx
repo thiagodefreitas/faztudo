@@ -12,6 +12,7 @@ import type { Lane, LaneHealth, Member, Presence } from "../types"
 import { WORKSPACE_NAME } from "../types"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { healthDotClass } from "./lane-chip"
+import { LanesGauge } from "./lanes"
 
 const PRESENCE: Record<Presence, string> = {
   online: "bg-ok",
@@ -98,13 +99,16 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         <MemberList title="Agents" members={agents} lanes={lanes.data ?? []} now={now} />
         <MemberList title="People" members={people} lanes={lanes.data ?? []} now={now} />
       </div>
-      <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2">
-        <p className="text-[12px] text-muted" role="status">
-          {STATUS_LABEL[status]}
-        </p>
-        <button type="button" onClick={theme.toggle} className="min-h-8 rounded px-2 text-[12px] text-ink hover:bg-canvas">
-          {theme.choice === "dark" ? "Use light theme" : "Use dark theme"}
-        </button>
+      <div className="border-t border-line px-3 py-2">
+        <LanesGauge lanes={lanes.data ?? []} />
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="text-[12px] text-muted" role="status">
+            {STATUS_LABEL[status]}
+          </p>
+          <button type="button" onClick={theme.toggle} className="min-h-8 rounded px-2 text-[12px] text-ink hover:bg-canvas">
+            {theme.choice === "dark" ? "Use light theme" : "Use dark theme"}
+          </button>
+        </div>
       </div>
     </div>
   )

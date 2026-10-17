@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, createRoute, createRouter, redirect } from "@tanstack/react-router"
 import { api } from "./api/client"
 import { ChannelPage } from "./components/channel"
+import { LanesPage } from "./components/lanes"
 import { Shell } from "./components/shell"
 import { qk } from "./state/keys"
 import { queryClient } from "./state/query-client"
@@ -66,11 +67,22 @@ const channelRoute = createRoute({
   component: ChannelPage,
 })
 
+const lanesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/lanes",
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData({
+      queryKey: qk.lanes,
+      queryFn: () => api.lanes(),
+    }),
+  component: LanesPage,
+})
+
 function HomePage() {
   return <p className="p-6 text-[14px] text-muted">No channels yet.</p>
 }
 
-const routeTree = rootRoute.addChildren([indexRoute, channelRoute])
+const routeTree = rootRoute.addChildren([indexRoute, channelRoute, lanesRoute])
 
 export const router = createRouter({
   routeTree,
