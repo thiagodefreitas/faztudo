@@ -25,7 +25,7 @@ function group(label, slugs) {
 function buildSidebar() {
   return [
     ...group('Start', ['getting-started']),
-    ...group('Concepts', ['vision', 'architecture']),
+    ...group('Concepts', ['vision', 'architecture', 'organization']),
     ...group('Reference', ['api', 'configuration']),
     ...dirGroup('Decisions', 'adr'),
     ...group('Project', ['roadmap', 'contributing']),

@@ -37,6 +37,9 @@ result are visible in the chat.
   calibrated against real exhaustion events.
 - faztudo MCP server so agents can post, ask and request approvals.
 - Optional Linux sandbox (bubblewrap) for write runs.
+- Organization, part one: departments with a lead, projects that group
+  channels and a repository, assigning departments and specialists to
+  projects, `@department` mentions. See [organization](organization.md).
 
 ## M2 Usable alpha (the repository becomes public here)
 
@@ -46,6 +49,10 @@ result are visible in the chat.
   conversations stay within model limits.
 - Security review, clean install test, complete docs, first release packages
   (tarball, deb, AppImage).
+- Organization, part two: the Chief of Staff routes unaddressed requests,
+  leads split team requests across their specialists (one level of
+  delegation, every handoff visible, run budgets), routines on a schedule or
+  trigger with a daily debrief, starting organization templates.
 - At least two weeks of building faztudo inside faztudo, with what broke
   written down, before the repository goes public.
 
