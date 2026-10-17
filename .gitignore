@@ -1,0 +1,72 @@
+# ---- secrets and local config: never committed ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets/
+**/secrets.toml
+*.secret
+*.token
+credentials*.json
+auth.json
+.netrc
+
+# ---- runtime data ----
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.log
+logs/
+runs/
+signal-cli-data/
+.local/
+
+# ---- worktrees and agent scratch ----
+.worktrees/
+wt-*/
+.remember/
+.claude/settings.local.json
+.claude/worktrees/
+.codex/
+.grok/
+.kimi/
+.agy/
+.opencode/
+.aider*
+
+# ---- go ----
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+/faztudo
+
+# ---- node / web ----
+node_modules/
+web/dist/
+web/.vite/
+site/dist/
+site/.astro/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# ---- desktop ----
+desktop/src-tauri/target/
+
+# ---- editors and os ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+.DS_Store
+Thumbs.db

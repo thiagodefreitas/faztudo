@@ -1,0 +1,28 @@
+name: Bug report
+description: Something does not work as described
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest set of steps. Remove any tokens or personal data from logs.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `faztudo --version`, or the commit you built from.
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution, and which agent CLIs are involved with their versions.

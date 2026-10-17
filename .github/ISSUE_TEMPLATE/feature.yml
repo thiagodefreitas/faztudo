@@ -1,0 +1,19 @@
+name: Feature request
+description: Something faztudo should do
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: moment
+    attributes:
+      label: The moment you needed it
+      description: Describe a real situation where this was missing.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like to happen
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead

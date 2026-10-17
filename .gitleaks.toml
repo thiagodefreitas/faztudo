@@ -1,0 +1,14 @@
+title = "faztudo gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders and test fixtures"
+paths = [
+  '''\.env\.example$''',
+]
+regexes = [
+  '''REPLACE_ME''',
+  '''<your-[a-z-]+>''',
+]

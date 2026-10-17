@@ -1,0 +1,17 @@
+# Git hooks. Install with `make setup` (runs `lefthook install`).
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks protect --staged --redact --no-banner
+    prose:
+      glob: "*.{md,mdx}"
+      run: python3 scripts/lint_prose.py {staged_files}
+    gofmt:
+      glob: "*.go"
+      run: test -z "$(gofmt -l {staged_files})" || (gofmt -l {staged_files}; exit 1)
+
+commit-msg:
+  commands:
+    no-trailers:
+      run: scripts/commit_msg_check.sh {1}

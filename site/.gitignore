@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.astro/
+# synced from ../docs by scripts/sync-docs.mjs
+src/content/docs/*
+!src/content/docs/index.mdx
