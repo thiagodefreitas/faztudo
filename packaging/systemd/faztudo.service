@@ -1,0 +1,22 @@
+# User service for faztudo. Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/systemd/faztudo.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now faztudo
+# Logs: journalctl --user -u faztudo -f
+[Unit]
+Description=faztudo workspace for people and agent CLIs
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/faztudo serve
+Restart=on-failure
+RestartSec=3
+# Agent runs are child processes in their own process groups. Stop only the
+# daemon on restart; it reattaches to runs that are still alive.
+KillMode=process
+# Agent CLIs are found on PATH, as in a login shell.
+Environment=PATH=%h/.local/bin:%h/.grok/bin:%h/.kimi-code/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

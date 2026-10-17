@@ -29,6 +29,22 @@ faztudo serve     # starts the server and opens http://127.0.0.1:7457
    When it finishes you see the diff and decide what to do with it.
 4. Open the Lanes page to see how much quota each agent has left.
 
+## Run it in the background
+
+A systemd user unit is in `packaging/systemd/faztudo.service`:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp packaging/systemd/faztudo.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now faztudo
+journalctl --user -u faztudo -f     # logs
+```
+
+Restarting the service does not kill agent runs in progress; the daemon
+reattaches to them when it starts again. Adjust `PATH` in the unit if your
+agent CLIs live elsewhere.
+
 ## Build from source
 
 See [CONTRIBUTING.md](https://github.com/thiagodefreitas/faztudo/blob/main/CONTRIBUTING.md).
