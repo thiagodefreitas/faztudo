@@ -1,0 +1,487 @@
+package store
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/oklog/ulid/v2"
+	"github.com/thiagodefreitas/faztudo/internal/domain"
+	"github.com/thiagodefreitas/faztudo/internal/events"
+	_ "modernc.org/sqlite"
+)
+
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+var ErrNotFound = errors.New("not found")
+
+type Store struct{ db *sql.DB }
+
+func Open(path string) (*Store, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := file.Stat()
+	file.Close()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() || fi.Mode().Perm()&0077 != 0 {
+		return nil, errors.New("database must be a private regular file")
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000", "PRAGMA foreign_keys=ON"} {
+		if _, err = db.Exec(q); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	migration, err := migrations.ReadFile("migrations/001.sql")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec(string(migration)); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return &Store{db: db}, nil
+}
+func (s *Store) Close() error { return s.db.Close() }
+func NewID() string           { return ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String() }
+
+func (s *Store) Append(ctx context.Context, d events.Draft) (events.Event, error) {
+	if d.Type == "" || d.Actor == "" {
+		return events.Event{}, errors.New("type and actor required")
+	}
+	payload, err := json.Marshal(d.Payload)
+	if err != nil {
+		return events.Event{}, err
+	}
+	if !json.Valid(payload) {
+		return events.Event{}, errors.New("invalid payload")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return events.Event{}, err
+	}
+	defer tx.Rollback()
+	if d.IdempotencyKey != "" {
+		e, err := eventByKey(ctx, tx, d.IdempotencyKey)
+		if err == nil {
+			return e, tx.Commit()
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return events.Event{}, err
+		}
+	}
+	version := d.Version
+	if version == 0 {
+		version = 1
+	}
+	e := events.Event{ID: NewID(), Type: d.Type, Version: version, Actor: d.Actor, ChannelID: d.ChannelID, IdempotencyKey: d.IdempotencyKey, Payload: payload, TS: time.Now().UTC()}
+	var key any
+	if d.IdempotencyKey != "" {
+		key = d.IdempotencyKey
+	}
+	res, err := tx.ExecContext(ctx, "INSERT INTO events(id,version,type,actor,channel_id,idempotency_key,payload,ts) VALUES(?,?,?,?,?,?,?,?)", e.ID, e.Version, e.Type, e.Actor, e.ChannelID, key, e.Payload, e.TS.Format(time.RFC3339Nano))
+	if err != nil {
+		return events.Event{}, err
+	}
+	e.Seq, err = res.LastInsertId()
+	if err != nil {
+		return events.Event{}, err
+	}
+	if err = project(ctx, tx, e); err != nil {
+		return events.Event{}, err
+	}
+	return e, tx.Commit()
+}
+func eventByKey(ctx context.Context, tx *sql.Tx, key string) (events.Event, error) {
+	return scanEvent(tx.QueryRowContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE idempotency_key=?", key))
+}
+func scanEvent(row interface{ Scan(...any) error }) (events.Event, error) {
+	var e events.Event
+	var ts string
+	err := row.Scan(&e.Seq, &e.ID, &e.Version, &e.Type, &e.Actor, &e.ChannelID, &e.IdempotencyKey, &e.Payload, &ts)
+	if err != nil {
+		return e, err
+	}
+	e.TS, err = time.Parse(time.RFC3339Nano, ts)
+	return e, err
+}
+func (s *Store) Event(ctx context.Context, id string) (events.Event, error) {
+	e, err := scanEvent(s.db.QueryRowContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, ErrNotFound
+	}
+	return e, err
+}
+func (s *Store) EventsAfter(ctx context.Context, after int64, limit int) ([]events.Event, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE seq>? ORDER BY seq LIMIT ?", after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []events.Event{}
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+func (s *Store) Subscribe(ctx context.Context, afterSeq int64) (<-chan events.Event, error) {
+	if afterSeq < 0 {
+		return nil, errors.New("negative cursor")
+	}
+	ch := make(chan events.Event, 32)
+	go func() {
+		defer close(ch)
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			batch, err := s.EventsAfter(ctx, afterSeq, 200)
+			if err != nil {
+				return
+			}
+			for _, e := range batch {
+				select {
+				case ch <- e:
+					afterSeq = e.Seq
+				case <-ctx.Done():
+					return
+				}
+			}
+			if len(batch) == 200 {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return ch, nil
+}
+func (s *Store) Rebuild(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes"} {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+			return err
+		}
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events ORDER BY seq")
+	if err != nil {
+		return err
+	}
+	var all []events.Event
+	for rows.Next() {
+		e, eerr := scanEvent(rows)
+		if eerr != nil {
+			rows.Close()
+			return eerr
+		}
+		all = append(all, e)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, e := range all {
+		if err = project(ctx, tx, e); err != nil {
+			return fmt.Errorf("project seq %d: %w", e.Seq, err)
+		}
+	}
+	return tx.Commit()
+}
+func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
+	switch e.Type {
+	case events.MemberUpdated:
+		var m domain.Member
+		if err := json.Unmarshal(e.Payload, &m); err != nil {
+			return err
+		}
+		if m.ID == "" || m.Handle == "" {
+			return errors.New("member id and handle required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO members(id,handle,data) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET handle=excluded.handle,data=excluded.data", m.ID, m.Handle, e.Payload)
+		return err
+	case events.ChannelCreated, events.ChannelUpdated:
+		var c domain.Channel
+		if err := json.Unmarshal(e.Payload, &c); err != nil {
+			return err
+		}
+		if c.ID == "" || c.Name == "" {
+			return errors.New("channel id and name required")
+		}
+		c.LastSeq = e.Seq
+		if c.MemberIDs == nil {
+			c.MemberIDs = []string{}
+		}
+		b, _ := json.Marshal(c)
+		_, err := tx.ExecContext(ctx, "INSERT INTO channels(id,name,data) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,data=excluded.data", c.ID, c.Name, b)
+		if err != nil {
+			return err
+		}
+		for _, id := range c.MemberIDs {
+			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO unread(channel_id,member_id) VALUES(?,?)", c.ID, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	case events.MessagePosted:
+		var m domain.Message
+		if err := json.Unmarshal(e.Payload, &m); err != nil {
+			return err
+		}
+		if m.ID == "" || m.ChannelID == "" {
+			return errors.New("message id and channel required")
+		}
+		if m.CreatedAt.IsZero() {
+			m.CreatedAt = e.TS
+		}
+		if m.Mentions == nil {
+			m.Mentions = []string{}
+		}
+		b, _ := json.Marshal(m)
+		_, err := tx.ExecContext(ctx, "INSERT INTO messages(id,channel_id,thread_id,created_at,data) VALUES(?,?,?,?,?)", m.ID, m.ChannelID, m.ThreadID, m.CreatedAt.Format(time.RFC3339Nano), b)
+		if err != nil {
+			return err
+		}
+		if m.ThreadID != "" {
+			if _, err = tx.ExecContext(ctx, "UPDATE messages SET data=json_set(data,'$.reply_count',COALESCE(json_extract(data,'$.reply_count'),0)+1) WHERE id=?", m.ThreadID); err != nil {
+				return err
+			}
+		}
+		return updateChannelSeq(ctx, tx, m.ChannelID, e.Seq)
+	case events.MessageEdited:
+		var m struct {
+			ID       string    `json:"id"`
+			Body     string    `json:"body"`
+			EditedAt time.Time `json:"edited_at"`
+		}
+		if err := json.Unmarshal(e.Payload, &m); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE messages SET data=json_set(data,'$.body',?,'$.edited_at',?) WHERE id=?", m.Body, m.EditedAt.Format(time.RFC3339Nano), m.ID)
+		return err
+	case events.RunCreated, events.RunUpdated:
+		var r domain.Run
+		if err := json.Unmarshal(e.Payload, &r); err != nil {
+			return err
+		}
+		if r.ID == "" {
+			return errors.New("run id required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO runs(id,channel_id,state,data) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET channel_id=excluded.channel_id,state=excluded.state,data=excluded.data", r.ID, r.ChannelID, r.State, e.Payload)
+		return err
+	case events.ApprovalRequested, events.ApprovalResolved:
+		var a domain.Approval
+		if err := json.Unmarshal(e.Payload, &a); err != nil {
+			return err
+		}
+		if a.ID == "" {
+			return errors.New("approval id required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO approvals(id,state,data) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,data=excluded.data", a.ID, a.State, e.Payload)
+		return err
+	case events.LaneUpdated:
+		var l domain.Lane
+		if err := json.Unmarshal(e.Payload, &l); err != nil {
+			return err
+		}
+		if l.ID == "" {
+			return errors.New("lane id required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO lanes(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", l.ID, e.Payload)
+		return err
+	case events.Type("channel.read"):
+		var read struct {
+			ChannelID string `json:"channel_id"`
+			MemberID  string `json:"member_id"`
+			Seq       int64  `json:"seq"`
+		}
+		if err := json.Unmarshal(e.Payload, &read); err != nil {
+			return err
+		}
+		if read.ChannelID == "" || read.MemberID == "" || read.Seq < 0 {
+			return errors.New("invalid read cursor")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO unread(channel_id,member_id,last_read_seq) VALUES(?,?,?) ON CONFLICT(channel_id,member_id) DO UPDATE SET last_read_seq=max(last_read_seq,excluded.last_read_seq)", read.ChannelID, read.MemberID, read.Seq)
+		return err
+	case events.PresenceChanged:
+		var p struct {
+			MemberID string          `json:"member_id"`
+			Presence domain.Presence `json:"presence"`
+		}
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE members SET data=json_set(data,'$.presence',?) WHERE id=?", p.Presence, p.MemberID)
+		return err
+	default:
+		return nil
+	}
+}
+func updateChannelSeq(ctx context.Context, tx *sql.Tx, id string, seq int64) error {
+	_, err := tx.ExecContext(ctx, "UPDATE channels SET data=json_set(data,'$.last_seq',?) WHERE id=?", seq, id)
+	return err
+}
+func (s *Store) Read(ctx context.Context, channelID, memberID string, seq int64) error {
+	_, err := s.Append(ctx, events.Draft{Type: events.Type("channel.read"), Actor: events.Human(memberID), ChannelID: channelID, Payload: struct {
+		ChannelID string `json:"channel_id"`
+		MemberID  string `json:"member_id"`
+		Seq       int64  `json:"seq"`
+	}{channelID, memberID, seq}})
+	return err
+}
+func queryJSON[T any](ctx context.Context, db *sql.DB, q string, args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []T{}
+	for rows.Next() {
+		var raw []byte
+		if err = rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var v T
+		if err = json.Unmarshal(raw, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func oneJSON[T any](ctx context.Context, db *sql.DB, q string, args ...any) (T, error) {
+	var v T
+	var raw []byte
+	err := db.QueryRowContext(ctx, q, args...).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return v, ErrNotFound
+	}
+	if err != nil {
+		return v, err
+	}
+	err = json.Unmarshal(raw, &v)
+	return v, err
+}
+func (s *Store) Members(ctx context.Context) ([]domain.Member, error) {
+	return queryJSON[domain.Member](ctx, s.db, "SELECT data FROM members ORDER BY handle")
+}
+func (s *Store) Member(ctx context.Context, id string) (domain.Member, error) {
+	return oneJSON[domain.Member](ctx, s.db, "SELECT data FROM members WHERE id=?", id)
+}
+func (s *Store) MemberByHandle(ctx context.Context, handle string) (domain.Member, error) {
+	return oneJSON[domain.Member](ctx, s.db, "SELECT data FROM members WHERE handle=?", handle)
+}
+func (s *Store) Channels(ctx context.Context) ([]domain.Channel, error) {
+	return queryJSON[domain.Channel](ctx, s.db, "SELECT data FROM channels ORDER BY name")
+}
+func (s *Store) Channel(ctx context.Context, id string) (domain.Channel, error) {
+	return oneJSON[domain.Channel](ctx, s.db, "SELECT data FROM channels WHERE id=?", id)
+}
+func (s *Store) Message(ctx context.Context, id string) (domain.Message, error) {
+	return oneJSON[domain.Message](ctx, s.db, "SELECT data FROM messages WHERE id=?", id)
+}
+func (s *Store) Messages(ctx context.Context, channelID, before string, limit int) ([]domain.Message, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	cutoff := "9999"
+	cutoffID := "9999"
+	if before != "" {
+		m, err := s.Message(ctx, before)
+		if err != nil {
+			return nil, err
+		}
+		if m.ChannelID != channelID {
+			return nil, ErrNotFound
+		}
+		cutoff = m.CreatedAt.Format(time.RFC3339Nano)
+		cutoffID = m.ID
+	}
+	return queryJSON[domain.Message](ctx, s.db, "SELECT data FROM (SELECT data,created_at,id FROM messages WHERE channel_id=? AND (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT ?) ORDER BY created_at,id", channelID, cutoff, cutoff, cutoffID, limit)
+}
+func (s *Store) Thread(ctx context.Context, id string) ([]domain.Message, error) {
+	return queryJSON[domain.Message](ctx, s.db, "SELECT data FROM messages WHERE id=? OR thread_id=? ORDER BY created_at,id", id, id)
+}
+func (s *Store) Runs(ctx context.Context, channelID, state string) ([]domain.Run, error) {
+	return queryJSON[domain.Run](ctx, s.db, "SELECT data FROM runs WHERE (?='' OR channel_id=?) AND (?='' OR state=?) ORDER BY id", channelID, channelID, state, state)
+}
+func (s *Store) Run(ctx context.Context, id string) (domain.Run, error) {
+	return oneJSON[domain.Run](ctx, s.db, "SELECT data FROM runs WHERE id=?", id)
+}
+func (s *Store) Approvals(ctx context.Context, state string) ([]domain.Approval, error) {
+	return queryJSON[domain.Approval](ctx, s.db, "SELECT data FROM approvals WHERE (?='' OR state=?) ORDER BY id", state, state)
+}
+func (s *Store) Approval(ctx context.Context, id string) (domain.Approval, error) {
+	return oneJSON[domain.Approval](ctx, s.db, "SELECT data FROM approvals WHERE id=?", id)
+}
+func (s *Store) Lanes(ctx context.Context) ([]domain.Lane, error) {
+	return queryJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes ORDER BY id")
+}
+func (s *Store) Lane(ctx context.Context, id string) (domain.Lane, error) {
+	return oneJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes WHERE id=?", id)
+}
+func (s *Store) RunOutput(ctx context.Context, id string, after int) ([]events.RunOutputPayload, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT payload FROM events WHERE type=? AND json_extract(payload,'$.run_id')=? AND CAST(json_extract(payload,'$.seq') AS INTEGER)>? ORDER BY seq", events.RunOutput, id, after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []events.RunOutputPayload{}
+	for rows.Next() {
+		var b []byte
+		if err = rows.Scan(&b); err != nil {
+			return nil, err
+		}
+		var p events.RunOutputPayload
+		if err = json.Unmarshal(b, &p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+func (s *Store) Unread(ctx context.Context, channelID, memberID string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events e LEFT JOIN unread u ON u.channel_id=e.channel_id AND u.member_id=? WHERE e.channel_id=? AND e.type=? AND e.seq>COALESCE(u.last_read_seq,0)", memberID, channelID, events.MessagePosted).Scan(&n)
+	return n, err
+}
+
+var _ events.Appender = (*Store)(nil)
+var _ events.Subscriber = (*Store)(nil)

@@ -70,3 +70,6 @@ desktop/src-tauri/target/
 *~
 .DS_Store
 Thumbs.db
+
+# Source package, not runtime secrets
+!internal/secrets/
