@@ -31,6 +31,34 @@ describe("ApprovalCard", () => {
     expect(onResolve).toHaveBeenCalledWith("push")
   })
 
+  it("sends the edited commit message with Merge only", async () => {
+    const user = userEvent.setup()
+    const onResolve = vi.fn()
+    const write: Approval = {
+      ...approval,
+      title: "Choose what to do with branch fz/run-demo",
+      commit_message: "Add the thing\n\nfaztudo run run-demo",
+      options: [
+        { key: "merge", label: "Merge", style: "primary" },
+        { key: "keep", label: "Keep" },
+      ],
+    }
+    render(<ApprovalCard approval={write} onResolve={onResolve} />)
+    const box = screen.getByRole("textbox", { name: "Commit message" })
+    expect(box).toHaveValue("Add the thing\n\nfaztudo run run-demo")
+    await user.clear(box)
+    await user.type(box, "Fix the thing")
+    await user.click(screen.getByRole("button", { name: /Merge/ }))
+    expect(onResolve).toHaveBeenLastCalledWith("merge", "Fix the thing")
+    await user.click(screen.getByRole("button", { name: /Keep/ }))
+    expect(onResolve).toHaveBeenLastCalledWith("keep")
+  })
+
+  it("shows no message box without a proposal", () => {
+    render(<ApprovalCard approval={approval} onResolve={() => undefined} />)
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
+
   it("shows the chosen option after it is resolved", () => {
     render(
       <ApprovalCard

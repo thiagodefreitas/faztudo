@@ -177,6 +177,9 @@ type Approval struct {
 	Options     []ApprovalOption    `json:"options"`
 	State       ApprovalState       `json:"state"`
 	Resolution  *ApprovalResolution `json:"resolution,omitempty"`
+
+	// CommitMessage is the proposed message for a write run's Merge.
+	CommitMessage string `json:"commit_message,omitempty"`
 }
 
 type LaneHealth string

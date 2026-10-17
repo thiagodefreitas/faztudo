@@ -229,7 +229,7 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		return err
 	}
 	if mode == domain.RunWrite {
-		prompt += "\n\nDo not commit changes in the worktree."
+		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
 	}
 	timeout, err := time.ParseDuration(a.Config.Runs.DefaultTimeout)
 	if err != nil {
@@ -270,8 +270,12 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		run.FailureReason = err.Error()
 		_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run})
 	}
+	var proposal string
 	if run.StartedAt != nil {
 		answer := adapters.CleanAnswer(adapter, a.answer(run.ID))
+		if mode == domain.RunWrite {
+			answer, proposal = splitCommit(answer)
+		}
 		if err != nil {
 			if answer != "" {
 				answer = "Run failed: " + run.FailureReason + "\n\n" + answer
@@ -291,7 +295,7 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		return fmt.Errorf("run %s failed: %w", run.ID, err)
 	}
 	if mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
-		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: channel.ID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}
+		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: channel.ID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", CommitMessage: buildCommitMessage(proposal, m.Body, run.ID), State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}
 		if _, err := a.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: channel.ID, Payload: approval}); err != nil {
 			return err
 		}
@@ -386,7 +390,7 @@ func (a *App) notice(ctx context.Context, channel, level, message string) {
 	_, _ = a.Store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: channel, Payload: events.NoticePayload{Level: level, Text: message}})
 }
 
-func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, option string) (string, error) {
+func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	run, err := a.Store.Run(ctx, approval.RunID)
@@ -426,7 +430,14 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 			// A normal commit, not plumbing, so the repository's own hooks
 			// (secret scanning, message rules) see agent changes before they
 			// land. The author is the human's Git identity: they approved it.
-			if err := gitHumanCommit(ctx, w.Path, a.commitMessage(ctx, run)); err != nil {
+			message := strings.TrimSpace(commitMessage)
+			if message == "" {
+				message = strings.TrimSpace(approval.CommitMessage)
+			}
+			if message == "" {
+				message = a.commitMessage(ctx, run)
+			}
+			if err := gitHumanCommit(ctx, w.Path, message); err != nil {
 				return "", fmt.Errorf("committing run changes (repository hooks may have refused them): %w", err)
 			}
 		}
@@ -453,35 +464,89 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 	return outcome, err
 }
 
-// commitMessage builds a subject from the request that started the run, so
-// the history says what was asked for rather than an internal id.
+// commitMessage is the message for a run whose agent proposed none.
 func (a *App) commitMessage(ctx context.Context, run domain.Run) string {
-	subject := "Apply changes from faztudo run " + run.ID
+	trigger := ""
 	if m, err := a.Store.Message(ctx, run.TriggerMessageID); err == nil {
-		line := strings.TrimSpace(strings.SplitN(m.Body, "\n", 2)[0])
-		line = strings.TrimSpace(mentionPrefix.ReplaceAllString(line, ""))
-		if line != "" {
-			words := strings.Fields(line)
-			line = ""
-			for _, word := range words {
-				candidate := word
-				if line != "" {
-					candidate = line + " " + word
-				}
-				if len(candidate) > 72 {
-					break
-				}
-				line = candidate
-			}
-			if line != "" {
-				subject = strings.ToUpper(line[:1]) + line[1:]
-			}
-		}
+		trigger = m.Body
 	}
-	return subject + "\n\nfaztudo run " + run.ID
+	return buildCommitMessage("", trigger, run.ID)
 }
 
-var mentionPrefix = regexp.MustCompile(`^(@[A-Za-z0-9_-]+[\s,:]*)+`)
+// buildCommitMessage turns the agent's proposal (a subject line, then an
+// optional body) into a full message and appends a Closes line for each issue
+// the request mentioned. With no proposal the subject comes from the request
+// that started the run, so the history says what was asked for rather than an
+// internal id.
+func buildCommitMessage(proposal, trigger, runID string) string {
+	subject, body, _ := strings.Cut(strings.TrimSpace(proposal), "\n")
+	subject = fitSubject(subject)
+	if subject == "" {
+		line := strings.TrimSpace(strings.SplitN(trigger, "\n", 2)[0])
+		subject = fitSubject(mentionPrefix.ReplaceAllString(line, ""))
+		if subject == "" {
+			subject = "Apply changes from faztudo run " + runID
+		} else {
+			subject = strings.ToUpper(subject[:1]) + subject[1:]
+		}
+	}
+	msg := subject
+	if body = strings.TrimSpace(attributionTrailer.ReplaceAllString(body, "")); body != "" {
+		msg += "\n\n" + body
+	}
+	seen := map[string]bool{}
+	for _, m := range closesRef.FindAllStringSubmatch(proposal, -1) {
+		seen[m[1]] = true
+	}
+	var closes string
+	for _, m := range issueRef.FindAllStringSubmatch(trigger, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			closes += "\nCloses #" + m[1]
+		}
+	}
+	if closes != "" {
+		msg += "\n" + closes
+	}
+	return msg + "\n\nfaztudo run " + runID
+}
+
+// fitSubject cuts a line at a word boundary so it fits in 72 bytes.
+func fitSubject(line string) string {
+	out := ""
+	for _, word := range strings.Fields(line) {
+		candidate := word
+		if out != "" {
+			candidate = out + " " + word
+		}
+		if len(candidate) > 72 {
+			break
+		}
+		out = candidate
+	}
+	return out
+}
+
+// splitCommit cuts the last COMMIT: block (that line and everything after it)
+// out of an answer and returns it as the proposed message.
+func splitCommit(answer string) (reply, proposal string) {
+	locs := commitLine.FindAllStringIndex(answer, -1)
+	if len(locs) == 0 {
+		return answer, ""
+	}
+	last := locs[len(locs)-1]
+	return strings.TrimSpace(answer[:last[0]]), strings.TrimSpace(answer[last[1]:])
+}
+
+var (
+	mentionPrefix = regexp.MustCompile(`^(@[A-Za-z0-9_-]+[\s,:]*)+`)
+	commitLine    = regexp.MustCompile(`(?m)^COMMIT:[ \t]*`)
+	issueRef      = regexp.MustCompile(`#(\d+)\b`)
+	closesRef     = regexp.MustCompile(`(?i)\bcloses #(\d+)`)
+	// Tool attribution lines are dropped from agent proposals: the human
+	// who approves the merge is the author (docs/adr/0003).
+	attributionTrailer = regexp.MustCompile(`(?im)^\s*(co-authored-by|claude-session|generated-by|assisted-by):.*$\n?`)
+)
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)

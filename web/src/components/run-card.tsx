@@ -84,9 +84,10 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
           qc.setQueryData<Run[]>(qk.runs, (list = []) => replaceById(list, next))
         })
       }}
-      onResolve={(option) => {
+      onResolve={(option, commitMessage) => {
         if (!approval) return
-        void api.resolveApproval(approval.id, { option }).then((next) => {
+        const body = commitMessage ? { option, commit_message: commitMessage } : { option }
+        void api.resolveApproval(approval.id, body).then((next) => {
           qc.setQueryData<Approval[]>(qk.approvals, (list = []) => replaceById(list, next))
         })
       }}
@@ -117,7 +118,7 @@ export function RunCardView({
   onViewDiff: () => void
   onCancel: () => void
   onRetry: (laneId: string) => void
-  onResolve: (option: string) => void
+  onResolve: (option: string, commitMessage?: string) => void
 }) {
   const live = LIVE.has(run.state)
   const [outputOpen, setOutputOpen] = useState(live)

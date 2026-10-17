@@ -117,6 +117,7 @@ export interface Approval {
   requested_by: ID
   title: string
   detail: string
+  commit_message?: string
   options: ApprovalOption[]
   state: ApprovalState
   resolution?: ApprovalResolution
@@ -257,6 +258,7 @@ export interface RetryBody {
 export interface ResolveBody {
   option: string
   note?: string
+  commit_message?: string
 }
 
 export interface LanePatch {

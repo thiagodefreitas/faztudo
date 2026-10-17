@@ -94,6 +94,7 @@ interface Approval {
   requested_by: ID;         // member id, agent or system
   title: string;            // "Push branch fz/run-01J... to origin"
   detail: string;           // markdown, may contain a diff or command
+  commit_message?: string;  // write runs: proposed Merge commit message
   options: { key: string; label: string; style?: "primary" | "danger" }[];
   state: "pending" | "resolved" | "expired";
   resolution?: { option: string; by: ID; at: string; note?: string };
@@ -143,7 +144,7 @@ interface Lane {
 | POST | `/api/v1/runs/{id}/cancel` | cancel a run |
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
-| POST | `/api/v1/approvals/{id}/resolve` | `{option, note?}`; humans only |
+| POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message |
 | GET | `/api/v1/lanes` | all lanes |
 | PATCH | `/api/v1/lanes/{id}` | set `{capacity?, health_override?, manual_window?}` |
 | POST | `/api/v1/lanes/{id}/probe` | refresh this lane's usage now |

@@ -425,7 +425,7 @@ func TestWriteApprovalKeepAndDiscard(t *testing.T) {
 			t.Fatal(err)
 		}
 		approval := domain.Approval{ID: store.NewID(), RunID: id, ChannelID: ch.ID, State: domain.ApprovalPending}
-		if _, err := a.ResolveApproval(ctx, approval, option); err != nil {
+		if _, err := a.ResolveApproval(ctx, approval, option, ""); err != nil {
 			t.Fatalf("%s: %v", option, err)
 		}
 		_, statErr := os.Stat(w.Path)

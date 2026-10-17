@@ -33,7 +33,7 @@ type API struct {
 	Store            *store.Store
 	HumanID, Version string
 	Trigger          RunTrigger
-	ResolveApproval  func(context.Context, domain.Approval, string) (string, error)
+	ResolveApproval  func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
 	ReadDiff         func(string) ([]byte, error)
 	CancelRun        func(context.Context, string) error
 	RetryRun         func(context.Context, string, string) error
@@ -540,8 +540,9 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Option string `json:"option"`
-		Note   string `json:"note"`
+		Option        string `json:"option"`
+		Note          string `json:"note"`
+		CommitMessage string `json:"commit_message"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -557,7 +558,7 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.ResolveApproval != nil && v.RunID != "" {
-		outcome, err := a.ResolveApproval(r.Context(), v, req.Option)
+		outcome, err := a.ResolveApproval(r.Context(), v, req.Option, req.CommitMessage)
 		if err != nil {
 			fail(w, 409, "conflict", err.Error())
 			return

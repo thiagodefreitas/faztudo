@@ -371,7 +371,7 @@ func TestConcurrentApprovalOnlyOneResolution(t *testing.T) {
 	h := New(s, human.ID, "test")
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
-	h.ResolveApproval = func(context.Context, domain.Approval, string) (string, error) {
+	h.ResolveApproval = func(context.Context, domain.Approval, string, string) (string, error) {
 		entered <- struct{}{}
 		<-release
 		return "synthetic outcome", nil
