@@ -183,7 +183,13 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		a.notice(ctx, channel.ID, "warn", "Write runs need a channel repo_path. Set it with PATCH /api/v1/channels/"+channel.ID+".")
 		return nil
 	}
-	lane, skipped, err := a.Registry.Pick(agent.Handle, override)
+	lane, skipped, err := a.Registry.WaitPick(ctx, agent.Handle, override, func(busy []lanes.Skipped) {
+		ids := make([]string, 0, len(busy))
+		for _, b := range busy {
+			ids = append(ids, b.ID)
+		}
+		a.notice(ctx, channel.ID, "info", fmt.Sprintf("@%s is queued: %s busy; it starts when a lane frees up.", agent.Handle, strings.Join(ids, ", ")))
+	})
 	if err != nil {
 		return err
 	}

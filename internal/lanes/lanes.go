@@ -98,6 +98,48 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 	}
 	return domain.Lane{}, skipped, errors.New("no healthy lane with free capacity")
 }
+
+// ErrBusy means every usable lane in the chain is at capacity: the work
+// should wait, not fail.
+var ErrBusy = errors.New("every usable lane is busy")
+
+// WaitPick is Pick that waits while the only obstacle is capacity. It
+// calls onWait once, the first time it has to wait, so the caller can tell
+// the channel the request is queued. Exhausted or unavailable lanes still
+// fail at once.
+func (r *Registry) WaitPick(ctx context.Context, persona, override string, onWait func([]Skipped)) (domain.Lane, []Skipped, error) {
+	waited := false
+	for {
+		r.mu.Lock()
+		changed := r.changed
+		r.mu.Unlock()
+		lane, skipped, err := r.Pick(persona, override)
+		if err == nil || !onlyBusy(skipped) {
+			return lane, skipped, err
+		}
+		if !waited && onWait != nil {
+			onWait(skipped)
+		}
+		waited = true
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return domain.Lane{}, skipped, ctx.Err()
+		}
+	}
+}
+
+func onlyBusy(skipped []Skipped) bool {
+	busy := false
+	for _, s := range skipped {
+		if s.Reason != "at capacity" {
+			continue
+		}
+		busy = true
+	}
+	return busy
+}
+
 func (r *Registry) Acquire(id string) error {
 	r.mu.Lock()
 	l := r.lanes[id]

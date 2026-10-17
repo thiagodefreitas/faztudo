@@ -2,7 +2,10 @@ package lanes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
@@ -56,5 +59,59 @@ func TestOverride(t *testing.T) {
 	}
 	if _, _, err := r.Pick("p", "missing"); err == nil {
 		t.Fatal("accepted unknown override")
+	}
+}
+
+func TestWaitPickQueuesWhileBusy(t *testing.T) {
+	r, err := New([]LaneConfig{{ID: "a", CLI: "codex", Capacity: 1}}, []PersonaConfig{{Handle: "coder", Lanes: []string{"a"}}}, &eventstest.Appender{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Acquire("a"); err != nil {
+		t.Fatal(err)
+	}
+	notified := make(chan []Skipped, 1)
+	got := make(chan error, 1)
+	go func() {
+		lane, _, err := r.WaitPick(context.Background(), "coder", "", func(s []Skipped) { notified <- s })
+		if err == nil && lane.ID != "a" {
+			err = fmt.Errorf("picked %s", lane.ID)
+		}
+		got <- err
+	}()
+	select {
+	case s := <-notified:
+		if len(s) != 1 || s[0].Reason != "at capacity" {
+			t.Fatalf("notice for %+v", s)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no queued notice")
+	}
+	select {
+	case err := <-got:
+		t.Fatalf("returned while the lane was busy: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	r.Release("a")
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not wake after release")
+	}
+}
+
+func TestWaitPickFailsFastWhenExhausted(t *testing.T) {
+	r, err := New([]LaneConfig{{ID: "a", CLI: "codex", Capacity: 1}}, []PersonaConfig{{Handle: "coder", Lanes: []string{"a"}}}, &eventstest.Appender{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Restore(domain.Lane{ID: "a", CLI: "codex", Capacity: 1, Health: domain.LaneExhausted, HealthReason: "quota"})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, _, err := r.WaitPick(ctx, "coder", "", nil); err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want immediate failure, got %v", err)
 	}
 }
