@@ -28,7 +28,7 @@ function buildSidebar() {
     ...group('Concepts', ['vision', 'architecture', 'organization']),
     ...group('Reference', ['api', 'configuration']),
     ...dirGroup('Decisions', 'adr'),
-    ...group('Project', ['roadmap', 'contributing']),
+    ...group('Project', ['roadmap', 'versioning', 'contributing']),
   ];
 }
 

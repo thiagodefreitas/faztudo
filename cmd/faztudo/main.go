@@ -23,9 +23,8 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
+	"github.com/thiagodefreitas/faztudo/internal/version"
 )
-
-var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -39,8 +38,11 @@ func run(args []string) error {
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
-	case "version", "--version":
-		fmt.Println("faztudo", version)
+	case "version", "--version", "-v":
+		if len(args) > 1 && args[1] == "--json" {
+			return json.NewEncoder(os.Stdout).Encode(version.Get())
+		}
+		fmt.Println(version.Get())
 		return nil
 	case "init":
 		return config.WriteDefaults(p)
@@ -95,7 +97,7 @@ func run(args []string) error {
 		if err := application.Start(context.Background()); err != nil {
 			return err
 		}
-		handler := api.New(s, humanID, version)
+		handler := api.New(s, humanID, version.Get().Version)
 		application.Bind(handler)
 		server := &http.Server{Addr: c.Server.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 		logger.Info("serving", "listen", c.Server.Listen)

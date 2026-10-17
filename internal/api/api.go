@@ -46,7 +46,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) routes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, 200, map[string]any{"ok": true, "version": a.Version})
+		respond(w, 200, map[string]any{"ok": true, "version": a.Version, "api": "v1"})
 	})
 	m.Handle("/api/v1/", a.authenticated())
 }

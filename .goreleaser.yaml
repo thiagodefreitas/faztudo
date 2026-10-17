@@ -1,0 +1,49 @@
+# Release builds. Triggered by pushing a tag vX.Y.Z (see docs/versioning.md).
+version: 2
+
+project_name: faztudo
+
+before:
+  hooks:
+    # The web UI is embedded; build it first once web/ exists.
+    - sh -c 'if [ -f web/package.json ]; then npm --prefix web ci && npm --prefix web run build; fi'
+
+builds:
+  - id: faztudo
+    main: ./cmd/faztudo
+    binary: faztudo
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/thiagodefreitas/faztudo/internal/version.Version={{ .Version }}
+      - -X github.com/thiagodefreitas/faztudo/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/thiagodefreitas/faztudo/internal/version.Date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, CHANGELOG.md]
+
+nfpms:
+  - package_name: faztudo
+    vendor: faztudo contributors
+    homepage: https://github.com/thiagodefreitas/faztudo
+    maintainer: Thiago de Freitas
+    description: Chat workspace for you and the agent CLIs on your machine.
+    license: MIT
+    formats: [deb, rpm]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  # Release notes come from CHANGELOG.md, written by people.
+  disable: true
+
+release:
+  draft: true
+  prerelease: auto

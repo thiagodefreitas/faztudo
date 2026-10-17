@@ -2,7 +2,13 @@
 SHELL := /bin/bash
 GO ?= go
 
-.PHONY: help setup check lint lint-prose authorship secrets test site
+.PHONY: help setup check lint lint-prose authorship secrets test site build release-check
+
+VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+PKG     := github.com/thiagodefreitas/faztudo/internal/version
+LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 
 help: ## show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -29,3 +35,10 @@ test: ## Go and web tests
 
 site: ## build the documentation site
 	npm --prefix site run build
+
+build: ## build bin/faztudo with version information
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/faztudo ./cmd/faztudo
+	@bin/faztudo version
+
+release-check: ## validate the release configuration without publishing
+	goreleaser check
