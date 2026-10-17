@@ -44,6 +44,30 @@ Director (you)
 - A **channel** belongs to at most one project. A department can also have its
   own channel for its internal work.
 
+## Cross-functional projects
+
+Real work rarely stays inside one department, so the organization is a
+matrix. A specialist has one home department (where its standing
+instructions and reviews come from) and can work on any number of projects.
+
+- A project can have a **project team**: a hand-picked set of specialists
+  from several departments, plus whole departments if useful. A launch might
+  take the Architect and Coder from Engineering, the Writer from Product and
+  Release from Operations.
+- A project has its own **project lead**, which can be any specialist, a
+  department lead, or the Chief of Staff. `@<project>` (for example
+  `@launch`) goes to the project lead, who splits the work across the project
+  team the same way a department lead does.
+- **Working groups** are small, named, temporary teams inside a project
+  (for example `@perf-squad` with Coder and Tester) for a focused piece of
+  work. They dissolve when their thread is closed.
+- Departments still answer for their people: a department lead can see what
+  its specialists are doing across all projects, and a specialist's lane
+  budget is shared across its projects, so one project cannot silently use
+  up another's quota.
+- The Director can be represented per project by a human **project owner**
+  later, when several people share a workspace.
+
 ## How work moves
 
 1. `@coder fix the flaky test` goes straight to that specialist.
@@ -92,6 +116,16 @@ name = "faztudo"
 repo_path = "~/code/faztudo"
 channels = ["faztudo-dev", "faztudo-release"]
 assigned = ["engineering", "writer"]
+
+[[project]]
+name = "launch"
+lead = "chief"                 # any specialist, a department lead, or the Chief of Staff
+channels = ["launch"]
+team = ["architect", "coder", "writer", "release"]   # drawn from three departments
+
+[[project.group]]
+handle = "perf-squad"
+members = ["coder", "tester"]
 
 [[persona]]
 handle = "reviewer"
