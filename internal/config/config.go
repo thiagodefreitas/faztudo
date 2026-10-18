@@ -30,8 +30,9 @@ func PathsFromEnv() Paths {
 }
 
 type Server struct {
-	Listen      string `toml:"listen"`
-	OpenBrowser bool   `toml:"open_browser"`
+	Listen       string   `toml:"listen"`
+	OpenBrowser  bool     `toml:"open_browser"`
+	AllowedHosts []string `toml:"allowed_hosts"`
 }
 type LAN struct {
 	Enabled bool `toml:"enabled"`

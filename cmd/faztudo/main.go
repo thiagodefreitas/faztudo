@@ -101,6 +101,7 @@ func run(args []string) error {
 			return err
 		}
 		handler := api.New(s, humanID, version.Get().Version)
+		handler.AllowedHosts = c.Server.AllowedHosts
 		application.Bind(handler)
 		server := &http.Server{Addr: c.Server.Listen, Handler: webui.Mount(handler), ReadHeaderTimeout: 5 * time.Second}
 		listener, err := net.Listen("tcp", c.Server.Listen)

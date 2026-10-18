@@ -45,6 +45,20 @@ Restarting the service does not kill agent runs in progress; the daemon
 reattaches to them when it starts again. Adjust `PATH` in the unit if your
 agent CLIs live elsewhere.
 
+## Use it from your phone today (Tailscale)
+
+Until built-in LAN mode lands, Tailscale gives you an HTTPS address that
+only your own devices can open:
+
+1. Log in to Tailscale on this machine and on the phone (same account).
+2. Enable Serve for your tailnet when Tailscale asks, and allow your user
+   to control it once: `sudo tailscale set --operator=$USER`.
+3. `tailscale serve --bg 7457`
+4. Add the machine's Tailscale name to `~/.config/faztudo/config.toml`:
+   `allowed_hosts = ["mypc.tailnet-name.ts.net"]` under `[server]`, then
+   restart faztudo.
+5. Open `https://mypc.tailnet-name.ts.net` on the phone.
+
 ## Build from source
 
 See [CONTRIBUTING.md](https://github.com/thiagodefreitas/faztudo/blob/main/CONTRIBUTING.md).

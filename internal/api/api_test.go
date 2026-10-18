@@ -451,3 +451,34 @@ func TestMessageKeyCanRepeatInAnotherChannel(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowedHostsForLocalProxy(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	human := domain.Member{ID: store.NewID(), Kind: domain.MemberHuman, Handle: "user", DisplayName: "User"}
+	if _, err := s.Append(context.Background(), events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: human}); err != nil {
+		t.Fatal(err)
+	}
+	h := New(s, human.ID, "test")
+	get := func(host, remote string) int {
+		req := httptest.NewRequest("GET", "/api/v1/me", nil)
+		req.Host = host
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := get("pc.example.ts.net", "127.0.0.1:5000"); code != 403 {
+		t.Fatalf("unlisted host accepted: %d", code)
+	}
+	h.AllowedHosts = []string{"pc.example.ts.net"}
+	if code := get("PC.example.ts.net:443", "127.0.0.1:5000"); code != 200 {
+		t.Fatalf("listed host refused: %d", code)
+	}
+	if code := get("pc.example.ts.net", "192.0.2.1:5000"); code != 403 {
+		t.Fatalf("listed host from a remote address accepted: %d", code)
+	}
+}

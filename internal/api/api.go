@@ -32,14 +32,18 @@ func (noopTrigger) OnMessage(context.Context, domain.Message, []domain.Member) {
 type API struct {
 	Store            *store.Store
 	HumanID, Version string
-	Trigger          RunTrigger
-	ResolveApproval  func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
-	ReadDiff         func(string) ([]byte, error)
-	CancelRun        func(context.Context, string) error
-	RetryRun         func(context.Context, string, string) error
-	ProbeLane        func(context.Context, string) (domain.Lane, error)
-	actorForRequest  func(*http.Request) (domain.Member, error)
-	resolveMu        sync.Mutex
+	// AllowedHosts are extra host names (no port) accepted in the Host
+	// header of loopback requests, for a local reverse proxy such as
+	// tailscale serve. Everything else stays loopback-only.
+	AllowedHosts    []string
+	Trigger         RunTrigger
+	ResolveApproval func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
+	ReadDiff        func(string) ([]byte, error)
+	CancelRun       func(context.Context, string) error
+	RetryRun        func(context.Context, string, string) error
+	ProbeLane       func(context.Context, string) (domain.Lane, error)
+	actorForRequest func(*http.Request) (domain.Member, error)
+	resolveMu       sync.Mutex
 }
 type actorKey struct{}
 
@@ -87,7 +91,7 @@ func (a *API) authenticated() http.Handler {
 			fail(w, 403, "forbidden", "local requests only")
 			return
 		}
-		if !loopbackHost(r.Host) {
+		if !a.hostAllowed(r.Host) {
 			fail(w, 403, "forbidden", "invalid host")
 			return
 		}
@@ -111,6 +115,22 @@ func (a *API) authenticated() http.Handler {
 		m.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, member)))
 	})
 }
+func (a *API) hostAllowed(addr string) bool {
+	if loopbackHost(addr) {
+		return true
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	for _, h := range a.AllowedHosts {
+		if strings.EqualFold(strings.TrimSuffix(host, "."), strings.TrimSuffix(h, ".")) {
+			return true
+		}
+	}
+	return false
+}
+
 func loopbackHost(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -677,7 +697,7 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	if origin != "" {
 		u := strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://")
 		host := strings.Split(u, "/")[0]
-		if host != r.Host && !loopbackHost(host) {
+		if host != r.Host && !a.hostAllowed(host) {
 			fail(w, 403, "forbidden", "invalid origin")
 			return
 		}

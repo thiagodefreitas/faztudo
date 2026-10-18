@@ -29,6 +29,13 @@ default_timeout = "30m"
 context_messages = 40       # recent messages sent to an agent
 ```
 
+`allowed_hosts` (under `[server]`) lists extra host names accepted from a
+reverse proxy running on this machine, for example
+`allowed_hosts = ["mypc.tailnet-name.ts.net"]` with `tailscale serve`.
+Requests must still arrive from 127.0.0.1; the proxy decides who may
+connect. faztudo has no login of its own until LAN mode, so only use this
+with a proxy that already restricts access to your own devices.
+
 `faztudo serve` opens the URL with `xdg-open` after binding when
 `open_browser` is true, stdout is a terminal, and `DISPLAY` or
 `WAYLAND_DISPLAY` is set. Use `faztudo serve --no-open` to skip this.
