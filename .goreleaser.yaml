@@ -26,7 +26,12 @@ builds:
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [LICENSE, README.md, CHANGELOG.md]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - src: packaging/systemd/faztudo.service
+        dst: systemd/faztudo.service
 
 nfpms:
   - package_name: faztudo
@@ -35,7 +40,14 @@ nfpms:
     maintainer: Thiago de Freitas
     description: Chat workspace for you and the agent CLIs on your machine.
     license: MIT
-    formats: [deb, rpm]
+    formats: [deb]
+    bindir: /usr/bin
+    dependencies: [git]
+    contents:
+      - src: packaging/systemd/faztudo-package.service
+        dst: /usr/lib/systemd/user/faztudo.service
+        file_info:
+          mode: 0644
 
 checksum:
   name_template: checksums.txt

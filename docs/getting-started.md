@@ -1,7 +1,7 @@
 # Getting started
 
-faztudo is pre-alpha and there is no release yet. This page describes the
-setup that the first alpha will have, and is updated as pieces land.
+faztudo is pre-alpha. The first release, v0.1.0, is not published yet; until
+then you can build from source (see the end of this page).
 
 ## Requirements
 
@@ -10,6 +10,41 @@ setup that the first alpha will have, and is updated as pieces land.
 - git.
 - At least one agent command line tool, signed in: Claude Code, Codex, Grok,
   Kimi, Antigravity or OpenCode.
+
+## Install from a release
+
+Each release on the
+[GitHub releases page](https://github.com/thiagodefreitas/faztudo/releases)
+has a `.deb` package and a `.tar.gz` archive for `amd64` and `arm64`, and a
+`checksums.txt` file. Replace `X.Y.Z` and the architecture below with the ones
+you downloaded.
+
+Check the download first:
+
+```bash
+sha256sum --check --ignore-missing checksums.txt
+```
+
+On Debian, Ubuntu and similar systems, install the package:
+
+```bash
+sudo apt install ./faztudo_X.Y.Z_linux_amd64.deb
+systemctl --user enable --now faztudo   # optional: run it in the background
+```
+
+The package installs `/usr/bin/faztudo` and a systemd user unit at
+`/usr/lib/systemd/user/faztudo.service`.
+
+On other distributions, unpack the archive and put the binary on your PATH:
+
+```bash
+tar -xzf faztudo_X.Y.Z_linux_amd64.tar.gz
+install -m 0755 faztudo ~/.local/bin/faztudo
+```
+
+The archive also contains `systemd/faztudo.service`, the unit described under
+"Run it in the background". The web app is embedded in the binary, so there is
+nothing else to install.
 
 ## Install and run
 

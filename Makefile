@@ -1,6 +1,7 @@
 # Common development tasks. Run `make help` for the list.
 SHELL := /bin/bash
 GO ?= go
+GORELEASER ?= goreleaser
 
 .PHONY: help setup check lint lint-prose authorship secrets test licenses site build release-check web dev
 
@@ -53,5 +54,6 @@ build: web ## build bin/faztudo with the web app and version information
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/faztudo ./cmd/faztudo
 	@bin/faztudo version
 
-release-check: ## validate the release configuration without publishing
-	goreleaser check
+release-check: ## validate the release configuration and build a local snapshot
+	$(GORELEASER) check
+	$(GORELEASER) release --snapshot --clean --skip=publish
