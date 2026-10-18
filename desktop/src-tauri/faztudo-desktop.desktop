@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=faztudo
+GenericName=Agent chat workspace
+Comment=Chat workspace for you and your coding agents
+Exec={{exec}}
+Icon={{icon}}
+StartupWMClass=faztudo-desktop
+Categories=Development;
+Terminal=false

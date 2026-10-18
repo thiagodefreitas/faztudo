@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "faztudo-desktop",
+  "mainBinaryName": "faztudo-desktop",
+  "version": "0.1.3",
+  "identifier": "dev.faztudo.desktop",
+  "build": {
+    "frontendDist": "static"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "category": "Development",
+    "shortDescription": "Chat workspace for you and your coding agents",
+    "longDescription": "A window and tray icon for faztudo, the local chat workspace where people and the agent command line tools already on the machine work together in channels.",
+    "copyright": "Copyright (c) 2026 Thiago de Freitas and faztudo contributors",
+    "license": "MIT",
+    "homepage": "https://thiagodefreitas.github.io/faztudo/",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "faztudo"
+        ],
+        "section": "devel",
+        "desktopTemplate": "faztudo-desktop.desktop"
+      }
+    },
+    "publisher": "Thiago de Freitas"
+  }
+}

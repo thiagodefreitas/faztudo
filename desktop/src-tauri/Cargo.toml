@@ -1,0 +1,30 @@
+[package]
+name = "faztudo-desktop"
+version = "0.1.3"
+description = "Desktop window and tray for a local faztudo"
+license = "MIT"
+repository = "https://github.com/thiagodefreitas/faztudo"
+edition = "2021"
+rust-version = "1.80"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

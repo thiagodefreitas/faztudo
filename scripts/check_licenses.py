@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Check go-licenses CSV on stdin and production npm lockfile entries."""
+"""Check go-licenses CSV on stdin, production npm lockfile entries and,
+with --cargo FILE, the crates in `cargo metadata` output for the desktop app."""
 
 import csv
 import hashlib
@@ -29,6 +30,10 @@ REVIEWED_NPM_LICENSES = {
     # (Copyright (c) 2019 Tim van Scherpenzeel), reviewed 2026-10-18.
     "node_modules/webgl-constants": ("MIT", "sha512-LkBXKjU5r9vAW7Gcu3T5u+5cvSvh5WwINdr0C+9jpzVB41cjQAP5ePArDtk/WHYdVj0GefCgM73BA7FlIiNtdg=="),
 }
+# Further permissive licenses that only crates use. Unicode-3.0 covers Unicode
+# data tables, CDLA-Permissive-2.0 the Mozilla CA list in webpki-roots, and
+# the LLVM exception only widens Apache-2.0.
+CARGO_EXTRA = frozenset({"Unicode-3.0", "Zlib", "MIT-0", "CDLA-Permissive-2.0", "Apache-2.0-WITH-LLVM-exception"})
 EXPRESSION = re.compile(r"[A-Za-z0-9.-]+|[()]", re.ASCII)
 MATHUTIL_LICENSE_SHA256 = "bfa9bf72a72ca009fd62a8f84fca3dca67e51d93af96352723646599898b6cf5"
 
@@ -113,13 +118,43 @@ def check_npm(paths):
     return errors, count
 
 
+def cargo_license(value: str) -> str:
+    """Rewrites the old Cargo forms ("MIT/Apache-2.0") and the LLVM exception
+    into plain expressions the checker reads."""
+    value = re.sub(r"\s*/\s*", " OR ", value)
+    return value.replace("Apache-2.0 WITH LLVM-exception", "Apache-2.0-WITH-LLVM-exception")
+
+
+def check_cargo(paths):
+    errors = []
+    count = 0
+    for path in paths:
+        meta = json.loads(Path(path).read_text(encoding="utf-8"))
+        used = {node["id"] for node in meta["resolve"]["nodes"]}
+        for package in meta["packages"]:
+            if package["id"] not in used or package.get("source") is None:
+                continue  # the app itself, or a crate not built for this target
+            count += 1
+            license_id = package.get("license")
+            if not isinstance(license_id, str) or not allowed_license(cargo_license(license_id), extra=CARGO_EXTRA):
+                errors.append(f"Cargo: {package['name']} {package['version']}: {license_id or 'missing license'}")
+    return errors, count
+
+
 def main():
+    args = sys.argv[1:]
+    cargo = []
+    while "--cargo" in args:
+        i = args.index("--cargo")
+        cargo.append(args[i + 1])
+        del args[i:i + 2]
     go_errors, go_count = check_go()
-    npm_errors, npm_count = check_npm(sys.argv[1:])
-    errors = go_errors + npm_errors
+    npm_errors, npm_count = check_npm(args)
+    cargo_errors, cargo_count = check_cargo(cargo)
+    errors = go_errors + npm_errors + cargo_errors
     for error in errors:
         print(error, file=sys.stderr)
-    print(f"Checked {go_count} Go packages and {npm_count} production npm packages: {len(errors)} disallowed or missing licenses")
+    print(f"Checked {go_count} Go packages, {npm_count} production npm packages and {cargo_count} crates: {len(errors)} disallowed or missing licenses")
     return int(bool(errors))
 
 

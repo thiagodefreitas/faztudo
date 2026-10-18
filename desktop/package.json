@@ -1,0 +1,14 @@
+{
+  "name": "faztudo-desktop",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build --bundles deb",
+    "build:appimage": "tauri build --bundles appimage --config src-tauri/tauri.appimage.conf.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.1"
+  }
+}

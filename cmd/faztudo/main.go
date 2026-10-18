@@ -39,7 +39,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: faztudo serve|open|connect [--json]|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|passwd|version")
+		return fmt.Errorf("usage: faztudo serve|open|connect [--json]|stop [--json]|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|passwd|version")
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
@@ -89,6 +89,12 @@ func run(args []string) error {
 			return err
 		}
 		return runConnect(c.Server.Listen, auth.LocalTokenPath(p.DataDir), args[1:], os.Stdout)
+	case "stop":
+		c, err := config.Load(p)
+		if err != nil {
+			return err
+		}
+		return runStop(c.Server.Listen, auth.LocalTokenPath(p.DataDir), args[1:], os.Stdout, stopSystemdUnit)
 	case "lanes":
 		return printLanes(p)
 	case "serve":

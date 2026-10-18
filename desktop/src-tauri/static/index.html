@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>faztudo</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ececea; --muted: #9a9a94; } }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { height: 100%; display: grid; place-content: center; text-align: center; padding: 0 24px; }
+  img { width: 72px; height: 72px; margin: 0 auto 16px; }
+  #status { font-weight: 600; }
+  #detail { color: var(--muted); max-width: 520px; white-space: pre-wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon.png" alt="">
+  <div id="status">Starting faztudo</div>
+  <div id="detail"></div>
+</main>
+</body>
+</html>

@@ -3,12 +3,20 @@ name: release
 on:
   push:
     tags: ['v*.*.*']
+  # A dry run of the desktop builds: packages become workflow artifacts and
+  # nothing is uploaded to a release.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: version to stamp on the desktop packages, such as 0.1.4
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +40,106 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The desktop app, built after GoReleaser so the AppImage carries the same
+  # faztudo binary as the release tarball. Ubuntu 22.04 keeps the glibc and
+  # WebKitGTK baseline low.
+  desktop:
+    needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: amd64
+            triple: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+            triple: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # linuxdeploy is itself an AppImage; runners have no FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = push ]; then v="${GITHUB_REF_NAME#v}"; else v="${{ inputs.version }}"; fi
+          echo "$v" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$' || { echo "bad version $v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        if: github.event_name != 'push'
+        with:
+          go-version-file: go.mod
+      - name: faztudo sidecar
+        run: |
+          mkdir -p desktop/src-tauri/binaries
+          out="desktop/src-tauri/binaries/faztudo-${{ matrix.triple }}"
+          if [ "${{ github.event_name }}" = push ]; then
+            gh release download "$GITHUB_REF_NAME" -p "faztudo_${{ steps.v.outputs.version }}_linux_${{ matrix.arch }}.tar.gz" -D "$RUNNER_TEMP"
+            tar -xzf "$RUNNER_TEMP"/faztudo_*.tar.gz -C "$RUNNER_TEMP" faztudo
+            cp "$RUNNER_TEMP/faztudo" "$out"
+          else
+            # Dry run: the daemon without the embedded web app is enough to
+            # check the packaging.
+            CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/faztudo
+          fi
+          chmod +x "$out"
+      - name: stamp the version
+        working-directory: desktop/src-tauri
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          sed -i "0,/^version = \".*\"/s//version = \"$v\"/" Cargo.toml
+          awk -v v="$v" '/^name = "faztudo-desktop"$/ {print; getline; print "version = \"" v "\""; next} {print}' Cargo.lock > Cargo.lock.new && mv Cargo.lock.new Cargo.lock
+          printf '{"version":"%s","bundle":{"linux":{"deb":{"depends":["faztudo (>= %s)"]}}}}' "$v" "$v" > "$RUNNER_TEMP/version.json"
+      - name: build
+        working-directory: desktop
+        run: |
+          npm ci
+          npx tauri build --bundles deb --config "$RUNNER_TEMP/version.json"
+          npx tauri build --bundles appimage --config src-tauri/tauri.appimage.conf.json --config "$RUNNER_TEMP/version.json"
+      - name: collect
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          mkdir -p "$RUNNER_TEMP/out"
+          cp desktop/src-tauri/target/release/bundle/deb/*.deb "$RUNNER_TEMP/out/faztudo-desktop_${v}_linux_${{ matrix.arch }}.deb"
+          cp desktop/src-tauri/target/release/bundle/appimage/*.AppImage "$RUNNER_TEMP/out/faztudo-desktop_${v}_linux_${{ matrix.arch }}.AppImage"
+          dpkg-deb -I "$RUNNER_TEMP/out/"*.deb
+          ls -la "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.arch }}
+          path: ${{ runner.temp }}/out/*
+      - name: upload to the draft release
+        if: github.event_name == 'push'
+        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/out/* --clobber
+
+  desktop-checksums:
+    needs: desktop
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: out
+      - run: |
+          cd out && sha256sum faztudo-desktop_* > checksums-desktop.txt && cat checksums-desktop.txt
+          gh release upload "$GITHUB_REF_NAME" checksums-desktop.txt --clobber --repo "$GITHUB_REPOSITORY"
