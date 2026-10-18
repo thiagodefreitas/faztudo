@@ -396,7 +396,14 @@ Login and plan errors:
   channel gets a notice naming both lanes and the reason, and the failed
   attempt posts no reply of its own.
 - A lane chosen in the message (`@coder /lane ...`) does not fall back. The
-  run fails and the notice says why.
+  run fails and the notice says why. If that lane is already out of quota,
+  no run starts: the notice names the lane and its reset time when known.
 - An unavailable lane stays out of use until you probe it
   (`POST /api/v1/lanes/{id}/probe`, or the probe button on the Lanes page)
   or a run on it succeeds. The next failed run marks it again.
+- A provider safety or content refusal fails only that request. The channel
+  gets a refusal notice; the lane remains healthy. Exhaustion requires quota
+  or limit wording, or a rate limit with a reset time.
+- A human health override clears the previous failure and reset signal before
+  the next request is routed. A human probe clears a stale exhausted signal
+  only when a fresh reading is below the conserve threshold.

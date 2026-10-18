@@ -307,6 +307,37 @@ func (r *Registry) Restore(lane domain.Lane) {
 	}
 }
 
+// ResetAt is the reset learned from a failed run, if any.
+func (r *Registry) ResetAt(id string) time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.until[id]
+}
+
+// ApplyManualHealth replaces a stored failure signal after a human override.
+// In particular, an old reset must not re-exhaust the lane later.
+func (r *Registry) ApplyManualHealth(ctx context.Context, id string, health domain.LaneHealth) error {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil {
+		r.mu.Unlock()
+		return fmt.Errorf("unknown lane %s", id)
+	}
+	l.Health, l.HealthReason, l.LastError = health, "manual override", nil
+	delete(r.until, id)
+	delete(r.alerted, id)
+	l.Alerted = false
+	close(r.changed)
+	r.changed = make(chan struct{})
+	copyLane := *l
+	r.mu.Unlock()
+	if r.app == nil {
+		return nil
+	}
+	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
+	return err
+}
+
 func (r *Registry) SetCostToday(ctx context.Context, id string, estimate *float64) error {
 	r.mu.Lock()
 	l := r.lanes[id]

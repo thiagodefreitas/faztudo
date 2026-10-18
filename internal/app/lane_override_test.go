@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thiagodefreitas/faztudo/internal/adapters"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -31,6 +32,63 @@ func TestParseLaneOverride(t *testing.T) {
 		if lane != tc.lane || rest != tc.rest || found != tc.found {
 			t.Fatalf("%q: got %q %q %v", tc.body, lane, rest, found)
 		}
+	}
+}
+
+func TestPinnedExhaustedLaneIsRefusedWithResetNotice(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	coder := domain.Member{ID: "m1", Kind: domain.MemberAgent, Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"codex/default"}}}
+	lane := domain.Lane{ID: "codex/default", CLI: "codex", Capacity: 1, Windows: []domain.LaneWindow{}}
+	ch := domain.Channel{ID: "ch", Name: "work", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic}
+	for _, draft := range []events.Draft{{Type: events.LaneUpdated, Actor: events.System, Payload: lane}, {Type: events.MemberUpdated, Actor: events.System, Payload: coder}, {Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch}} {
+		if _, err := s.Append(ctx, draft); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := New(ctx, s, config.Config{}, config.Paths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := time.Now().Add(3 * time.Hour)
+	if err := a.Registry.ApplySignal(ctx, "run", "coder", lane.ID, adapters.LaneSignal{Kind: adapters.SignalExhausted, Until: reset}, "usage limit"); err != nil {
+		t.Fatal(err)
+	}
+	a.OnMessage(ctx, domain.Message{ID: store.NewID(), ChannelID: ch.ID, Body: "@coder /lane codex/default do it"}, []domain.Member{coder})
+	want := "codex/default is out of quota until " + reset.Local().Format("15:04") + "; @coder did not run"
+	deadline := time.Now().Add(2 * time.Second)
+	for !noticeContaining(t, s, ch.ID, want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no immediate notice containing %q", want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	runs, err := s.Runs(ctx, ch.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("pinned exhausted lane started %d runs", len(runs))
+	}
+	// A manual health override must clear the old reset signal before the
+	// next pinned request, rather than revive exhaustion from the registry.
+	lane, err = s.Lane(ctx, lane.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lane.Health, lane.HealthReason = domain.LaneAvailable, "manual override"
+	if _, err := s.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.Human("human"), Payload: lane}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.syncManualLane(ctx, lane.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := a.Registry.Snapshot(lane.ID); !ok || got.Health != domain.LaneAvailable || got.LastError != nil {
+		t.Fatalf("manual override did not clear exhaustion: %+v", got)
 	}
 }
 

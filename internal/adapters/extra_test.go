@@ -81,7 +81,7 @@ func TestAdditionalClassification(t *testing.T) {
 		adapter Adapter
 		tail    string
 	}{
-		{Grok{}, "HTTP 402 Payment Required"},
+		{Grok{}, "HTTP 402 quota exceeded"},
 		{Kimi{}, "provider returned 403 monthly quota reached"},
 		{Agy{}, "quota exhausted"},
 		{OpenCode{}, "HTTP 429 retry in 2 hours"},

@@ -424,12 +424,16 @@ func (a *App) planLimit(id string) int64 {
 	return 0
 }
 
-func (a *App) OnMessage(_ context.Context, m domain.Message, agents []domain.Member) {
+func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.Member) {
 	for _, agent := range agents {
 		agent, msg := agent, m
 		override, body, found := parseLaneOverride(m.Body, agent.Handle)
 		if found {
 			msg.Body = body
+			if err := a.syncManualLane(ctx, override); err != nil {
+				go a.notice(context.Background(), m.ChannelID, "error", err.Error())
+				continue
+			}
 			if err := a.checkLaneOverride(agent, override); err != nil {
 				channel := m.ChannelID
 				go a.notice(context.Background(), channel, "warn", err.Error())
@@ -442,18 +446,51 @@ func (a *App) OnMessage(_ context.Context, m domain.Message, agents []domain.Mem
 
 // checkLaneOverride says why a "/lane" override cannot run.
 func (a *App) checkLaneOverride(agent domain.Member, id string) error {
-	if _, ok := a.Registry.Snapshot(id); !ok {
+	lane, ok := a.Registry.Snapshot(id)
+	if !ok {
 		return fmt.Errorf("Unknown lane %s; @%s did not run.", id, agent.Handle)
 	}
 	if agent.Agent != nil {
 		for _, l := range agent.Agent.Lanes {
 			if l == id {
+				if lane.Health == domain.LaneExhausted {
+					until := a.Registry.ResetAt(id)
+					if until.IsZero() || time.Now().Before(until) {
+						if !until.IsZero() {
+							return fmt.Errorf("%s is out of quota until %s; @%s did not run.", id, until.Local().Format("15:04"), agent.Handle)
+						}
+						return fmt.Errorf("%s is out of quota; @%s did not run.", id, agent.Handle)
+					}
+				}
 				return nil
 			}
 		}
 		return fmt.Errorf("Lane %s is not in @%s's chain (%s); @%s did not run.", id, agent.Handle, strings.Join(agent.Agent.Lanes, ", "), agent.Handle)
 	}
 	return fmt.Errorf("@%s has no lane chain", agent.Handle)
+}
+
+// syncManualLane brings a health override written by the human API into the
+// in-memory registry before the next request is routed.
+func (a *App) syncManualLane(ctx context.Context, id string) error {
+	stored, err := a.Store.Lane(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil // unknown lane is reported by checkLaneOverride
+		}
+		return err
+	}
+	if stored.HealthReason != "manual override" {
+		return nil
+	}
+	current, ok := a.Registry.Snapshot(id)
+	if !ok {
+		return nil
+	}
+	if current.Health != stored.Health || current.HealthReason != stored.HealthReason || current.LastError != nil || !a.Registry.ResetAt(id).IsZero() {
+		return a.Registry.ApplyManualHealth(ctx, id, stored.Health)
+	}
+	return nil
 }
 
 // parseLaneOverride finds "/lane <id>" right after a mention of handle, as
@@ -522,6 +559,11 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	explicit := override != "" // the human chose the lane for this message
 	if agent.Agent == nil {
 		return errors.New("agent has no lane chain")
+	}
+	for _, id := range agent.Agent.Lanes {
+		if err := a.syncManualLane(ctx, id); err != nil {
+			return err
+		}
 	}
 	channel, err := a.Store.Channel(ctx, m.ChannelID)
 	if err != nil {
@@ -691,6 +733,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		}
 	}
 	if err != nil {
+		if run.StartedAt != nil && adapters.ProviderRefusal(run.FailureReason) {
+			a.notice(ctx, channel.ID, "warn", fmt.Sprintf("The provider refused @%s's request on %s. The lane remains healthy.", agent.Handle, lane.ID))
+		}
 		return fmt.Errorf("run %s failed: %w", run.ID, err)
 	}
 	if mode == domain.RunWrite && run.State == domain.RunDone && run.DiffStat != nil && run.DiffStat.Files == 0 {

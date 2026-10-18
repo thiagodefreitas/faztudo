@@ -50,11 +50,25 @@ func TestHumanProbeClearsAStaleExhaustedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	l, _ := r.Snapshot("a")
-	if l.Health != domain.LaneAvailable || l.HealthReason != "cleared by probe" || l.LastError != nil {
+	if l.Health != domain.LaneAvailable || l.HealthReason != "cleared by probe" || l.LastError != nil || !r.ResetAt("a").IsZero() {
 		t.Fatalf("not cleared by the probe: %+v", l)
 	}
 	if next, _, err := r.Pick("coder", ""); err != nil || next.ID != "a" {
 		t.Fatalf("cleared lane not usable: %+v %v", next, err)
+	}
+}
+
+func TestManualHealthOverrideClearsRecordedReset(t *testing.T) {
+	r := exhaustedLane(t)
+	if err := r.ApplyManualHealth(context.Background(), "a", domain.LaneAvailable); err != nil {
+		t.Fatal(err)
+	}
+	l, ok := r.Snapshot("a")
+	if !ok || l.Health != domain.LaneAvailable || l.LastError != nil || !r.ResetAt("a").IsZero() {
+		t.Fatalf("manual override left stale exhaustion: %+v, reset %v", l, r.ResetAt("a"))
+	}
+	if lane, _, err := r.Pick("coder", "a"); err != nil || lane.ID != "a" {
+		t.Fatalf("cleared lane cannot run: %+v, %v", lane, err)
 	}
 }
 

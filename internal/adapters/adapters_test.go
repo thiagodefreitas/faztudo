@@ -79,6 +79,44 @@ func TestClassification(t *testing.T) {
 	}
 }
 
+func TestProviderRefusalDoesNotExhaustLane(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		adapter Adapter
+		text    string
+	}{
+		{"codex", Codex{}, "ERROR: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. Apply for Daybreak access via https://example.test/status-and-access before retrying."},
+		{"claude", Claude{}, "API Error: This request was rejected by our safety system. I cannot assist with this request."},
+		{"grok", Grok{}, "Error: Request refused by the provider's safety policy. Please rephrase your request."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class, signal, reason := tc.adapter.Classify(1, tc.text)
+			if class != domain.FailureSemantic || signal.Kind != SignalNone || reason != tc.text {
+				t.Fatalf("refusal: class=%s signal=%s reason=%q", class, signal.Kind, reason)
+			}
+		})
+	}
+}
+
+func TestQuotaWordsInTaskOutputDoNotExhaustLane(t *testing.T) {
+	class, signal, _ := Codex{}.Classify(1, "--- FAIL: TestQuotaView\nquota label was missing")
+	if class == domain.FailureSemantic && signal.Kind == SignalExhausted {
+		t.Fatal("a failed test exhausted the lane")
+	}
+}
+
+func TestCodexAbsoluteQuotaResetTime(t *testing.T) {
+	want := time.Now().Add(2 * time.Hour)
+	message := "ERROR: You've hit your usage limit. Try again at " + want.Format("3:04 PM") + "."
+	class, signal, _ := Codex{}.Classify(1, message)
+	if class != domain.FailureSemantic || signal.Kind != SignalExhausted || signal.Until.IsZero() {
+		t.Fatalf("absolute reset was not parsed: %s %+v", class, signal)
+	}
+	if diff := signal.Until.Sub(want); diff < -time.Minute || diff > time.Minute {
+		t.Fatalf("reset %s differs from %s by %s", signal.Until, want, diff)
+	}
+}
+
 func TestFakeCLI(t *testing.T) {
 	cmd := exec.Command(fakeCLI)
 	cmd.Env = append(os.Environ(), "FAKE_STDOUT=ok", "FAKE_STDERR=HTTP 429", "FAKE_EXIT=3")

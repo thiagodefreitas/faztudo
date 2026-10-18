@@ -195,6 +195,7 @@ func validate(r Request) error {
 }
 
 var resetPattern = regexp.MustCompile(`(?i)(?:retry|try again|reset|resets)\s+(?:in\s+)?(\d+)\s*(seconds?|minutes?|hours?|days?)`)
+var resetClockPattern = regexp.MustCompile(`(?i)(?:try again|reset|resets)\s+at\s+(\d{1,2}:\d{2})\s*(am|pm)?\b`)
 var serverErrorPattern = regexp.MustCompile(`\b5\d\d\b`)
 
 // authPattern matches the CLIs' own login and plan failures. A bare 401 or
@@ -213,6 +214,23 @@ var ownErrorLine = regexp.MustCompile(`(?i)^(?:\[?(?:error|fatal)\]?\W|api error
 // testFailure marks output from tests the agent ran. A CLI login failure
 // happens before any work, so a tail with test failures is the task failing.
 var testFailure = regexp.MustCompile(`(?m)^\s*(?:--- FAIL|FAIL\s|=== RUN)|_test\.go:\d+|\bAssertionError\b|\bTests?:\s+\d+ failed`)
+var refusalPattern = regexp.MustCompile(`(?i)flagged for possible .{0,40}risk|rejected by (?:our|the|a) safety|refused by .{0,40}safety policy|(?:cannot|can't) assist with this request|content policy|violat(?:es|ion of) .{0,40}safety policy`)
+var quotaPattern = regexp.MustCompile(`(?i)\b(?:quota\s+(?:exceeded|exhausted|reached|used up)|(?:usage|monthly|plan|subscription)\s+limit\b|(?:reached|hit)\s+(?:your\s+)?(?:usage|monthly|plan|subscription|\d+[- ]hour)\s+limit\b|resource_exhausted|individual quota reached)\b`)
+
+// ProviderRefusal recognizes a provider's own safety or content refusal.
+// Task output that merely discusses a policy is not a provider error.
+func ProviderRefusal(tail string) bool {
+	if testFailure.MatchString(tail) {
+		return false
+	}
+	for _, line := range strings.Split(tail, "\n") {
+		line = strings.TrimSpace(line)
+		if ownErrorLine.MatchString(line) && refusalPattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
 
 // authLine returns the first line of tail that reports a login, plan or
 // subscription failure, trimmed and capped so it reads as a lane reason.
@@ -236,6 +254,9 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	if code == 0 {
 		return "", LaneSignal{Kind: SignalNone}, ""
 	}
+	if ProviderRefusal(tail) {
+		return domain.FailureSemantic, LaneSignal{Kind: SignalNone}, tail
+	}
 	s := strings.ToLower(tail)
 	signal := LaneSignal{Kind: SignalNone}
 	var reset time.Duration
@@ -252,8 +273,24 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 		}
 		reset = time.Duration(n) * unit
 	}
+	if reset == 0 {
+		if m := resetClockPattern.FindStringSubmatch(s); m != nil {
+			layout, clock := "15:04", m[1]
+			if m[2] != "" {
+				layout, clock = "3:04pm", m[1]+m[2]
+			}
+			if parsed, err := time.ParseInLocation(layout, clock, time.Local); err == nil {
+				now := time.Now()
+				until := time.Date(now.Year(), now.Month(), now.Day(), parsed.Hour(), parsed.Minute(), 0, 0, now.Location())
+				if !until.After(now) {
+					until = until.AddDate(0, 0, 1)
+				}
+				reset = time.Until(until)
+			}
+		}
+	}
 	switch {
-	case strings.Contains(s, "402"), strings.Contains(s, "quota"), strings.Contains(s, "usage limit"), strings.Contains(s, "monthly limit"), strings.Contains(s, "plan limit"), (strings.Contains(s, "429") || strings.Contains(s, "rate limit")) && reset >= 30*time.Minute:
+	case !testFailure.MatchString(tail) && quotaPattern.MatchString(s), (strings.Contains(s, "429") || strings.Contains(s, "rate limit")) && reset >= 30*time.Minute:
 		signal.Kind = SignalExhausted
 		if reset > 0 {
 			signal.Until = time.Now().Add(reset)
