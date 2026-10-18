@@ -15,6 +15,10 @@ All notable changes are listed here. The format follows
   daily update notice that never updates by itself.
 - `faztudo stop` cancels the agent runs in progress and stops the systemd
   user unit.
+- Signal bridge, step 2: `faztudo bridge signal` translates between the local
+  bridge protocol and a separate user-installed signal-cli process. A link
+  command shows a terminal QR code, and doctor checks for the linked account.
+  Signal approval replies remain for step 3.
 
 ## [0.1.3] - 2026-10-18
 

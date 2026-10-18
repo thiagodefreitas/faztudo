@@ -5,13 +5,11 @@ starts a separate bridge process. The bridge reads daemon messages on stdin and
 writes its messages on stdout. Each line is one UTF-8 JSON-RPC 2.0 object.
 Stdout is reserved for protocol messages; diagnostics go to stderr. The daemon
 owns the channel bindings, sender allowlist, event log, files and approvals.
-The Signal transport itself is a later step.
+The Signal adapter runs as `faztudo bridge signal` in a separate process from
+the daemon. It starts the user-installed signal-cli as another process. The
+adapter does not link signal-cli code into faztudo.
 
-This step installs the daemon protocol and supervisor. `faztudo bridge signal`
-is a placeholder until the Signal adapter is built; enabling it now reports
-the missing transport and retries. Do not enable it for daily use yet.
-
-The later adapter will read `[bridges.signal]` from `config.toml`:
+The adapter reads `[bridges.signal]` from `config.toml`:
 
 ```toml
 [bridges.signal]
@@ -29,7 +27,24 @@ self = "general"
 `bind` values are existing channel names or IDs. An enabled bridge requires
 an account, signal-cli command, at least one allowed sender, and at least one
 binding. `alerts` must name a bound conversation. `doctor` checks that
-signal-cli and Java are on the path when Signal is enabled.
+signal-cli and Java are on the path and checks for linked account files when
+Signal is enabled. Install signal-cli and Java yourself, then run
+`faztudo bridge signal link` in a terminal. Scan the QR code with Signal's
+Linked Devices screen. The command also prints the pairing URI and, after
+linking, the account number or account ID. Set that value as `account`, set
+`allow` to the Signal sender IDs or numbers allowed to post, then enable the
+bridge. Account keys stay in `$XDG_DATA_HOME/faztudo/bridges/signal` (or
+`~/.local/share/faztudo/bridges/signal` if XDG_DATA_HOME is unset), created
+with private directory permissions. Keep that directory private.
+
+The adapter uses signal-cli JSON-RPC on a second pair of stdio pipes. It
+starts signal-cli with `--config <dir> -a <account>
+--trust-new-identities on-first-use jsonRpc --receive-mode on-start`.
+signal-cli downloads inbound attachments into its data directory; the adapter
+reads those bytes, enforces the configured upload limit, and sends base64 data
+to the daemon. For outbound files it writes temporary private files and passes
+their paths to signal-cli, then removes them. The daemon checks bindings and
+the sender allowlist again after the adapter's early filter.
 
 The bridge calls `hello` first:
 

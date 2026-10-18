@@ -26,6 +26,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/sandbox"
+	"github.com/thiagodefreitas/faztudo/internal/signalbridge"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/version"
 	"github.com/thiagodefreitas/faztudo/internal/webui"
@@ -39,15 +40,27 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: faztudo serve|open|connect [--json]|stop [--json]|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|passwd|version")
+		return fmt.Errorf("usage: faztudo serve|open|connect [--json]|stop [--json]|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|bridge signal [link]|passwd|version")
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
 	case "bridge":
-		if len(args) != 2 || args[1] != "signal" {
-			return fmt.Errorf("usage: faztudo bridge signal")
+		if len(args) < 2 || args[1] != "signal" || len(args) > 3 || len(args) == 3 && args[2] != "link" {
+			return fmt.Errorf("usage: faztudo bridge signal [link]")
 		}
-		return fmt.Errorf("Signal transport is not installed in this protocol-only build")
+		c, err := config.Load(p)
+		if err != nil {
+			return err
+		}
+		dir := signalbridge.DataDir(p.DataDir)
+		cli := c.Bridges.Signal.SignalCLI
+		if cli == "" {
+			cli = "signal-cli"
+		}
+		if len(args) == 3 {
+			return signalbridge.Link(context.Background(), cli, dir, os.Stdout, os.Stderr)
+		}
+		return signalbridge.Run(context.Background(), signalbridge.Options{SignalCLI: cli, Account: c.Bridges.Signal.Account, DataDir: dir, MaxUpload: int64(c.Server.MaxUploadMB) << 20, In: os.Stdin, Out: os.Stdout, Err: os.Stderr})
 	case "version", "--version", "-v":
 		if len(args) > 1 && args[1] == "--json" {
 			return json.NewEncoder(os.Stdout).Encode(version.Get())
@@ -472,6 +485,11 @@ func doctor(p config.Paths) error {
 			fmt.Println("Java:", path)
 		} else {
 			fmt.Println("Java: unavailable", e)
+		}
+		if signalbridge.Linked(signalbridge.DataDir(p.DataDir), c.Bridges.Signal.Account) {
+			fmt.Println("Signal linked account: present")
+		} else {
+			fmt.Println("Signal linked account: missing; run faztudo bridge signal link")
 		}
 	}
 	if e := sandbox.Probe(ctx, true); e == nil {

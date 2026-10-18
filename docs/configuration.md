@@ -424,3 +424,31 @@ Login and plan errors:
 - A human health override clears the previous failure and reset signal before
   the next request is routed. A human probe clears a stale exhausted signal
   only when a fresh reading is below the conserve threshold.
+
+## Signal bridge
+
+Signal is off until `enabled = true` is set in `[bridges.signal]`. Install
+signal-cli and Java yourself, run `faztudo bridge signal link`, then configure
+the linked account, allowed senders, and conversation bindings.
+`faztudo doctor` checks for both commands and the linked account files.
+Signal state lives under
+`$XDG_DATA_HOME/faztudo/bridges/signal` (or
+`~/.local/share/faztudo/bridges/signal` when XDG_DATA_HOME is unset).
+
+```toml
+[bridges.signal]
+enabled = true
+account = "+15551234567"
+signal_cli = "signal-cli"
+allow = ["+15551234567"]
+approvals = false
+alerts = "self"
+
+[bridges.signal.bind]
+self = "general"
+```
+
+Bind keys are `self`, `group:<Signal group ID>`, or `direct:<sender ID>`.
+Values are existing faztudo channel names or IDs. The configured mirror needs
+no per-message approval. Agent requests to send outward still need approval.
+Signal approval replies are not active yet; step 3 will add keep and discard.
