@@ -31,5 +31,24 @@ class LicenseCheckTests(unittest.TestCase):
             self.assertTrue(any("node_modules/missing" in error for error in errors))
 
 
+class ReviewedLicenseTests(unittest.TestCase):
+    def test_reviewed_package_passes_only_with_the_reviewed_integrity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "package-lock.json"
+            reviewed = "sha512-LkBXKjU5r9vAW7Gcu3T5u+5cvSvh5WwINdr0C+9jpzVB41cjQAP5ePArDtk/WHYdVj0GefCgM73BA7FlIiNtdg=="
+            path.write_text(json.dumps({"lockfileVersion": 3, "packages": {
+                "": {},
+                "node_modules/webgl-constants": {"version": "1.1.1", "integrity": reviewed},
+            }}), encoding="utf-8")
+            errors, _ = check_npm([path])
+            self.assertEqual(errors, [])
+            path.write_text(json.dumps({"lockfileVersion": 3, "packages": {
+                "": {},
+                "node_modules/webgl-constants": {"version": "1.1.2", "integrity": "sha512-other"},
+            }}), encoding="utf-8")
+            errors, _ = check_npm([path])
+            self.assertEqual(len(errors), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

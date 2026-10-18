@@ -21,6 +21,14 @@ BUILD_ONLY_LOCKFILES = {"site/package-lock.json"}
 BUILD_ONLY_EXTRA = frozenset({"LGPL-3.0-or-later"})
 # Add a package path here only after confirming it contains data, not code.
 DATA_ONLY_NPM_PACKAGES = frozenset()
+# npm packages whose license was reviewed by reading the LICENSE file they
+# ship, because the package.json has no license field. Each entry is pinned to
+# the exact lockfile integrity hash, so any other version or content fails.
+REVIEWED_NPM_LICENSES = {
+    # Pulled in by @react-three/drei through detect-gpu; LICENSE is MIT
+    # (Copyright (c) 2019 Tim van Scherpenzeel), reviewed 2026-10-18.
+    "node_modules/webgl-constants": ("MIT", "sha512-LkBXKjU5r9vAW7Gcu3T5u+5cvSvh5WwINdr0C+9jpzVB41cjQAP5ePArDtk/WHYdVj0GefCgM73BA7FlIiNtdg=="),
+}
 EXPRESSION = re.compile(r"[A-Za-z0-9.-]+|[()]", re.ASCII)
 MATHUTIL_LICENSE_SHA256 = "bfa9bf72a72ca009fd62a8f84fca3dca67e51d93af96352723646599898b6cf5"
 
@@ -95,6 +103,9 @@ def check_npm(paths):
                 continue
             count += 1
             license_id = package.get("license")
+            reviewed = REVIEWED_NPM_LICENSES.get(name)
+            if license_id is None and reviewed and package.get("integrity") == reviewed[1]:
+                license_id = reviewed[0]
             # CC-BY-4.0 requires a reviewed data-only exception. None is set.
             extra = BUILD_ONLY_EXTRA if Path(path).as_posix() in BUILD_ONLY_LOCKFILES else frozenset()
             if not isinstance(license_id, str) or not allowed_license(license_id, name in DATA_ONLY_NPM_PACKAGES, extra):
