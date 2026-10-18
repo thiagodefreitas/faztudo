@@ -496,3 +496,27 @@ func TestScopeArgsAreAcceptedBySystemd(t *testing.T) {
 		t.Fatal("scope runs from the shell but ScopeAvailable says no")
 	}
 }
+
+func TestProbeRefusesInsideASandbox(t *testing.T) {
+	t.Setenv(NestedEnv, "1")
+	if err := Probe(context.Background(), true); err == nil {
+		t.Fatal("Probe accepted a nested sandbox")
+	}
+}
+
+func TestBuildMarksTheSandboxForNestedProbes(t *testing.T) {
+	dir := t.TempDir()
+	worktree, git := filepath.Join(dir, "w"), filepath.Join(dir, "g")
+	for _, p := range []string{worktree, git} {
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: dir, StateDir: filepath.Join(dir, "s")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(args, " "), "--setenv "+NestedEnv+" 1") {
+		t.Fatalf("sandbox does not set %s: %v", NestedEnv, args)
+	}
+}

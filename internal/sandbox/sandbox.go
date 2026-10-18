@@ -306,7 +306,7 @@ func Build(o Options) ([]string, error) {
 			return nil, err
 		}
 	}
-	args = append(args, "--chdir", o.Worktree, "--setenv", "HOME", o.Home, "--setenv", "TMPDIR", "/tmp")
+	args = append(args, "--chdir", o.Worktree, "--setenv", "HOME", o.Home, "--setenv", "TMPDIR", "/tmp", "--setenv", NestedEnv, "1")
 	for _, name := range []string{"SSH_AUTH_SOCK", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"} {
 		args = append(args, "--unsetenv", name)
 	}
@@ -646,7 +646,15 @@ func authPaths(home, cli string) []string {
 }
 
 // Probe tests the namespaces that the selected network policy needs.
+// NestedEnv is set inside every faztudo sandbox. A process that sees it is
+// already sandboxed; a nested bubblewrap there cannot see the host paths it
+// would bind, so Probe reports the sandbox as unavailable.
+const NestedEnv = "FAZTUDO_SANDBOXED"
+
 func Probe(ctx context.Context, network bool) error {
+	if os.Getenv(NestedEnv) == "1" {
+		return errors.New("already inside a faztudo sandbox")
+	}
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		return err
 	}
