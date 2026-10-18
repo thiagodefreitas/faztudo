@@ -56,7 +56,13 @@ type API struct {
 	CAFingerprint string
 	CAHTTPURL     string
 	LANURLs       []string
-	Limiter       *auth.LoginRateLimiter
+	// CurrentLANURLs, when set, reports the LAN URLs from the machine's
+	// addresses at call time and wins over LANURLs. faztudo can start before
+	// the network is up, so a list taken at startup goes stale.
+	CurrentLANURLs func() []string
+	// CAPort is the CA helper's port, joined to the current LAN address.
+	CAPort  string
+	Limiter *auth.LoginRateLimiter
 	// SessionRecheck is how often an open stream re-reads its session row.
 	// Zero means 10 seconds.
 	SessionRecheck  time.Duration

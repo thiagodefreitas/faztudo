@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -299,7 +300,7 @@ func (a *API) createPairing(w http.ResponseWriter, r *http.Request) {
 		URL:           pairURL,
 		QRSVG:         qrSVG,
 		CAFingerprint: a.CAFingerprint,
-		CAHTTPURL:     a.CAHTTPURL,
+		CAHTTPURL:     a.caHelperURL(),
 		ExpiresAt:     expiresAt,
 	})
 }
@@ -307,8 +308,8 @@ func (a *API) createPairing(w http.ResponseWriter, r *http.Request) {
 func (a *API) caInfo(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{
 		"ca_fingerprint": a.CAFingerprint,
-		"ca_http_url":    a.CAHTTPURL,
-		"lan_urls":       a.LANURLs,
+		"ca_http_url":    a.caHelperURL(),
+		"lan_urls":       a.lanURLs(),
 	})
 }
 
@@ -377,9 +378,28 @@ func (a *API) pair(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, dev)
 }
 
+func (a *API) lanURLs() []string {
+	if a.CurrentLANURLs != nil {
+		if urls := a.CurrentLANURLs(); len(urls) > 0 {
+			return urls
+		}
+	}
+	return a.LANURLs
+}
+
+// caHelperURL points at the CA helper on the current primary LAN address.
+func (a *API) caHelperURL() string {
+	if a.CAPort != "" {
+		if u, err := url.Parse(a.primaryLANURL()); err == nil && u.Hostname() != "" && u.Hostname() != "localhost" {
+			return "http://" + net.JoinHostPort(u.Hostname(), a.CAPort)
+		}
+	}
+	return a.CAHTTPURL
+}
+
 func (a *API) primaryLANURL() string {
-	if len(a.LANURLs) > 0 && a.LANURLs[0] != "" {
-		return strings.TrimRight(a.LANURLs[0], "/")
+	if urls := a.lanURLs(); len(urls) > 0 && urls[0] != "" {
+		return strings.TrimRight(urls[0], "/")
 	}
 	listen := a.LANListen
 	if listen == "" {

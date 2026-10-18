@@ -34,28 +34,65 @@ type TLSBundle struct {
 }
 
 // DefaultHostAndIPs returns the machine hostname and all non-loopback
-// interface IP addresses.
+// interface IP addresses, physical interfaces first. Container bridges, VM
+// networks and VPN tunnels come last, so the first LAN URL (the one the
+// pairing QR code uses) is the address a phone on the same Wi-Fi can reach.
 func DefaultHostAndIPs() (string, []net.IP, error) {
 	hostname, _ := os.Hostname()
-	addrs, err := net.InterfaceAddrs()
+	ifaces, err := net.Interfaces()
 	if err != nil {
 		return hostname, nil, err
 	}
-	var ips []net.IP
-	for _, a := range addrs {
-		var ip net.IP
-		switch v := a.(type) {
-		case *net.IPNet:
-			ip = v.IP
-		case *net.IPAddr:
-			ip = v.IP
-		}
-		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+	type ranked struct {
+		ip   net.IP
+		rank int
+	}
+	var found []ranked
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
 			continue
 		}
-		ips = append(ips, ip)
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+				continue
+			}
+			found = append(found, ranked{ip, interfaceRank(iface.Name)})
+		}
+	}
+	slices.SortStableFunc(found, func(a, b ranked) int { return a.rank - b.rank })
+	ips := make([]net.IP, 0, len(found))
+	for _, f := range found {
+		ips = append(ips, f.ip)
 	}
 	return hostname, ips, nil
+}
+
+// virtualInterfacePrefixes name interfaces a phone on the home network cannot
+// reach directly: container bridges, VM networks and VPN tunnels.
+var virtualInterfacePrefixes = []string{
+	"docker", "br-", "veth", "virbr", "vmnet", "vboxnet", "lxc", "lxd", "cni", "flannel", "podman",
+	"tailscale", "wg", "tun", "tap", "zt", "utun",
+}
+
+// interfaceRank orders physical interfaces (0) before virtual ones (1).
+func interfaceRank(name string) int {
+	for _, prefix := range virtualInterfacePrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return 1
+		}
+	}
+	return 0
 }
 
 // SANs returns the deduplicated DNS names and IP addresses for the LAN server certificate.

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -133,14 +132,11 @@ func startLAN(ctx context.Context, s *store.Store, c config.Config, p config.Pat
 	if err := checkLANAuthReady(ctx, s, now); err != nil {
 		return nil, err
 	}
-	host, ips, err := auth.DefaultHostAndIPs()
+	certs, err := auth.NewCertManager(p.TLSDir, auth.DefaultHostAndIPs)
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := auth.EnsureTLS(p.TLSDir, host, ips)
-	if err != nil {
-		return nil, err
-	}
+	bundle := certs.Bundle()
 	lanTCP, err := net.Listen("tcp", c.LAN.Listen)
 	if err != nil {
 		return nil, err
@@ -150,25 +146,23 @@ func startLAN(ctx context.Context, s *store.Store, c config.Config, p config.Pat
 		_ = lanTCP.Close()
 		return nil, err
 	}
-	urls := auth.LANURLs(ips, lanTCP.Addr().String())
-	if len(urls) == 0 {
-		urls = []string{"https://" + lanTCP.Addr().String()}
+	lanAddr := lanTCP.Addr().String()
+	currentURLs := func() []string {
+		_, ips, _ := auth.DefaultHostAndIPs()
+		return auth.LANURLs(ips, lanAddr)
 	}
 	_, caPort, _ := net.SplitHostPort(caListener.Addr().String())
-	caHTTPURL := "http://" + caListener.Addr().String()
-	if parsed, parseErr := url.Parse(urls[0]); parseErr == nil && parsed.Hostname() != "" && caPort != "" {
-		caHTTPURL = "http://" + net.JoinHostPort(parsed.Hostname(), caPort)
-	}
 	handler.LANEnabled = true
-	handler.LANListen = lanTCP.Addr().String()
-	handler.LANURLs = urls
+	handler.LANListen = lanAddr
+	handler.CurrentLANURLs = currentURLs
+	handler.CAPort = caPort
+	handler.CAHTTPURL = "http://" + caListener.Addr().String()
 	handler.CACertPEM = bundle.CACertPEM
 	handler.CAFingerprint = bundle.Fingerprint
-	handler.CAHTTPURL = caHTTPURL
 
 	tlsListener := tls.NewListener(lanTCP, &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{bundle.ServerCert},
+		MinVersion:     tls.VersionTLS12,
+		GetCertificate: certs.GetCertificate,
 	})
 	lanServer := &http.Server{
 		Handler:           webui.Mount(handler.LANHandler()),
@@ -181,23 +175,25 @@ func startLAN(ctx context.Context, s *store.Store, c config.Config, p config.Pat
 	go func() { _ = lanServer.Serve(tlsListener) }()
 	go func() { _ = caServer.Serve(caListener) }()
 
+	urls := currentURLs()
+	if len(urls) == 0 && out != nil {
+		fmt.Fprintln(out, "LAN: listening on", lanAddr, "(no network address yet; Settings > Devices shows the URL once the network is up)")
+	}
 	for _, u := range urls {
 		if out != nil {
 			fmt.Fprintln(out, "LAN:", u)
 		}
-		if logger != nil {
-			logger.Info("serving lan", "listen", lanTCP.Addr().String(), "url", u, "ca_fingerprint", bundle.Fingerprint)
-		}
 	}
 	if logger != nil {
-		logger.Info("serving ca helper", "listen", caListener.Addr().String(), "url", caHTTPURL)
+		logger.Info("serving lan", "listen", lanAddr, "urls", urls, "ca_fingerprint", bundle.Fingerprint)
+		logger.Info("serving ca helper", "listen", caListener.Addr().String())
 	}
 	return &lanServers{
 		lanListener: tlsListener,
 		caListener:  caListener,
 		lanServer:   lanServer,
 		caServer:    caServer,
-		lanAddr:     lanTCP.Addr().String(),
+		lanAddr:     lanAddr,
 		caAddr:      caListener.Addr().String(),
 		urls:        urls,
 		fingerprint: bundle.Fingerprint,
