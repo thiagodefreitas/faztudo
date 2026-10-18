@@ -22,3 +22,21 @@ func TestMountRoutesAPIAndUI(t *testing.T) {
 		}
 	}
 }
+
+func TestWithMCPRoutesMCPOnly(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("next")) })
+	mcp := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("mcp")) })
+	h := WithMCP(Mount(next), mcp)
+	for _, tc := range []struct{ path, want string }{
+		{"/mcp", "mcp"},
+		{"/mcp/", "mcp"},
+		{"/api/v1/health", "next"},
+		{"/", "faztudo"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("%s: %d %q", tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}

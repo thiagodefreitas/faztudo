@@ -20,6 +20,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/lanes"
+	"github.com/thiagodefreitas/faztudo/internal/mcp"
 	"github.com/thiagodefreitas/faztudo/internal/runner"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/usage"
@@ -28,6 +29,8 @@ import (
 
 const maxAnswerBytes = 8192
 
+const mcpPromptNote = "Faztudo MCP tools are available for this channel only. ask_human returns immediately. You cannot resolve an approval."
+
 type App struct {
 	Store    *store.Store
 	Config   config.Config
@@ -35,6 +38,11 @@ type App struct {
 	Registry *lanes.Registry
 	Runner   *runner.Runner
 	Adapters map[string]adapters.Adapter
+	// MCP is the in-process server. MCPBase is its loopback origin with no
+	// token in it, for example http://127.0.0.1:7457. An empty MCPBase leaves
+	// agent commands unchanged.
+	MCP      *mcp.Handler
+	MCPBase  string
 	mu       sync.Mutex
 	activeMu sync.Mutex
 	active   map[string]context.CancelFunc
@@ -85,6 +93,7 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		"opencode": adapters.OpenCode{},
 	}}
 	a.Runner = &runner.Runner{RunDir: p.RunsDir, Appender: s, Lanes: reg, PersonaForRun: func(r domain.Run) string { return byID[r.AgentID] }}
+	a.MCP = mcp.New(s, a)
 	return a, nil
 }
 
@@ -231,6 +240,9 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	if mode == domain.RunWrite {
 		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
 	}
+	if mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
+		prompt += "\n\n" + mcpPromptNote
+	}
 	timeout, err := time.ParseDuration(a.Config.Runs.DefaultTimeout)
 	if err != nil {
 		return err
@@ -257,10 +269,21 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		workdir = a.Paths.DataDir
 	}
 	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout}
-	if mode == domain.RunWrite {
-		err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand})
-	} else {
-		err = a.Runner.Execute(runCtx, &run, adapter, req)
+	if mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
+		token, issueErr := a.MCP.Issue(run.ID, agent.ID, channel.ID)
+		if issueErr != nil {
+			err = issueErr
+		} else {
+			defer a.MCP.RevokeRun(run.ID)
+			req.MCP = &adapters.MCP{URL: strings.TrimRight(a.MCPBase, "/") + "/mcp", Token: token, Dir: filepath.Join(a.Paths.RunsDir, run.ID)}
+		}
+	}
+	if err == nil {
+		if mode == domain.RunWrite {
+			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand})
+		} else {
+			err = a.Runner.Execute(runCtx, &run, adapter, req)
+		}
 	}
 	if run.StartedAt == nil && err != nil {
 		run.State = domain.RunFailed
@@ -301,6 +324,10 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		}
 	}
 	return err
+}
+
+func mcpCLI(name string) bool {
+	return name == "claude" || name == "codex"
 }
 
 func (a *App) CancelRun(_ context.Context, id string) error {

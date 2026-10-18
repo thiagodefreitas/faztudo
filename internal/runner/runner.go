@@ -241,6 +241,7 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 	if err != nil {
 		return err
 	}
+	defer removePaths(command.Remove)
 	if err := os.MkdirAll(filepath.Join(r.RunDir, run.ID), 0700); err != nil {
 		return err
 	}
@@ -329,6 +330,14 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 			return errors.Join(fmt.Errorf("run failed: %w: %s", execErr, reason), finishErr)
 		}
 		return errors.Join(errors.New(reason), finishErr)
+	}
+}
+func removePaths(paths []string) {
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		_ = os.Remove(path)
 	}
 }
 func (r *Runner) claimID(id string) error {

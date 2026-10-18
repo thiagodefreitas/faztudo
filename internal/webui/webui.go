@@ -51,6 +51,17 @@ func Handler() http.Handler {
 	})
 }
 
+// WithMCP sends /mcp to mcp and every other path to next.
+func WithMCP(next, mcp http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" || strings.HasPrefix(r.URL.Path, "/mcp/") {
+			mcp.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Mount returns a handler that sends /api/ to api and everything else to the
 // web app.
 func Mount(api http.Handler) http.Handler {

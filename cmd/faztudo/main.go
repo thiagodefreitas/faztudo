@@ -103,11 +103,12 @@ func run(args []string) error {
 		handler := api.New(s, humanID, version.Get().Version)
 		handler.AllowedHosts = c.Server.AllowedHosts
 		application.Bind(handler)
-		server := &http.Server{Addr: c.Server.Listen, Handler: webui.Mount(handler), ReadHeaderTimeout: 5 * time.Second}
 		listener, err := net.Listen("tcp", c.Server.Listen)
 		if err != nil {
 			return err
 		}
+		application.MCPBase = "http://" + listener.Addr().String()
+		server := &http.Server{Addr: c.Server.Listen, Handler: webui.WithMCP(webui.Mount(handler), application.MCP), ReadHeaderTimeout: 5 * time.Second}
 		url := "http://" + listener.Addr().String()
 		logger.Info("serving", "listen", listener.Addr().String(), "url", url)
 		if shouldOpenBrowser(c.Server.OpenBrowser, *noOpen, isatty.IsTerminal(os.Stdout.Fd()), os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY")) {

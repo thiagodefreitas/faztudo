@@ -19,6 +19,7 @@ type Request struct {
 	Workdir   string
 	ExtraDirs []string
 	Timeout   time.Duration
+	MCP       *MCP
 }
 
 type Cmd struct {
@@ -28,6 +29,8 @@ type Cmd struct {
 	EnvAdd    map[string]string
 	EnvRemove []string
 	EnvAllow  []string
+	// Remove lists files to delete after the run finishes, including retries.
+	Remove []string
 }
 
 type LaneSignalKind string
@@ -85,7 +88,7 @@ func (Claude) Command(r Request) (Cmd, error) {
 	for _, dir := range r.ExtraDirs {
 		args = append(args, "--add-dir", dir)
 	}
-	return Cmd{Path: "claude", Args: args, Dir: r.Workdir, EnvAllow: []string{"CLAUDE_CONFIG_DIR"}}, nil
+	return claudeMCP(r, args)
 }
 func (Claude) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)
@@ -111,6 +114,10 @@ func (Codex) Command(r Request) (Cmd, error) {
 	}
 	for _, dir := range r.ExtraDirs {
 		args = append(args, "--add-dir", dir)
+	}
+	args, err := withCodexMCP(args, r.MCP)
+	if err != nil {
+		return Cmd{}, err
 	}
 	args = append(args, r.Prompt)
 	return Cmd{Path: "codex", Args: args, Dir: r.Workdir, EnvAllow: []string{"CODEX_HOME"}}, nil

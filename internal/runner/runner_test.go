@@ -47,6 +47,42 @@ func fakeBinary(t *testing.T) string {
 	}
 	return p
 }
+func TestConfigFileSurvivesRetries(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "mcp.json")
+	if err := os.WriteFile(target, []byte("synthetic"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "tried")
+	script := filepath.Join(dir, "tool.sh")
+	body := "#!/bin/sh\nset -eu\ntest -f \"$1\"\nif test -f \"$2\"; then\n  exit 0\nfi\ntouch \"$2\"\necho 'HTTP 503' >&2\nexit 1\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{RunDir: dir, Backoff: []time.Duration{time.Millisecond}}
+	run := domain.Run{ID: "retry1", Mode: domain.RunRead, State: domain.RunQueued, LaneID: "lane"}
+	err := r.Execute(context.Background(), &run, removeAdapter{script: script, target: target, marker: marker}, adapters.Request{Mode: domain.RunRead, Workdir: dir, Prompt: "x"})
+	if err != nil || run.State != domain.RunDone {
+		t.Fatalf("%v %s", err, run.State)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatal("config file still present")
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatal(statErr)
+	}
+}
+
+type removeAdapter struct{ script, target, marker string }
+
+func (a removeAdapter) Name() string { return "fake" }
+func (a removeAdapter) Command(adapters.Request) (adapters.Cmd, error) {
+	return adapters.Cmd{Path: a.script, Args: []string{a.target, a.marker}, Remove: []string{a.target}}, nil
+}
+func (a removeAdapter) Classify(code int, tail string) (domain.FailureClass, adapters.LaneSignal, string) {
+	return (adapters.Codex{}).Classify(code, tail)
+}
+
 func TestTransitionsAndCapacity(t *testing.T) {
 	if err := Transition(domain.RunQueued, domain.RunRunning); err != nil {
 		t.Fatal(err)
