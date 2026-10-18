@@ -106,3 +106,14 @@ func TestKimiCleanAnswer(t *testing.T) {
 		t.Fatal("adapters without a cleaner must pass output through")
 	}
 }
+
+func TestAgyQuotaOnlyFromErrorLines(t *testing.T) {
+	class, sig, _ := Agy{}.ClassifyOutput(0, "Here is how agy reports it: RESOURCE_EXHAUSTED, Individual quota reached.", "")
+	if sig.Kind == SignalExhausted || class == domain.FailureSemantic {
+		t.Fatalf("quoted text exhausted the lane: %v %v", class, sig)
+	}
+	class, sig, reason := Agy{}.ClassifyOutput(0, "error: Individual quota reached. Resets in 4h54m14s.\nAGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\"}", "")
+	if sig.Kind != SignalExhausted || class != domain.FailureSemantic || sig.Until.IsZero() {
+		t.Fatalf("real agy error not classified: %v %v %q", class, sig, reason)
+	}
+}

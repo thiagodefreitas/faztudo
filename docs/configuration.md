@@ -97,12 +97,50 @@ logs token totals without a quota percentage, so its health stays unknown
 unless `plan_limit_tokens` sets a manual daily plan limit. This produces a
 percentage estimate from local token totals.
 
+Conserve lanes are a last resort. When a persona's chain holds a lane that
+is available or unknown, it is used first even if a conserve lane comes
+earlier in the list. A conserve lane runs only when no other lane in the chain
+is usable, and the channel gets a notice saying so. A lane that is merely busy
+counts as usable, so the run waits for it.
+
+`runs_today` on a lane counts runs started on it since local midnight.
+`tokens_last_hour` is filled for Claude lanes from the local session logs.
+
+`allowed_tools` is an optional list on a `claude` lane, passed to Claude as
+`--allowedTools`. These tools run without asking, which matters because
+Claude's print mode refuses every shell command that is not listed.
+
+```toml
+[[lane]]
+id = "claude/sonnet"
+cli = "claude"
+model = "sonnet"
+capacity = 1
+allowed_tools = ["Bash(make test:*)", "Bash(go test:*)"]
+```
+
+Unset, a Claude write run may use `Bash(go test:*)`, `Bash(go vet:*)`,
+`Bash(gofmt:*)`, `Bash(npm test:*)`, `Bash(npm run:*)`,
+`Bash(npx vitest:*)`, `Bash(git status:*)`, `Bash(git diff:*)` and
+`Bash(gh issue view:*)`. Setting the field replaces that list, and
+`allowed_tools = []` allows none. Read runs have no default list. Whenever
+faztudo passes its MCP endpoint, every Claude run, read or write, also allows
+the five faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
+`request_approval`, `read_context`, `list_members`); that is not configurable.
+Other CLIs ignore the field.
+
+When `lanes.toml` configures any lane for a CLI, the detected-only
+`<cli>/default` lane is no longer listed or used.
+
 Every detected CLI also gets a plain persona with its own name (`@claude`,
 `@codex`, ...) bound to its default lane.
 
 Switching:
 
-- In a message: `@coder /lane claude/opus fix the failing test`.
+- In a message: `@coder /lane claude/opus fix the failing test`. The
+  override applies to that persona for that message only and is removed from
+  the prompt. An unknown lane, or one outside the persona's list, gets a
+  notice and no run.
 - For a channel: `/lane coder claude/opus` in that channel.
 - Automatically: when a lane becomes exhausted or unavailable, new runs take
   the next healthy lane in the persona's list and the channel gets a notice.

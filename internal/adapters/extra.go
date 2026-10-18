@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -118,8 +119,41 @@ func (Agy) Command(r Request) (Cmd, error) {
 	return Cmd{Path: "agy", Args: args, Dir: r.Workdir}, nil
 }
 
-func (Agy) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
-	return classify(code, tail)
+func (a Agy) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
+	return a.ClassifyOutput(code, "", tail)
+}
+
+var agyResetPattern = regexp.MustCompile(`(?i)resets?\s+in\s+((?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?)`)
+
+// ClassifyOutput treats an agy quota error as an exhausted lane even when
+// the exit code is 0: agy prints an AGY_ERROR JSON line on stdout with
+// "RESOURCE_EXHAUSTED (code 429): Individual quota reached ... Resets in
+// 4h54m14s". Agy quota is per model route, and a lane is one route.
+func (Agy) ClassifyOutput(code int, stdoutTail, stderrTail string) (domain.FailureClass, LaneSignal, string) {
+	// On stdout only agy's own error lines count, so an answer that merely
+	// quotes the error text does not mark the lane exhausted; stderr never
+	// carries the answer, so all of it counts.
+	errLines := []string{stderrTail}
+	for _, l := range strings.Split(stdoutTail, "\n") {
+		t := strings.ToLower(strings.TrimSpace(l))
+		if strings.HasPrefix(t, "agy_error") || strings.HasPrefix(t, "error:") {
+			errLines = append(errLines, l)
+		}
+	}
+	both := strings.Join(errLines, "\n")
+	lower := strings.ToLower(both)
+	if strings.Contains(lower, "resource_exhausted") || strings.Contains(lower, "individual quota reached") {
+		signal := LaneSignal{Kind: SignalExhausted}
+		reason := "agy quota reached"
+		if m := agyResetPattern.FindStringSubmatch(both); m != nil && m[1] != "" {
+			if d, err := time.ParseDuration(strings.ToLower(m[1])); err == nil && d > 0 {
+				signal.Until = time.Now().Add(d)
+				reason += "; resets in " + m[1]
+			}
+		}
+		return domain.FailureSemantic, signal, reason
+	}
+	return classify(code, stderrTail)
 }
 
 type OpenCode struct{}

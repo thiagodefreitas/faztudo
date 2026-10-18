@@ -17,7 +17,9 @@ type MCP struct {
 	Dir   string
 }
 
-const allowedMCPTools = "mcp__faztudo__post_message,mcp__faztudo__ask_human,mcp__faztudo__request_approval,mcp__faztudo__read_context,mcp__faztudo__list_members"
+// allowedMCPTools are the exact names claude gives the faztudo server tools:
+// mcp__<server>__<tool>.
+var allowedMCPTools = []string{"mcp__faztudo__post_message", "mcp__faztudo__ask_human", "mcp__faztudo__request_approval", "mcp__faztudo__read_context", "mcp__faztudo__list_members"}
 
 func (m *MCP) valid() error {
 	if m == nil {
@@ -70,7 +72,7 @@ func claudeMCP(r Request, args []string) (Cmd, error) {
 	}
 	// Tool search hides MCP tools until the model loads them. These five are
 	// small, so load them with the session. Plan mode stays in place.
-	cmd.Args = append(cmd.Args, "--mcp-config", path, "--strict-mcp-config", "--allowedTools", allowedMCPTools, "--settings", `{"enable_tool_search":false}`)
+	cmd.Args = append(cmd.Args, "--mcp-config", path, "--strict-mcp-config", "--settings", `{"enable_tool_search":false}`)
 	cmd.Remove = []string{path}
 	return cmd, nil
 }

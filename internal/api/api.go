@@ -44,6 +44,9 @@ type API struct {
 	CancelRun       func(context.Context, string) error
 	RetryRun        func(context.Context, string, string) error
 	ProbeLane       func(context.Context, string) (domain.Lane, error)
+	// HideLane drops lanes that must not be listed, such as a detected-only
+	// default once lanes.toml configures the CLI.
+	HideLane        func(domain.Lane) bool
 	actorForRequest func(*http.Request) (domain.Member, error)
 	resolveMu       sync.Mutex
 }
@@ -456,7 +459,7 @@ func (a *API) statusText(ctx context.Context, channelID string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	lanes, err := a.Store.Lanes(ctx)
+	lanes, err := a.listLanes(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -725,8 +728,21 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, v)
 }
+func (a *API) listLanes(ctx context.Context) ([]domain.Lane, error) {
+	all, err := a.Store.Lanes(ctx)
+	if err != nil || a.HideLane == nil {
+		return all, err
+	}
+	kept := all[:0:0]
+	for _, l := range all {
+		if !a.HideLane(l) {
+			kept = append(kept, l)
+		}
+	}
+	return kept, nil
+}
 func (a *API) lanes(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.Lanes(r.Context())
+	v, e := a.listLanes(r.Context())
 	if e != nil {
 		failErr(w, e)
 		return

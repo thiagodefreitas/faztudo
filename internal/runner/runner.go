@@ -260,7 +260,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 		if err := ctx.Err(); err != nil {
 			return errors.Join(err, r.finish(context.Background(), run, domain.RunCancelled, domain.FailureTransient, err.Error(), nil))
 		}
+		outStart := r.fileSize(run.ID, "stdout.log")
 		code, tail, execErr := r.executeOnce(ctx, run, command, req.Timeout, &outputSeq)
+		stdoutTail := r.tailOf(run.ID, "stdout.log", outStart)
 		if ctx.Err() != nil {
 			state := domain.RunCancelled
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -269,7 +271,10 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 			finishErr := r.finish(context.Background(), run, state, domain.FailureTransient, ctx.Err().Error(), &code)
 			return errors.Join(ctx.Err(), finishErr)
 		}
-		if execErr == nil && code == 0 {
+		class, signal, reason := adapters.Classify(adapter, code, stdoutTail, tail)
+		// A zero exit succeeds unless the adapter reads a lane signal out
+		// of the output (agy reports an exhausted quota with exit 0).
+		if execErr == nil && code == 0 && signal.Kind == adapters.SignalNone {
 			if verify != nil {
 				run.State = domain.RunVerifying
 				if err := r.emitRun(ctx, run, events.RunUpdated, *run); err != nil {
@@ -290,7 +295,6 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 			}
 			return r.finish(ctx, run, successState, "", "", &code)
 		}
-		class, signal, reason := adapter.Classify(code, tail)
 		if errors.Is(execErr, context.DeadlineExceeded) {
 			class = domain.FailureTransient
 			reason = "run timed out"
@@ -483,6 +487,36 @@ func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cm
 		return code, string(tailBytes), waitErr
 	}
 	return code, string(tailBytes), waitErr
+}
+func (r *Runner) fileSize(id, name string) int64 {
+	info, err := os.Stat(filepath.Join(r.RunDir, id, name))
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// tailOf returns up to 8 KiB of a run log, never reading before from.
+func (r *Runner) tailOf(id, name string, from int64) string {
+	f, err := os.Open(filepath.Join(r.RunDir, id, name))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	start := info.Size() - 8192
+	if start < from {
+		start = from
+	}
+	if start < 0 || start >= info.Size() {
+		return ""
+	}
+	buf := make([]byte, info.Size()-start)
+	n, _ := f.ReadAt(buf, start)
+	return string(buf[:n])
 }
 func (r *Runner) streamFile(run *domain.Run, path, stream string, offset int64, stop <-chan struct{}, seq *atomic.Int64) {
 	f, err := os.Open(path)

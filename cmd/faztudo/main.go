@@ -170,6 +170,7 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 			lane.HealthReason = existing.HealthReason
 			lane.Windows = existing.Windows
 			lane.LastError = existing.LastError
+			lane.RunsToday, lane.RunsDate, lane.TokensLastHour = existing.RunsToday, existing.RunsDate, existing.TokensLastHour
 		} else if !errors.Is(getErr, store.ErrNotFound) {
 			return "", getErr
 		}

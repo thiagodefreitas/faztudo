@@ -34,7 +34,7 @@ func TestCommands(t *testing.T) {
 		want    []string
 	}{
 		{Claude{}, domain.RunRead, []string{"-p", "hello", "--model", "opus", "--permission-mode", "plan"}},
-		{Claude{}, domain.RunWrite, []string{"-p", "hello", "--model", "opus", "--permission-mode", "acceptEdits"}},
+		{Claude{}, domain.RunWrite, append([]string{"-p", "hello", "--model", "opus", "--permission-mode", "acceptEdits", "--allowedTools"}, DefaultClaudeWriteTools...)},
 		{Codex{}, domain.RunRead, []string{"exec", "-C", "/tmp/work", "--skip-git-repo-check", "-s", "read-only", "-m", "gpt", "-c", "model_reasoning_effort=high", "hello"}},
 		{Codex{}, domain.RunWrite, []string{"exec", "-C", "/tmp/work", "--skip-git-repo-check", "-s", "workspace-write", "-m", "gpt", "-c", "model_reasoning_effort=high", "hello"}},
 	} {

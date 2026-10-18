@@ -498,3 +498,37 @@ func TestOutputLinesBoundedAndSequenced(t *testing.T) {
 		t.Fatalf("output bytes %d", total)
 	}
 }
+
+type agyFake struct{ fakeAdapter }
+
+func (a agyFake) ClassifyOutput(code int, stdout, stderr string) (domain.FailureClass, adapters.LaneSignal, string) {
+	return (adapters.Agy{}).ClassifyOutput(code, stdout, stderr)
+}
+
+func TestAgyQuotaWithExitZeroExhaustsLane(t *testing.T) {
+	path := fakeBinary(t)
+	dir := t.TempDir()
+	t.Setenv("FAKE_STDOUT", `AGY_ERROR {"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 4h54m14s"}`)
+	t.Setenv("FAKE_EXIT", "0")
+	log := &eventstest.Appender{}
+	registry, err := lanes.New([]lanes.LaneConfig{{ID: "agy/opus", Capacity: 1}, {ID: "codex/default", Capacity: 1}}, []lanes.PersonaConfig{{Handle: "coder", Lanes: []string{"agy/opus", "codex/default"}}}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{RunDir: dir, Appender: log, Lanes: registry, PersonaForRun: func(domain.Run) string { return "coder" }}
+	run := domain.Run{ID: "agyq", ChannelID: "channel", LaneID: "agy/opus", Mode: domain.RunRead, State: domain.RunQueued}
+	if err := r.Execute(context.Background(), &run, agyFake{fakeAdapter{path}}, adapters.Request{Mode: domain.RunRead, Prompt: "x", Workdir: dir}); err == nil {
+		t.Fatal("exhausted run reported success")
+	}
+	if run.State != domain.RunFailed || run.FailureClass != domain.FailureSemantic {
+		t.Fatalf("%s %s", run.State, run.FailureClass)
+	}
+	l, _ := registry.Snapshot("agy/opus")
+	if l.Health != domain.LaneExhausted {
+		t.Fatalf("lane %s", l.Health)
+	}
+	next, _, err := registry.Pick("coder", "")
+	if err != nil || next.ID != "codex/default" {
+		t.Fatalf("%+v %v", next, err)
+	}
+}

@@ -31,6 +31,8 @@ func (t TokenUsage) Total() int64 {
 type ClaudeResult struct {
 	// FiveHour is the rolling 5 hour window ending at Options.Now.
 	FiveHour TokenUsage
+	// LastHour is the 60 minutes ending at Options.Now.
+	LastHour TokenUsage
 	// Day is the local calendar day containing Options.Now.
 	Day TokenUsage
 	// MeasuredAt is the timestamp of the newest assistant entry seen,
@@ -67,6 +69,7 @@ func ReadClaude(root string, opts Options) (ClaudeResult, error) {
 
 	dayStart := time.Date(opts.Now.Year(), opts.Now.Month(), opts.Now.Day(), 0, 0, 0, 0, opts.Now.Location())
 	winStart := opts.Now.Add(-5 * time.Hour)
+	hourStart := opts.Now.Add(-time.Hour)
 	var newest time.Time
 
 	for _, path := range files {
@@ -104,6 +107,9 @@ func ReadClaude(root string, opts Options) (ClaudeResult, error) {
 			}
 			if !ts.Before(winStart) {
 				res.FiveHour = addTokens(res.FiveHour, tu)
+			}
+			if !ts.Before(hourStart) {
+				res.LastHour = addTokens(res.LastHour, tu)
 			}
 			if !ts.Before(dayStart) {
 				res.Day = addTokens(res.Day, tu)

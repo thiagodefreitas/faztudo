@@ -49,6 +49,10 @@ type Lane struct {
 	Capacity        int    `toml:"capacity"`
 	ConserveAt      *int   `toml:"conserve_at"`
 	PlanLimitTokens int64  `toml:"plan_limit_tokens"`
+	// AllowedTools lists tools a claude run may use without asking, passed
+	// as --allowedTools. Unset keeps the write-run default; an empty list
+	// allows none.
+	AllowedTools []string `toml:"allowed_tools"`
 }
 type Persona struct {
 	Handle      string   `toml:"handle"`
@@ -114,6 +118,11 @@ func (c Config) Validate() error {
 		if l.PlanLimitTokens < 0 {
 			return fmt.Errorf("lane[%d].plan_limit_tokens: must be nonnegative", i)
 		}
+		for j, t := range l.AllowedTools {
+			if strings.TrimSpace(t) == "" {
+				return fmt.Errorf("lane[%d].allowed_tools[%d]: must not be empty", i, j)
+			}
+		}
 		if seen[l.ID] {
 			return fmt.Errorf("lane[%d].id: duplicate", i)
 		}
@@ -131,6 +140,26 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+// IsStaleDefaultLane reports whether a stored lane is a detected-only
+// default (cli/default) left over from before lanes.toml configured a lane
+// for the same CLI. Such a lane is not listed or used.
+func (c Config) IsStaleDefaultLane(id, cli string) bool {
+	if id != cli+"/default" {
+		return false
+	}
+	configuredCLI := false
+	for _, l := range c.Lanes.Lane {
+		if l.ID == id {
+			return false
+		}
+		if l.CLI == cli {
+			configuredCLI = true
+		}
+	}
+	return configuredCLI
+}
+
 func WriteDefaults(p Paths) error {
 	for _, d := range []string{p.ConfigDir, p.DataDir, p.WorktreesDir, p.RunsDir} {
 		if err := os.MkdirAll(d, 0700); err != nil {

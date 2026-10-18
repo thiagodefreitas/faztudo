@@ -35,6 +35,10 @@ func TestReadClaudeSumsWindows(t *testing.T) {
 		t.Errorf("FiveHour.Entries = %d, want %d", got, want)
 	}
 
+	if got, want := res.LastHour.Total(), int64(990); got != want {
+		t.Errorf("LastHour.Total() = %d, want %d", got, want)
+	}
+
 	// day: all valid entries count, including the 06:30 one
 	if got, want := res.Day.InputTokens, int64(1600); got != want {
 		t.Errorf("Day.InputTokens = %d, want %d", got, want)

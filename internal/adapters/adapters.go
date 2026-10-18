@@ -20,6 +20,20 @@ type Request struct {
 	ExtraDirs []string
 	Timeout   time.Duration
 	MCP       *MCP
+	// AllowedTools lists the tools a claude run may use without asking.
+	// Nil means the adapter default: DefaultClaudeWriteTools for write runs,
+	// nothing extra for read runs. The faztudo MCP tools are always added
+	// when MCP is set.
+	AllowedTools []string
+}
+
+// DefaultClaudeWriteTools is what a claude write run may execute when the
+// lane sets no allowed_tools: the usual checks and read-only git and gh
+// queries, so the agent can verify its own work.
+var DefaultClaudeWriteTools = []string{
+	"Bash(go test:*)", "Bash(go vet:*)", "Bash(gofmt:*)",
+	"Bash(npm test:*)", "Bash(npm run:*)", "Bash(npx vitest:*)",
+	"Bash(git status:*)", "Bash(git diff:*)", "Bash(gh issue view:*)",
 }
 
 type Cmd struct {
@@ -50,6 +64,22 @@ type Adapter interface {
 	Name() string
 	Command(Request) (Cmd, error)
 	Classify(exitCode int, stderrTail string) (domain.FailureClass, LaneSignal, string)
+}
+
+// OutputClassifier is implemented by adapters whose CLI reports failures on
+// stdout or with exit code 0. The runner calls it after every attempt,
+// including successful exits, with the tails of both streams.
+type OutputClassifier interface {
+	ClassifyOutput(exitCode int, stdoutTail, stderrTail string) (domain.FailureClass, LaneSignal, string)
+}
+
+// Classify classifies one finished attempt. It uses ClassifyOutput when the
+// adapter has it and Classify with the stderr tail otherwise.
+func Classify(a Adapter, exitCode int, stdoutTail, stderrTail string) (domain.FailureClass, LaneSignal, string) {
+	if c, ok := a.(OutputClassifier); ok {
+		return c.ClassifyOutput(exitCode, stdoutTail, stderrTail)
+	}
+	return a.Classify(exitCode, stderrTail)
 }
 
 // AnswerCleaner is implemented by adapters whose CLI decorates its final
@@ -88,8 +118,29 @@ func (Claude) Command(r Request) (Cmd, error) {
 	for _, dir := range r.ExtraDirs {
 		args = append(args, "--add-dir", dir)
 	}
+	if tools := claudeTools(r); len(tools) > 0 {
+		args = append(args, "--allowedTools")
+		args = append(args, tools...)
+	}
 	return claudeMCP(r, args)
 }
+
+// claudeTools builds the --allowedTools list: the lane's list or the write
+// default, then the faztudo MCP tools when an MCP config is passed.
+func claudeTools(r Request) []string {
+	var tools []string
+	switch {
+	case r.AllowedTools != nil:
+		tools = append(tools, r.AllowedTools...)
+	case r.Mode == domain.RunWrite:
+		tools = append(tools, DefaultClaudeWriteTools...)
+	}
+	if r.MCP != nil {
+		tools = append(tools, allowedMCPTools...)
+	}
+	return tools
+}
+
 func (Claude) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)
 }

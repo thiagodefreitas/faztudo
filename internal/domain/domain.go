@@ -229,16 +229,18 @@ type LaneError struct {
 }
 
 type Lane struct {
-	ID             string       `json:"id"`
-	CLI            string       `json:"cli"`
-	Model          string       `json:"model,omitempty"`
-	CostClass      CostClass    `json:"cost_class"`
-	Capacity       int          `json:"capacity"`
-	Running        int          `json:"running"`
-	Health         LaneHealth   `json:"health"`
-	HealthReason   string       `json:"health_reason,omitempty"`
-	Windows        []LaneWindow `json:"windows"`
-	RunsToday      int          `json:"runs_today"`
-	TokensLastHour *int64       `json:"tokens_last_hour,omitempty"`
-	LastError      *LaneError   `json:"last_error,omitempty"`
+	ID           string       `json:"id"`
+	CLI          string       `json:"cli"`
+	Model        string       `json:"model,omitempty"`
+	CostClass    CostClass    `json:"cost_class"`
+	Capacity     int          `json:"capacity"`
+	Running      int          `json:"running"`
+	Health       LaneHealth   `json:"health"`
+	HealthReason string       `json:"health_reason,omitempty"`
+	Windows      []LaneWindow `json:"windows"`
+	RunsToday    int          `json:"runs_today"`
+	// RunsDate is the local day (2006-01-02) that RunsToday counts.
+	RunsDate       string     `json:"runs_date,omitempty"`
+	TokensLastHour *int64     `json:"tokens_last_hour,omitempty"`
+	LastError      *LaneError `json:"last_error,omitempty"`
 }

@@ -23,9 +23,18 @@ func printLanes(p config.Paths) error {
 			return err
 		}
 		defer s.Close()
-		lanes, err = s.Lanes(context.Background())
+		all, err := s.Lanes(context.Background())
 		if err != nil {
 			return err
+		}
+		c, err := config.Load(p)
+		if err != nil {
+			return err
+		}
+		for _, l := range all {
+			if !c.IsStaleDefaultLane(l.ID, l.CLI) {
+				lanes = append(lanes, l)
+			}
 		}
 	} else if os.IsNotExist(err) {
 		c, err := config.Load(p)

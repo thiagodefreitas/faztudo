@@ -33,10 +33,12 @@ type Registry struct {
 	until      map[string]time.Time
 	thresholds map[string]int
 	changed    chan struct{}
+	// now is the clock; tests replace it.
+	now func() time.Time
 }
 
 func New(lanes []LaneConfig, personas []PersonaConfig, app events.Appender) (*Registry, error) {
-	r := &Registry{lanes: map[string]*domain.Lane{}, personas: map[string]PersonaConfig{}, app: app, until: map[string]time.Time{}, thresholds: map[string]int{}, changed: make(chan struct{})}
+	r := &Registry{lanes: map[string]*domain.Lane{}, personas: map[string]PersonaConfig{}, app: app, until: map[string]time.Time{}, thresholds: map[string]int{}, changed: make(chan struct{}), now: time.Now}
 	for _, c := range lanes {
 		if c.ID == "" || c.Capacity < 1 || c.ConserveAt < 0 || c.ConserveAt > 100 || r.lanes[c.ID] != nil {
 			return nil, fmt.Errorf("invalid or duplicate lane %q", c.ID)
@@ -82,7 +84,12 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 		}
 		chain = []string{override}
 	}
+	// Lanes that are available or unknown win over conserve lanes. A
+	// conserve lane is used only when no other lane in the chain is usable,
+	// busy lanes included: those are worth waiting for.
 	var skipped []Skipped
+	conserveID, conserveAt := "", 0
+	busyOther := false
 	for _, id := range chain {
 		l := r.lanes[id]
 		if l.Health == domain.LaneExhausted && !r.until[id].IsZero() && time.Now().After(r.until[id]) {
@@ -98,11 +105,24 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 		}
 		if reason == "" && l.Running >= l.Capacity {
 			reason = "at capacity"
+			if l.Health != domain.LaneConserve {
+				busyOther = true
+			}
+		}
+		if reason == "" && l.Health == domain.LaneConserve {
+			if conserveID == "" {
+				conserveID, conserveAt = id, len(skipped)
+			}
+			skipped = append(skipped, Skipped{ID: id, Reason: "conserve: " + l.HealthReason})
+			continue
 		}
 		if reason == "" {
 			return *l, skipped, nil
 		}
 		skipped = append(skipped, Skipped{ID: id, Reason: reason})
+	}
+	if conserveID != "" && !busyOther {
+		return *r.lanes[conserveID], skipped[:conserveAt], nil
 	}
 	return domain.Lane{}, skipped, errors.New("no healthy lane with free capacity")
 }
@@ -221,11 +241,58 @@ func (r *Registry) Snapshot(id string) (domain.Lane, bool) {
 	return *l, true
 }
 
+// RecordRun counts a run started on the lane for the local day and
+// publishes the lane.
+func (r *Registry) RecordRun(id string) {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil {
+		r.mu.Unlock()
+		return
+	}
+	r.rollDay(l)
+	l.RunsToday++
+	copyLane := *l
+	r.mu.Unlock()
+	r.emit(copyLane)
+}
+
+// rollDay resets the run counter when the local day changed.
+func (r *Registry) rollDay(l *domain.Lane) {
+	today := r.now().Format("2006-01-02")
+	if l.RunsDate != today {
+		l.RunsDate, l.RunsToday = today, 0
+	}
+}
+
+// SetTokensLastHour records the token total of the last hour, or clears it
+// when the reader has none.
+func (r *Registry) SetTokensLastHour(ctx context.Context, id string, tokens *int64) error {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil {
+		r.mu.Unlock()
+		return fmt.Errorf("unknown lane %s", id)
+	}
+	l.TokensLastHour = tokens
+	r.rollDay(l)
+	copyLane := *l
+	r.mu.Unlock()
+	if r.app == nil {
+		return nil
+	}
+	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
+	return err
+}
+
 // Restore keeps persisted health when the daemon starts again.
 func (r *Registry) Restore(lane domain.Lane) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if current := r.lanes[lane.ID]; current != nil {
+		current.RunsToday, current.RunsDate = lane.RunsToday, lane.RunsDate
+		current.TokensLastHour = lane.TokensLastHour
+		r.rollDay(current)
 		current.Health = lane.Health
 		current.HealthReason = lane.HealthReason
 		current.Windows = lane.Windows

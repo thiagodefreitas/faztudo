@@ -63,6 +63,9 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		configured[l.ID] = l
 	}
 	for _, l := range stored {
+		if c.IsStaleDefaultLane(l.ID, l.CLI) {
+			continue
+		}
 		threshold := 0
 		if v := configured[l.ID].ConserveAt; v != nil {
 			threshold = *v
@@ -82,6 +85,9 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		return nil, err
 	}
 	for _, l := range stored {
+		if c.IsStaleDefaultLane(l.ID, l.CLI) {
+			continue
+		}
 		reg.Restore(l)
 	}
 	a := &App{Store: s, Config: c, Paths: p, Registry: reg, Adapters: map[string]adapters.Adapter{
@@ -106,6 +112,7 @@ func (a *App) Bind(h *api.API) {
 	h.CancelRun = a.CancelRun
 	h.RetryRun = a.RetryRun
 	h.ProbeLane = a.ProbeLane
+	h.HideLane = func(l domain.Lane) bool { return a.Config.IsStaleDefaultLane(l.ID, l.CLI) }
 }
 
 func (a *App) Start(ctx context.Context) error {
@@ -159,6 +166,7 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 		return domain.Lane{}, err
 	}
 	var windows []domain.LaneWindow
+	var tokensHour *int64
 	switch lane.CLI {
 	case "codex":
 		windows, err = usage.ReadCodex(home, usage.Options{})
@@ -166,6 +174,10 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 		var result usage.ClaudeResult
 		result, err = usage.ReadClaude(home, usage.Options{PlanLimitTokens: a.planLimit(id)})
 		windows = result.Windows
+		if result.FiveHour.Entries > 0 || result.Day.Entries > 0 {
+			total := result.LastHour.Total()
+			tokensHour = &total
+		}
 	default:
 		return domain.Lane{}, fmt.Errorf("%w: usage reader unavailable for lane", store.ErrConflict)
 	}
@@ -175,7 +187,22 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 	if err := a.Registry.UpdateUsage(ctx, id, windows); err != nil {
 		return domain.Lane{}, err
 	}
+	if lane.CLI == "claude" {
+		if err := a.Registry.SetTokensLastHour(ctx, id, tokensHour); err != nil {
+			return domain.Lane{}, err
+		}
+	}
 	return a.Store.Lane(ctx, id)
+}
+
+// allowedTools returns the lane's allowed_tools, nil when unset.
+func (a *App) allowedTools(id string) []string {
+	for _, l := range a.Config.Lanes.Lane {
+		if l.ID == id {
+			return l.AllowedTools
+		}
+	}
+	return nil
 }
 
 func (a *App) planLimit(id string) int64 {
@@ -189,9 +216,51 @@ func (a *App) planLimit(id string) int64 {
 
 func (a *App) OnMessage(_ context.Context, m domain.Message, agents []domain.Member) {
 	for _, agent := range agents {
-		agent := agent
-		go a.run(context.Background(), m, agent, "")
+		agent, msg := agent, m
+		override, body, found := parseLaneOverride(m.Body, agent.Handle)
+		if found {
+			msg.Body = body
+			if err := a.checkLaneOverride(agent, override); err != nil {
+				channel := m.ChannelID
+				go a.notice(context.Background(), channel, "warn", err.Error())
+				continue
+			}
+		}
+		go a.run(context.Background(), msg, agent, override)
 	}
+}
+
+// checkLaneOverride says why a "/lane" override cannot run.
+func (a *App) checkLaneOverride(agent domain.Member, id string) error {
+	if _, ok := a.Registry.Snapshot(id); !ok {
+		return fmt.Errorf("Unknown lane %s; @%s did not run.", id, agent.Handle)
+	}
+	if agent.Agent != nil {
+		for _, l := range agent.Agent.Lanes {
+			if l == id {
+				return nil
+			}
+		}
+		return fmt.Errorf("Lane %s is not in @%s's chain (%s); @%s did not run.", id, agent.Handle, strings.Join(agent.Agent.Lanes, ", "), agent.Handle)
+	}
+	return fmt.Errorf("@%s has no lane chain", agent.Handle)
+}
+
+// parseLaneOverride finds "/lane <id>" right after a mention of handle, as
+// in "@coder /lane claude/opus fix x". It returns the lane id and the body
+// with that part removed.
+func parseLaneOverride(body, handle string) (string, string, bool) {
+	re := regexp.MustCompile(`(?i)(^|[^A-Za-z0-9])(@` + regexp.QuoteMeta(handle) + `)(?:\s+/lane\s+([^\s]+))(\s+|$)`)
+	loc := re.FindStringSubmatchIndex(body)
+	if loc == nil {
+		return "", body, false
+	}
+	id := body[loc[6]:loc[7]]
+	prefix, suffix := body[:loc[5]], body[loc[1]:]
+	if suffix == "" {
+		return id, prefix, true
+	}
+	return id, prefix + " " + suffix, true
 }
 
 func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member, override string) {
@@ -226,13 +295,16 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	if err != nil {
 		return err
 	}
-	if len(skipped) > 0 {
+	if lane.Health == domain.LaneConserve {
+		a.notice(ctx, channel.ID, "warn", fmt.Sprintf("Using %s although it is in conserve (%s): no other lane in @%s's chain is usable.", lane.ID, lane.HealthReason, agent.Handle))
+	} else if len(skipped) > 0 {
 		a.notice(ctx, channel.ID, "warn", fmt.Sprintf("Using %s; %s was skipped: %s", lane.ID, skipped[0].ID, skipped[0].Reason))
 	}
 	adapter := a.Adapters[lane.CLI]
 	if adapter == nil {
 		return fmt.Errorf("no adapter for %s", lane.CLI)
 	}
+	a.Registry.RecordRun(lane.ID)
 	prompt, err := a.prompt(ctx, m)
 	if err != nil {
 		return err
@@ -268,7 +340,7 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	if workdir == "" {
 		workdir = a.Paths.DataDir
 	}
-	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout}
+	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout, AllowedTools: a.allowedTools(lane.ID)}
 	if mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
 		token, issueErr := a.MCP.Issue(run.ID, agent.ID, channel.ID)
 		if issueErr != nil {
@@ -390,7 +462,11 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 	var b strings.Builder
 	b.WriteString("Recent channel messages (oldest first):\n")
 	for _, msg := range messages {
-		fmt.Fprintf(&b, "@%s: %s\n", handles[msg.AuthorID], msg.Body)
+		body := msg.Body
+		if msg.ID == m.ID {
+			body = m.Body
+		}
+		fmt.Fprintf(&b, "@%s: %s\n", handles[msg.AuthorID], body)
 	}
 	fmt.Fprintf(&b, "\nRequest:\n%s", m.Body)
 	return b.String(), nil
