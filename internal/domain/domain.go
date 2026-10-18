@@ -211,6 +211,22 @@ type Run struct {
 	RetryOf      ID            `json:"retry_of,omitempty"`
 	Verification *Verification `json:"verification,omitempty"`
 	DiffStat     *DiffStat     `json:"diff_stat,omitempty"`
+	// Tokens is what the CLI's own local log says this run used. It is absent
+	// when the CLI keeps no such log or the run cannot be told apart from
+	// another in the same directory.
+	Tokens *RunTokens `json:"tokens,omitempty"`
+	// CostUSD is an estimate from the lane's configured prices, never billing.
+	// It is absent when Tokens is unknown or the lane has no prices.
+	CostUSD *float64 `json:"cost_usd,omitempty"`
+}
+
+// RunTokens splits a run's tokens the way prices do. Cached input is not
+// part of Input.
+type RunTokens struct {
+	Input      int64 `json:"input"`
+	Output     int64 `json:"output"`
+	CacheRead  int64 `json:"cache_read"`
+	CacheWrite int64 `json:"cache_write"`
 }
 
 type ApprovalOption struct {

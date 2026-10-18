@@ -87,9 +87,17 @@ describe("RunCardView", () => {
   it("shows a pass and the diff stat", () => {
     renderCard(passed)
     expect(screen.getByText("Passed")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /View diff/ })).toHaveTextContent("1 file")
-    expect(screen.getByRole("button", { name: /View diff/ })).toHaveTextContent("+2")
+    expect(screen.getByRole("button", { name: /View diff/ })).toHaveTextContent("View diff (1 file, +2 -1)")
     expect(screen.getByText(/available · cli-log · 12m ago/)).toBeInTheDocument()
+  })
+
+  it("shows the run's tokens and estimated cost under Details, and unknown as unknown", () => {
+    const view = renderCard({ ...passed, tokens: { input: 1200, output: 300, cache_read: 0, cache_write: 0 }, cost_usd: 0.02 })
+    expect(screen.getByText(/1,500 tokens/)).toBeInTheDocument()
+    expect(screen.getByText(/about \$0\.02, estimate/i)).toBeInTheDocument()
+    view.unmount()
+    renderCard(passed)
+    expect(screen.getByText(/Tokens unknown/)).toBeInTheDocument()
   })
 
   it("offers Retry only for failed and cancelled runs", () => {

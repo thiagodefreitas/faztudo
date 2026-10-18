@@ -181,6 +181,9 @@ interface Run {
   retry_of?: ID;            // the failed run this one retried on the next lane
   verification?: { ok: boolean; detail: string };
   diff_stat?: { files: number; insertions: number; deletions: number };
+  // Set when the run ends, from the CLI's own local log. Absent means unknown.
+  tokens?: { input: number; output: number; cache_read: number; cache_write: number };
+  cost_usd?: number;        // estimate from the lane's configured prices, never billing
 }
 
 interface Approval {
@@ -260,6 +263,8 @@ interface NoticeAction {
   agent: string;
 }
 ```
+
+`Run.tokens` and `Run.cost_usd` are filled when a run ends, from the usage the CLI wrote to its own local log for that run: Claude's session JSONL, Codex's rollout file and Grok's `usage.json` turns. Other CLIs leave them absent, and so does a run whose session cannot be told apart from another run in the same directory at the same time. `cost_usd` also needs the lane's `usd_per_million_*` prices. It is an estimate, not billing, and unknown stays absent rather than zero.
 
 ## Endpoints
 

@@ -136,6 +136,18 @@ export interface Run {
   retry_of?: ID
   verification?: Verification
   diff_stat?: DiffStat
+  /** What the CLI's own log says this run used. Absent means unknown. */
+  tokens?: RunTokens
+  /** Estimate from the lane's configured prices. Never billing. */
+  cost_usd?: number
+}
+
+/** Cached input is not part of `input`. */
+export interface RunTokens {
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number
 }
 
 export type ApprovalStyle = "primary" | "danger"

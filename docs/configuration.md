@@ -124,7 +124,7 @@ capacity = 1
 conserve_at = 80
 sandbox_network = true       # default; false hides the network in write runs
 # plan_limit_tokens = 1000000 # optional manual limit for token-based usage (claude, grok)
-# usd_per_million_input = 2.0  # optional estimate, not billing
+# usd_per_million_input = 2.0  # optional estimate, not billing; also prices each run's tokens
 # usd_per_million_output = 8.0
 # usd_per_million_cached = 0.5
 

@@ -23,6 +23,23 @@ const STATE_TEXT: Record<Run["state"], string> = {
   cancelled: "Cancelled",
 }
 
+const COUNT = new Intl.NumberFormat("en-US")
+
+/** "51,500 tokens", or "Tokens unknown" when the CLI keeps no per-run log. */
+export function tokensTitle(run: Run): string {
+  const t = run.tokens
+  if (!t) return "Tokens unknown"
+  return `${COUNT.format(t.input + t.output + t.cache_read + t.cache_write)} tokens`
+}
+
+/** The split behind the total, plus the estimated cost when the lane has prices. */
+export function tokensDetail(run: Run): string {
+  const t = run.tokens
+  if (!t) return "This CLI does not record usage per run, or it could not be told apart from another run."
+  const split = `${COUNT.format(t.input)} in, ${COUNT.format(t.output)} out, ${COUNT.format(t.cache_read)} cache read, ${COUNT.format(t.cache_write)} cache write.`
+  return run.cost_usd === undefined ? split : `${split} About $${run.cost_usd.toFixed(2)}, estimate, not billing.`
+}
+
 /** "codex/default skipped: no capacity" from a "Lane switched from ... to ..." notice. */
 export function switchedWhy(text: string | undefined): string | undefined {
   const match = text ? /^Lane switched from (\S+) to \S+?\.\s*(.*)$/.exec(text) : null
@@ -94,12 +111,14 @@ export function runTimeline(input: {
   } else {
     steps.push({ key: "now", title: STATE_TEXT[run.state], detail: formatElapsed(run.started_at, undefined, now), tone: "info" })
   }
+  // Usage is read when the run ends, so a live run has none yet.
+  if (run.tokens || run.ended_at) steps.push({ key: "usage", title: tokensTitle(run), detail: tokensDetail(run), tone: "info" })
   const cost = input.lane?.cost_today_usd
   if (cost !== undefined) {
     steps.push({
       key: "cost",
       title: `About $${cost.toFixed(2)} on this lane today, estimate`,
-      detail: "Tokens and cost are not recorded per run. This is the lane's estimate, not billing.",
+      detail: "This is the lane's estimate for the whole day, not billing.",
       tone: "info",
     })
   }

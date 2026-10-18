@@ -662,6 +662,13 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if err == nil {
 		_ = a.Registry.RecoverSince(ctx, lane.ID, "last run succeeded", runStarted)
 	}
+	if run.StartedAt != nil && run.EndedAt != nil {
+		dir := workdir
+		if run.Worktree != "" {
+			dir = run.Worktree
+		}
+		a.recordRunUsage(ctx, &run, lane.CLI, dir)
+	}
 	var proposal string
 	if run.StartedAt != nil {
 		answer := adapters.CleanAnswer(adapter, a.answer(run.ID))
@@ -696,6 +703,27 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		}
 	}
 	return err
+}
+
+// recordRunUsage stores the tokens the CLI logged for this run, and a cost
+// estimate when the lane has prices. Unknown usage leaves the run untouched.
+func (a *App) recordRunUsage(ctx context.Context, run *domain.Run, cli, dir string) {
+	home, err := os.UserHomeDir()
+	if err != nil || run.StartedAt == nil || run.EndedAt == nil {
+		return
+	}
+	tu, ok := usage.ReadRun(cli, home, dir, *run.StartedAt, *run.EndedAt)
+	if !ok {
+		return
+	}
+	run.Tokens = &domain.RunTokens{Input: tu.InputTokens, Output: tu.OutputTokens, CacheRead: tu.CacheReadTokens, CacheWrite: tu.CacheWriteTokens}
+	for _, configured := range a.Config.Lanes.Lane {
+		if configured.ID == run.LaneID {
+			run.CostUSD = usage.EstimateUSD(tu, configured.USDPerMillionInput, configured.USDPerMillionOutput, configured.USDPerMillionCached)
+			break
+		}
+	}
+	_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: run.ChannelID, Payload: *run})
 }
 
 func mcpReachableForRun(mode domain.RunMode, sandboxMode string, network bool) bool {

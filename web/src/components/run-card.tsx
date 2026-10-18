@@ -5,7 +5,7 @@ import { api } from "../api/client"
 import { hueFor } from "../lib/avatar"
 import { cx } from "../lib/cx"
 import { runSentence } from "../lib/run-sentence"
-import { switchedWhy } from "../lib/run-timeline"
+import { switchedWhy, tokensDetail, tokensTitle } from "../lib/run-timeline"
 import { formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
@@ -183,9 +183,9 @@ export function RunCardView({
         <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
           {run.diff_stat && (
             <button type="button" onClick={onViewDiff} className={run.state === "done" ? PRIMARY : BUTTON}>
-              {run.diff_stat.files} {run.diff_stat.files === 1 ? "file" : "files"}{" "}
+              View diff ({run.diff_stat.files} {run.diff_stat.files === 1 ? "file" : "files"},{" "}
               <span className={run.state === "done" ? undefined : "text-ok"}>+{run.diff_stat.insertions}</span>{" "}
-              <span className={run.state === "done" ? undefined : "text-danger"}>-{run.diff_stat.deletions}</span> View diff
+              <span className={run.state === "done" ? undefined : "text-danger"}>-{run.diff_stat.deletions}</span>)
             </button>
           )}
           {working && (
@@ -220,6 +220,10 @@ export function RunCardView({
           <summary className="inline-flex min-h-8 cursor-pointer items-center text-[12px] text-muted hover:text-ink">Details</summary>
           <div className="mt-1 flex flex-col gap-2">
             <LaneChip lane={lane} now={now} />
+            <p className="text-[12px] text-muted">
+              {tokensTitle(run)}
+              {run.tokens ? `. ${tokensDetail(run)}` : ""}
+            </p>
             {run.verification?.ok && (
               <div className="rounded-md border-l-2 border-ok bg-ok-soft px-2.5 py-2">
                 <p className="text-[13px] font-medium">Passed</p>

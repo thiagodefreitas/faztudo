@@ -32,7 +32,7 @@ describe("switchedWhy", () => {
 describe("runTimeline", () => {
   it("walks a finished run from request to the end", () => {
     const steps = runTimeline({ run, now, trigger })
-    expect(steps.map((step) => step.key)).toEqual(["request", "lane", "start", "files", "tests", "end"])
+    expect(steps.map((step) => step.key)).toEqual(["request", "lane", "start", "files", "tests", "end", "usage"])
     expect(steps[0]?.detail).toBe("Fix the login check")
     expect(steps.find((step) => step.key === "files")?.detail).toBe("+12 -4")
     expect(steps.find((step) => step.key === "end")?.detail).toBe("3m 30s")
@@ -54,6 +54,21 @@ describe("runTimeline", () => {
     const steps = runTimeline({ run: live, now })
     expect(steps.map((step) => step.key)).toEqual(["lane", "start", "now"])
     expect(steps.at(-1)?.detail).toBe("1m 00s")
+  })
+
+  it("shows the tokens and the estimated cost of this run when they are recorded", () => {
+    const withUsage: Run = { ...run, tokens: { input: 1200, output: 300, cache_read: 50000, cache_write: 0 }, cost_usd: 0.1234 }
+    const step = runTimeline({ run: withUsage, now }).find((s) => s.key === "usage")
+    expect(step?.title).toBe("51,500 tokens")
+    expect(step?.detail).toBe("1,200 in, 300 out, 50,000 cache read, 0 cache write. About $0.12, estimate, not billing.")
+  })
+
+  it("leaves tokens unknown when the CLI keeps no per-run log, and the cost out when there are no prices", () => {
+    const unknown = runTimeline({ run, now }).find((s) => s.key === "usage")
+    expect(unknown?.title).toBe("Tokens unknown")
+    expect(unknown?.detail).toMatch(/does not record/)
+    const noPrice: Run = { ...run, tokens: { input: 10, output: 5, cache_read: 0, cache_write: 0 } }
+    expect(runTimeline({ run: noPrice, now }).find((s) => s.key === "usage")?.detail).not.toMatch(/\$/)
   })
 
   it("adds the lane cost estimate only when it is known, never as billing", () => {
