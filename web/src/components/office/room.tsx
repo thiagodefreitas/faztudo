@@ -167,6 +167,58 @@ function WallLaneStrip({ strip }: { strip: PlacedLaneStrip }) {
   )
 }
 
+const AREA_CLICK_STYLE = { cursor: "zoom-in" } as const
+
+// Keyboard and screen reader targets for the area names. They are drawn after
+// the desks so the desks stay first in the tab order, and sit over the names
+// the backdrop already paints. Enter or Space zooms to the area.
+export function AreaLabelTargets({
+  zones,
+  rug,
+  onSelect,
+}: {
+  zones: readonly PlacedZone[]
+  rug: Rect | null
+  onSelect: (area: Rect) => void
+}) {
+  const targets: { key: string; label: string; box: Rect; area: Rect }[] = zones.map((zone) => ({
+    key: zone.id,
+    label: zone.label,
+    area: zone,
+    box: { x: zone.x + 12, y: zone.y + 5, w: Math.min(zone.w - 24, zone.label.length * 9 + 16), h: 22 },
+  }))
+  if (rug) targets.push({ key: "director", label: "Director", area: rug, box: { x: rug.x + 14, y: rug.y + 6, w: 84, h: 20 } })
+  return (
+    <g>
+      {targets.map(({ key, label, box, area }) => (
+        <rect
+          key={key}
+          data-testid={`area-label-${key}`}
+          role="button"
+          tabIndex={0}
+          aria-label={`Zoom to ${label}`}
+          x={box.x}
+          y={box.y}
+          width={Math.max(box.w, 24)}
+          height={box.h}
+          rx="6"
+          fill="transparent"
+          stroke="transparent"
+          strokeWidth="1.5"
+          style={AREA_CLICK_STYLE}
+          className="outline-none focus-visible:stroke-accent"
+          onClick={() => onSelect(area)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return
+            event.preventDefault()
+            onSelect(area)
+          }}
+        />
+      ))}
+    </g>
+  )
+}
+
 export function RoomBackdrop({
   width = ROOM_W,
   height,
@@ -174,6 +226,7 @@ export function RoomBackdrop({
   rug,
   taskNotes = [],
   laneBars = [],
+  onAreaClick,
 }: {
   width?: number
   height: number
@@ -181,7 +234,11 @@ export function RoomBackdrop({
   rug: Rect | null
   taskNotes?: readonly TaskBoardNote[]
   laneBars?: readonly LaneMeterBar[]
+  // Clicking bare floor of a zone, a pod or the Director rug zooms to it.
+  onAreaClick?: (area: Rect) => void
 }) {
+  const areaProps = (area: Rect) =>
+    onAreaClick ? { onClick: () => onAreaClick(area), style: AREA_CLICK_STYLE } : {}
   const compact = width < 640
   const fixtures = layoutWallFixtures(width, taskNotes, laneBars)
   return (
@@ -218,13 +275,14 @@ export function RoomBackdrop({
             fillOpacity="0.55"
             stroke="var(--color-line)"
             strokeDasharray="5 5"
+            {...areaProps(zone)}
           />
           <text x={zone.x + 20} y={zone.y + 21} fontSize="11" fontWeight="600" letterSpacing="1.2" fill="var(--color-faint)">
             {zone.label}
           </text>
           {zone.pods.map((pod) => (
             <g key={`${pod.x}-${pod.y}`} aria-hidden="true">
-              <rect x={pod.x} y={pod.y} width={pod.w} height={pod.h} rx="14" fill="var(--color-sidebar)" fillOpacity="0.7" />
+              <rect x={pod.x} y={pod.y} width={pod.w} height={pod.h} rx="14" fill="var(--color-sidebar)" fillOpacity="0.7" {...areaProps(pod)} />
               <circle cx={pod.x + pod.w / 2} cy={pod.y + pod.h / 2} r="7" fill="var(--color-accent-soft)" stroke="var(--color-accent)" strokeOpacity="0.5" />
             </g>
           ))}
@@ -233,7 +291,7 @@ export function RoomBackdrop({
 
       {rug && (
         <g aria-hidden="true">
-          <rect x={rug.x} y={rug.y} width={rug.w} height={rug.h} rx="22" fill="var(--color-accent-soft)" stroke="var(--color-accent)" strokeOpacity="0.45" />
+          <rect x={rug.x} y={rug.y} width={rug.w} height={rug.h} rx="22" fill="var(--color-accent-soft)" stroke="var(--color-accent)" strokeOpacity="0.45" {...areaProps(rug)} />
           <rect x={rug.x + 8} y={rug.y + 8} width={rug.w - 16} height={rug.h - 16} rx="16" fill="none" stroke="var(--color-accent)" strokeOpacity="0.3" strokeDasharray="3 5" />
           <text x={rug.x + 22} y={rug.y + 20} fontSize="10" fontWeight="600" letterSpacing="1.2" fill="var(--color-accent)">
             Director

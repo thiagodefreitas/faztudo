@@ -2,7 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { motion } from "motion/react"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { api } from "../../api/client"
 import { cx } from "../../lib/cx"
 import { displayPct } from "../../lib/lane-format"
@@ -18,9 +18,12 @@ import { HealthBadge } from "../lanes"
 import { WorkspaceNav } from "../sidebar"
 import { avatarState, deriveLaneMeterBars, deriveTaskBoardNotes } from "./avatar"
 import { DeskStateBadge, RoomDesk } from "./desk"
-import { layoutRoom } from "./layout"
-import { RoomBackdrop } from "./room"
+import { layoutRoom, roomAreas } from "./layout"
+import { AreaLabelTargets, RoomBackdrop } from "./room"
 import { type DeskInfo, useOfficeDesks, useReducedMotion } from "./state"
+import { handleRoomKey, useRoomGestures, useRoomView } from "./use-room-view"
+import { layoutSignature, viewGeometry, ZOOM_STEP } from "./zoom"
+import { ZoomControls } from "./zoom-controls"
 
 const RUN_STATE_LABEL: Record<RunState, string> = {
   queued: "Queued",
@@ -154,6 +157,49 @@ export function OfficeScene({
   }, [lanesProp, desks])
 
   const room = useMemo(() => layoutRoom(desks, { departments, compact }), [desks, departments, compact])
+  const areas = useMemo(() => roomAreas(room), [room])
+  const empty = desks.length === 0
+
+  // The window onto the room. Its aspect follows the box the room is drawn in.
+  const roomRef = useRef<HTMLDivElement>(null)
+  const [aspect, setAspect] = useState(room.width / room.height)
+  useEffect(() => {
+    const el = roomRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const measure = () => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) setAspect(el.clientWidth / el.clientHeight)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [empty])
+  const geometry = useMemo(
+    () => viewGeometry(room.width, room.height, aspect, compact),
+    [room.width, room.height, aspect, compact],
+  )
+  const sig = useMemo(
+    () => layoutSignature(room.width, room.height, room.seats.map((seat) => seat.desk.member.id)),
+    [room.width, room.height, room.seats],
+  )
+  const view = useRoomView({ geometry, sig, reducedMotion })
+  useRoomGestures(roomRef, view, compact, !empty)
+
+  // Escape goes back to fit-all, unless a desk panel or a dialog is open and uses it first.
+  const { zoomed, fit } = view
+  useEffect(() => {
+    if (!zoomed || selectedDesk) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest("input, textarea, select")) return
+      if (document.querySelector('[role="dialog"]')) return
+      fit()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [zoomed, fit, selectedDesk])
+
   const taskNotes = useMemo(() => deriveTaskBoardNotes(desks), [desks])
   const laneBars = useMemo(() => deriveLaneMeterBars(lanes, theme), [lanes, theme])
 
@@ -221,18 +267,38 @@ export function OfficeScene({
           <p className="py-12 text-center text-[13px] text-muted">No workspace members yet.</p>
         ) : (
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs">
-            {/* The back wall sits flush at the top (`xMidYMin meet`). On phones, pods reflow vertically inside this box. */}
+            {/* The back wall sits flush at the top (`xMidYMin meet`). On phones, pods reflow vertically inside this box.
+                Zooming moves the viewBox instead of scaling a picture, so text stays sharp. At fit-all the box is
+                drawn exactly as before. */}
             <div
+              ref={roomRef}
               data-testid="office-room"
               data-compact={compact ? "true" : "false"}
-              className="h-full overflow-x-hidden overflow-y-auto"
+              data-zoom={view.state.zoom.toFixed(2)}
+              role="region"
+              aria-label="Office floor. Plus and minus zoom, 0 fits all, arrows pan."
+              tabIndex={0}
+              onKeyDown={(event) => {
+                const target = event.target
+                if (target instanceof HTMLElement && target.closest("input, textarea, select")) return
+                if (handleRoomKey(view, event)) event.preventDefault()
+              }}
+              style={{ touchAction: compact && !view.active ? "pan-y" : "none" }}
+              className={cx(
+                "h-full overflow-x-hidden focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+                view.active ? "overflow-y-hidden" : "overflow-y-auto",
+              )}
             >
               <svg
-                viewBox={`0 0 ${room.width} ${room.height}`}
+                viewBox={
+                  view.active
+                    ? `${view.rect.x} ${view.rect.y} ${view.rect.w} ${view.rect.h}`
+                    : `0 0 ${room.width} ${room.height}`
+                }
                 preserveAspectRatio="xMidYMin meet"
                 role="group"
                 aria-label="Office floor plan"
-                className={cx("mx-auto block w-full select-none", compact ? "h-auto" : "h-full")}
+                className={cx("mx-auto block w-full select-none", compact && !view.active ? "h-auto" : "h-full")}
               >
                 <RoomBackdrop
                   width={room.width}
@@ -241,6 +307,7 @@ export function OfficeScene({
                   rug={room.rug}
                   taskNotes={taskNotes}
                   laneBars={laneBars}
+                  onAreaClick={view.focusRect}
                 />
                 {room.seats.map((seat) => (
                   <RoomDesk
@@ -258,8 +325,18 @@ export function OfficeScene({
                     onOpenApproval={handleApproval}
                   />
                 ))}
+                <AreaLabelTargets zones={room.zones} rug={room.rug} onSelect={view.focusRect} />
               </svg>
             </div>
+            <ZoomControls
+              areas={areas}
+              onFit={view.fit}
+              onJump={view.focusRect}
+              onZoomIn={() => view.zoomBy(ZOOM_STEP)}
+              onZoomOut={() => view.zoomBy(1 / ZOOM_STEP)}
+              canZoomIn={view.canZoomIn}
+              canZoomOut={view.canZoomOut}
+            />
             <Legend />
           </div>
         )}

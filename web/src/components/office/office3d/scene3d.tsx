@@ -13,9 +13,10 @@ import type { Approval, Channel, Department, Lane, Member, Run, StreamEvent } fr
 import { AgentAvatar } from "../../agent-avatar"
 import { WorkspaceNav } from "../../sidebar"
 import { avatarState } from "../avatar"
-import { layoutRoom, type PlacedZone, type Rect, type Seat } from "../layout"
+import { layoutRoom, type PlacedZone, type Rect, type RoomArea, roomAreas, type Seat } from "../layout"
 import { DeskDetailPanel, Legend, OfficeViewToggle } from "../scene"
 import { type DeskInfo, useOfficeDesks, useReducedMotion } from "../state"
+import { ZoomControls } from "../zoom-controls"
 import {
   createAnimationQueue,
   enqueueOfficeEvent,
@@ -55,6 +56,7 @@ import {
 } from "./poses"
 import { CameraRig, NameLabelDriver } from "./view-rig"
 import {
+  areaCameraPose,
   defaultCameraPose,
   deskCameraPose,
   openingCameraPose,
@@ -174,6 +176,7 @@ function RoomWorld({
   onCameraMovingChange,
   onSelect,
   onOpenApproval,
+  onFocusArea,
 }: {
   width: number
   height: number
@@ -200,6 +203,7 @@ function RoomWorld({
   onCameraMovingChange: (moving: boolean) => void
   onSelect: (desk: DeskInfo) => void
   onOpenApproval?: ((desk: DeskInfo) => void) | undefined
+  onFocusArea: (area: RoomArea) => void
 }) {
   const floorW = width * SCALE_3D
   const floorD = height * SCALE_3D
@@ -327,12 +331,15 @@ function RoomWorld({
             })}
             <Billboard position={[zoneLabel.x, zoneLabel.y, zoneLabel.z]}>
               <Html center transform={false} zIndexRange={[5, 0]}>
-                <span
+                <button
+                  type="button"
                   data-testid={`zone3d-label-${zone.id}`}
-                  className="pointer-events-none select-none whitespace-nowrap rounded bg-canvas/80 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-faint/85"
+                  aria-label={`Zoom to ${zone.label}`}
+                  onClick={() => onFocusArea({ id: zone.id, label: zone.label, x: zone.x, y: zone.y, w: zone.w, h: zone.h })}
+                  className="cursor-pointer select-none whitespace-nowrap rounded bg-canvas/80 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-faint/85 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
                 >
                   {zone.label}
-                </span>
+                </button>
               </Html>
             </Billboard>
           </group>
@@ -351,9 +358,15 @@ function RoomWorld({
             </mesh>
             <Billboard position={[rugLabel.x, rugLabel.y, rugLabel.z]}>
               <Html center transform={false} zIndexRange={[5, 0]}>
-                <span className="pointer-events-none select-none whitespace-nowrap rounded bg-canvas/80 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-accent/85">
+                <button
+                  type="button"
+                  data-testid="zone3d-label-director"
+                  aria-label="Zoom to Director"
+                  onClick={() => onFocusArea({ id: "director", label: "Director", ...rug })}
+                  className="cursor-pointer select-none whitespace-nowrap rounded bg-canvas/80 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-accent/85 hover:text-accent focus-visible:outline-2 focus-visible:outline-accent"
+                >
                   Director
-                </span>
+                </button>
               </Html>
             </Billboard>
           </group>
@@ -455,6 +468,8 @@ export function Office3DScene({
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const [focusedId, setFocusedId] = useState<string | null>(initialSelectedId ?? null)
   const [cameraTargetId, setCameraTargetId] = useState<string | null>(initialSelectedId ?? null)
+  const [cameraArea, setCameraArea] = useState<RoomArea | null>(null)
+  const [canvasAspect, setCanvasAspect] = useState(1.6)
   const [moveToken, setMoveToken] = useState(0)
   const [cameraMoving, setCameraMoving] = useState(!reducedMotion)
   const [orbitNonce, setOrbitNonce] = useState(0)
@@ -533,13 +548,17 @@ export function Office3DScene({
   const webglAvailable = useMemo(() => webglProp ?? isWebGLAvailable(), [webglProp])
   const room = useMemo(() => layoutRoom(desks, { departments }), [desks, departments])
   const overviewPose = useMemo(() => defaultCameraPose(room.width, room.height), [room.width, room.height])
+  const areas = useMemo(() => roomAreas(room), [room])
   const destinationPose = useMemo(() => {
+    if (cameraArea && !cameraTargetId) {
+      return areaCameraPose(toWorld(cameraArea, room.width, room.height), overviewPose, canvasAspect)
+    }
     if (!cameraTargetId) return overviewPose
     const seat = room.seats.find((item) => item.desk.member.id === cameraTargetId)
     if (!seat) return overviewPose
     const coords = seatWorldCoords(seat, room.width, room.height)
     return deskCameraPose({ x: coords.x, z: coords.z, facing: seat.facing, scale: coords.scale })
-  }, [cameraTargetId, overviewPose, room])
+  }, [cameraTargetId, cameraArea, canvasAspect, overviewPose, room])
   const openingPose = useMemo(
     () => openingCameraPose(overviewPose, reducedMotion),
     [overviewPose, reducedMotion],
@@ -568,12 +587,26 @@ export function Office3DScene({
   const focusDesk = (memberId: string) => {
     setFocusedId(memberId)
     setCameraTargetId(memberId)
+    setCameraArea(null)
     setMoveToken((token) => token + 1)
   }
 
   const showOverview = () => {
     setFocusedId(null)
     setCameraTargetId(null)
+    setCameraArea(null)
+    setMoveToken((token) => token + 1)
+  }
+
+  // Glide to frame a zone or the Director rug with the camera rig's usual easing.
+  const focusArea = (area: RoomArea) => {
+    setFocusedId(null)
+    setCameraTargetId(null)
+    setCameraArea(area)
+    const canvas = surfaceRef.current
+    if (canvas && canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+      setCanvasAspect(canvas.clientWidth / canvas.clientHeight)
+    }
     setMoveToken((token) => token + 1)
   }
 
@@ -878,9 +911,11 @@ export function Office3DScene({
                   onCameraMovingChange={setCameraMoving}
                   onSelect={handleSelect}
                   onOpenApproval={handleApproval}
+                  onFocusArea={focusArea}
                 />
               </CodeScreenDriver>
             </Canvas>
+            <ZoomControls areas={areas} onFit={showOverview} onJump={focusArea} />
             <Legend />
           </div>
         )}

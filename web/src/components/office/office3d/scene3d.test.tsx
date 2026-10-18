@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import type { Approval, Channel, Department, Lane, Member, Run, StreamEvent } from "../../../types"
 import { DESK_H, DESK_W, layoutRoom } from "../layout"
@@ -560,6 +560,20 @@ describe("Office3DScene", () => {
     fireEvent.keyDown(surface, { key: "Tab" })
     fireEvent.keyDown(surface, { key: " " })
     expect(screen.getByRole("complementary")).toBeVisible()
+  })
+
+  it("offers the zone menu, Fit all and no zoom buttons next to the 3D canvas, and keeps the orbit keys working", async () => {
+    await renderScene3D({ webglAvailable: true })
+    const menu = screen.getByRole("combobox", { name: "Jump to area" })
+    expect(within(menu).getAllByRole("option").map((o) => o.textContent)).toEqual(["Jump to...", "Engineering", "Director"])
+    expect(screen.queryByRole("button", { name: "Zoom in" })).toBeNull()
+
+    fireEvent.change(menu, { target: { value: "dept-eng" } })
+    expect(menu).toHaveValue("")
+    fireEvent.click(screen.getByRole("button", { name: "Fit all" }))
+    fireEvent.keyDown(screen.getByTestId("office3d-canvas"), { key: "ArrowLeft" })
+    fireEvent.keyDown(screen.getByTestId("office3d-canvas"), { key: "+" })
+    expect(screen.getByTestId("office3d-canvas")).toBeInTheDocument()
   })
 
   it("closes the fallback side panel on Escape and returns focus to the desk button", async () => {

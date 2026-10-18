@@ -392,3 +392,15 @@ export function layoutWallFixtures(
 
   return { taskBoard, laneStrip, windows, shelves }
 }
+
+export interface RoomArea extends Rect {
+  id: string
+  label: string
+}
+
+// The named areas a person can jump to: each zone, then the Director's rug.
+export function roomAreas(room: Pick<RoomLayout, "zones" | "rug">): RoomArea[] {
+  const areas: RoomArea[] = room.zones.map((zone) => ({ id: zone.id, label: zone.label, x: zone.x, y: zone.y, w: zone.w, h: zone.h }))
+  if (room.rug) areas.push({ id: "director", label: "Director", ...room.rug })
+  return areas
+}

@@ -5,6 +5,8 @@ import { layoutRoom } from "../layout"
 import { deriveMemberDesk, deriveOfficeDesks } from "../state"
 import {
   applyCameraOrbit,
+  areaCameraPose,
+  CAMERA_LIMITS,
   defaultCameraPose,
   deskCameraPose,
   introCameraPose,
@@ -106,6 +108,34 @@ describe("office camera", () => {
     expect(agentScreen.dot(agentForward)).toBeLessThan(0)
     expect(seatFacingYaw("up")).toBe(Math.PI)
     expect(seatFacingYaw("down")).toBe(0)
+  })
+})
+
+describe("office area framing", () => {
+  const overview = defaultCameraPose(1200, 600)
+
+  it("looks at the area's center from the overview's direction, closer than the overview", () => {
+    const pose = areaCameraPose({ x: -4, z: 1, w: 5, d: 4 }, overview)
+    expect(pose.target[0]).toBe(-4)
+    expect(pose.target[2]).toBe(1)
+    expect(poseRadius(pose)).toBeLessThan(poseRadius(overview))
+    const side = (p: typeof pose) => Math.sign(p.position[2] - p.target[2])
+    expect(side(pose)).toBe(side(overview))
+  })
+
+  it("steps back for a bigger area and a narrower canvas", () => {
+    const small = poseRadius(areaCameraPose({ x: 0, z: 0, w: 4, d: 3 }, overview))
+    const big = poseRadius(areaCameraPose({ x: 0, z: 0, w: 8, d: 6 }, overview))
+    const narrow = poseRadius(areaCameraPose({ x: 0, z: 0, w: 4, d: 3 }, overview, 0.7))
+    expect(big).toBeGreaterThan(small)
+    expect(narrow).toBeGreaterThan(small)
+  })
+
+  it("stays inside the camera limits for a tiny or a huge area", () => {
+    const tiny = poseRadius(areaCameraPose({ x: 0, z: 0, w: 0.1, d: 0.1 }, overview))
+    const huge = poseRadius(areaCameraPose({ x: 0, z: 0, w: 400, d: 400 }, overview))
+    expect(tiny).toBeGreaterThanOrEqual(CAMERA_LIMITS.minDistance - 1e-6)
+    expect(huge).toBeLessThanOrEqual(CAMERA_LIMITS.maxDistance + 1e-6)
   })
 })
 

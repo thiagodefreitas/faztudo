@@ -120,6 +120,45 @@ export function deskCameraPose(anchor: DeskAnchor, limits: CameraLimits = CAMERA
   )
 }
 
+export interface AreaFrame {
+  // Center and size of the area on the floor, in world meters.
+  x: number
+  z: number
+  w: number
+  d: number
+}
+
+const CANVAS_FOV_DEG = 38
+const AREA_MARGIN_3D = 1.2
+
+// Frame a zone or the Director rug from the direction the overview looks from,
+// close enough that the area fills the view with a margin. aspect is the canvas
+// width over its height.
+export function areaCameraPose(
+  area: AreaFrame,
+  overview: CameraPose,
+  aspect = 1.6,
+  limits: CameraLimits = CAMERA_LIMITS,
+): CameraPose {
+  const target: [number, number, number] = [area.x, 0.2, area.z]
+  const dx = overview.position[0] - overview.target[0]
+  const dy = overview.position[1] - overview.target[1]
+  const dz = overview.position[2] - overview.target[2]
+  const length = Math.hypot(dx, dy, dz) || 1
+  const halfV = Math.tan((CANVAS_FOV_DEG * Math.PI) / 360)
+  const halfH = halfV * (aspect > 0 && Number.isFinite(aspect) ? aspect : 1.6)
+  // The floor is seen at a slant, so its depth takes up less of the view than its width.
+  const slant = Math.max(0.5, dy / length)
+  const radius = Math.max((area.w * AREA_MARGIN_3D) / (2 * halfH), (area.d * AREA_MARGIN_3D * slant) / (2 * halfV))
+  return clampCameraPose(
+    {
+      target,
+      position: [target[0] + (dx / length) * radius, target[1] + (dy / length) * radius, target[2] + (dz / length) * radius],
+    },
+    limits,
+  )
+}
+
 export function smoothstep01(t: number): number {
   const x = clamp(t, 0, 1)
   return x * x * (3 - 2 * x)
