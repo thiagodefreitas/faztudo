@@ -1,13 +1,48 @@
 #!/bin/sh
-# Removes the AppArmor profile that postinst may have installed.
+# Removes the AppArmor profile that postinst may have installed, but only a
+# file that still carries the package's marker line. If the profile cannot be
+# unloaded the file is kept and the admin is told.
 set -e
 dst=/etc/apparmor.d/faztudo
-if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
-	if [ -e "$dst" ]; then
-		if command -v apparmor_parser >/dev/null 2>&1; then
-			apparmor_parser -R "$dst" >/dev/null 2>&1 || true
+marker='# faztudo-managed-file: do not edit. Put local changes in /etc/apparmor.d/local/faztudo'
+# The unedited profile 0.1.1 installed, which has no marker.
+v011=07a147e3ad714f23d766c402bbb0b101faea0141c7c9e4f101162832e3aca519
+
+remove_profile() {
+	[ -f "$dst" ] && [ ! -L "$dst" ] || return 0
+	[ "$(head -n 1 "$dst")" = "$marker" ] || [ "$(sha256sum "$dst" | cut -d' ' -f1)" = "$v011" ] || return 0
+	if command -v apparmor_parser >/dev/null 2>&1; then
+		if ! apparmor_parser -R "$dst" >/dev/null 2>&1; then
+			# Not loaded is fine; loaded but not removable is not.
+			if grep -q '^faztudo ' /sys/kernel/security/apparmor/profiles 2>/dev/null; then
+				echo "faztudo: could not unload the AppArmor profile; $dst was kept." >&2
+				echo "faztudo: run 'apparmor_parser -R $dst' and delete the file by hand." >&2
+				return 0
+			fi
 		fi
-		rm -f "$dst"
 	fi
-fi
+	rm -f "$dst"
+	# apparmor_parser -r -T -W cached the compiled profile; drop it too.
+	for dir in /var/cache/apparmor /etc/apparmor.d/cache.d; do
+		[ -d "$dir" ] || continue
+		find "$dir" -maxdepth 2 -type f -name faztudo -exec rm -f '{}' +
+	done
+}
+
+case "$1" in
+remove | purge)
+	remove_profile
+	;;
+abort-install)
+	# A first install failed. With an old version given this is an aborted
+	# upgrade of a removed package; the profile was not ours to add then.
+	if [ -z "$2" ]; then
+		remove_profile
+	fi
+	;;
+abort-upgrade)
+	# The old version stays installed and keeps its profile.
+	:
+	;;
+esac
 exit 0

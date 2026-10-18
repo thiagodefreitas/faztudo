@@ -1,13 +1,35 @@
 #!/bin/sh
 # Installs the AppArmor profile only where the kernel restricts unprivileged
 # user namespaces (Ubuntu 24.04 and newer) and the installed AppArmor can
-# parse it. Elsewhere nothing is changed.
+# parse it. Elsewhere nothing is changed. An existing /etc/apparmor.d/faztudo
+# is replaced only when it is a regular file that still starts with the
+# package's marker line; a symlink or an edited file is left alone.
 set -e
 src=/usr/share/faztudo/apparmor/faztudo
 dst=/etc/apparmor.d/faztudo
+marker='# faztudo-managed-file: do not edit. Put local changes in /etc/apparmor.d/local/faztudo'
+# The profile 0.1.1 installed has no marker; it is replaced when unedited.
+v011=07a147e3ad714f23d766c402bbb0b101faea0141c7c9e4f101162832e3aca519
 if [ "$1" = "configure" ] && [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
 	&& command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -Q -K "$src" >/dev/null 2>&1; then
-	cp "$src" "$dst"
-	apparmor_parser -r -T -W "$dst" >/dev/null 2>&1 || echo "faztudo: could not load $dst; run 'faztudo doctor'" >&2
+	install=no
+	if [ -L "$dst" ]; then
+		echo "faztudo: $dst is a symlink; leaving it alone" >&2
+	elif [ ! -e "$dst" ]; then
+		install=yes
+	elif [ -f "$dst" ] && [ "$(head -n 1 "$dst")" = "$marker" ]; then
+		install=yes
+	elif [ -f "$dst" ] && [ "$(sha256sum "$dst" | cut -d' ' -f1)" = "$v011" ]; then
+		install=yes
+	else
+		echo "faztudo: $dst is not the packaged profile; leaving it alone. See $src" >&2
+	fi
+	if [ "$install" = yes ]; then
+		tmp="$dst.faztudo-new"
+		rm -f "$tmp"
+		cp "$src" "$tmp"
+		mv -f "$tmp" "$dst"
+		apparmor_parser -r -T -W "$dst" >/dev/null 2>&1 || echo "faztudo: could not load $dst; run 'faztudo doctor'" >&2
+	fi
 fi
 exit 0

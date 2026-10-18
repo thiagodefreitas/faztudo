@@ -1,12 +1,89 @@
-# AppArmor profile for faztudo. Ubuntu 24.04 and newer stop unprivileged
-# programs from creating user namespaces unless a profile allows it, and
-# faztudo's write runs need bubblewrap to create one. This profile only adds
-# that permission; faztudo stays otherwise unconfined, as it was.
+# faztudo-managed-file: do not edit. Put local changes in /etc/apparmor.d/local/faztudo
+#
+# This file is installed by the faztudo package and is replaced on upgrade
+# only while this first line is intact. Local changes belong in
+# /etc/apparmor.d/local/faztudo (and local/faztudo_bwrap), which survive
+# upgrades. Remove this line to stop the package from touching the file.
+#
+# Ubuntu 24.04 and newer stop unprivileged programs from creating user
+# namespaces unless a profile allows it. faztudo's write runs need bubblewrap
+# to create one. The permission is given to bubblewrap only:
+#
+#   faztudo          broad, but no user namespaces. Agent CLIs that run
+#                    without bubblewrap (read-mode runs) stay under the
+#                    system restriction.
+#   faztudo_bwrap    /usr/bin/bwrap started by faztudo (also through
+#                    systemd-run and sh). May create the user namespace and
+#                    do what bubblewrap needs to build the sandbox.
+#   faztudo_unpriv   stacked on everything bubblewrap runs: no user
+#                    namespaces and no capabilities.
+#
+# The faztudo profile is enforcing rather than flags=(unconfined) because an
+# unconfined profile ignores exec rules, so the switch to faztudo_bwrap would
+# never happen. The bubblewrap pair follows Ubuntu's own
+# bwrap-userns-restrict profile; the child is stacked because bubblewrap sets
+# no_new_privs. Tested on Ubuntu 24.04 (AppArmor 4.0.1).
 abi <abi/4.0>,
 include <tunables/global>
 
-profile faztudo /usr/bin/faztudo flags=(unconfined) {
-  userns,
+profile faztudo /usr/bin/faztudo flags=(attach_disconnected,mediate_deleted) {
+  allow capability,
+  allow file rwlkm /{**,},
+  # Programs faztudo starts stay in this profile, except bubblewrap.
+  allow ix /**,
+  /usr/bin/bwrap px -> faztudo_bwrap,
+  allow network,
+  allow unix,
+  allow ptrace,
+  allow signal,
+  allow mqueue,
+  allow io_uring,
+  allow dbus,
+  allow mount,
+  allow umount,
+  allow pivot_root,
+  allow change_profile,
+  # No "userns" rule: only faztudo_bwrap creates user namespaces.
 
   include if exists <local/faztudo>
+}
+
+profile faztudo_bwrap flags=(attach_disconnected,mediate_deleted) {
+  allow capability,
+  allow file rwlkm /{**,},
+  allow network,
+  allow unix,
+  allow ptrace,
+  allow signal,
+  allow mqueue,
+  allow io_uring,
+  allow dbus,
+  allow mount,
+  allow umount,
+  allow pivot_root,
+  # The one place user namespaces are granted.
+  allow userns,
+  # What bubblewrap runs is stacked with faztudo_unpriv.
+  allow px /** -> faztudo_bwrap//&faztudo_unpriv,
+
+  include if exists <local/faztudo_bwrap>
+}
+
+profile faztudo_unpriv flags=(attach_disconnected,mediate_deleted) {
+  allow file rwlkm /{**,},
+  allow network,
+  allow unix,
+  allow ptrace,
+  allow signal,
+  allow mqueue,
+  allow io_uring,
+  allow dbus,
+  allow mount,
+  allow umount,
+  allow pivot_root,
+  allow pix /** -> &faztudo_unpriv,
+  # The point of this profile: the sandboxed agent cannot create nested user
+  # namespaces or use capabilities.
+  audit deny userns,
+  audit deny capability,
 }

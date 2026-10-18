@@ -69,10 +69,16 @@ systemd user scopes: available
 
 If the namespaces line shows an error on Ubuntu 24.04, bubblewrap cannot
 create its user namespace as you. The `.deb` from 0.1.1 on handles this: it
-installs a small AppArmor profile, `/etc/apparmor.d/faztudo`, that lets
-faztudo (and the bubblewrap it starts) create user namespaces, and only on
-systems that restrict them. Removing the package removes the profile. With
-the tarball, install the same profile from its `apparmor/faztudo` file:
+installs a small AppArmor profile, `/etc/apparmor.d/faztudo`, only on systems
+that restrict them. The profile grants user namespaces to `/usr/bin/bwrap`
+alone, when faztudo starts it. faztudo and the agent CLIs it runs without
+bubblewrap stay under the system restriction, and programs that bubblewrap
+runs get no user namespaces and no capabilities. The package installs the file
+only if it is absent or still the packaged one (its first line says so); it
+never replaces a symlink or a file you edited. Put local changes in
+`/etc/apparmor.d/local/faztudo`, which the profile includes. Removing the
+package unloads and removes the profile. With the tarball, install the same
+profile from its `apparmor/faztudo` file:
 
 ```bash
 sudo install -m 0644 apparmor/faztudo /etc/apparmor.d/faztudo
@@ -80,8 +86,8 @@ sudo apparmor_parser -r /etc/apparmor.d/faztudo
 faztudo doctor
 ```
 
-The profile only applies to `/usr/bin/faztudo`; if you put the binary
-somewhere else, change the path in its `profile` line. Read-only runs work
+The profile only applies to `/usr/bin/faztudo` and `/usr/bin/bwrap`; if you
+put either somewhere else, change the paths in it. Read-only runs work
 without it. If you accept unsandboxed write runs instead, set
 `sandbox = "auto"` under `[runs]` in `config.toml`. The "systemd user scopes" line only matters
 for the memory and task limits.

@@ -78,6 +78,13 @@ design assumes that agents make mistakes and that messages from outside
   requires per-worktree Git configuration cannot start a write run. The
   channel's test command runs in the same sandbox with a
   stripped environment.
+- **AppArmor on Ubuntu 24.04 and newer.** The `.deb` installs a profile that
+  allows user namespaces only for `/usr/bin/bwrap` started by faztudo.
+  faztudo itself and agent CLIs that run without bubblewrap get no such
+  permission, and programs run by bubblewrap are stacked under a profile that
+  denies user namespaces and capabilities. The package never replaces a
+  symlink or a file you edited at `/etc/apparmor.d/faztudo`; put local changes
+  in `/etc/apparmor.d/local/faztudo`.
   System tools and a small set of `/etc` files are read-only. Toolchain roots
   in home `PATH` entries named `bin`, `shims` or `scripts`, the Go module cache and paths in
   `runs.sandbox_read_only` are read-only. Go, npm and XDG caches use a private
