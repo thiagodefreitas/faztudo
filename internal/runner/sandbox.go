@@ -73,6 +73,9 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		"XDG_DATA_HOME":    filepath.Join(opts.runStateDir, "xdg-data"),
 		"XDG_STATE_HOME":   filepath.Join(opts.runStateDir, "xdg-state"),
 	}
+	if cli == "opencode" {
+		cache["XDG_CONFIG_HOME"] = filepath.Join(opts.runStateDir, "xdg-config")
+	}
 	for _, path := range cache {
 		if err := os.MkdirAll(path, 0700); err != nil {
 			return fallback(err)

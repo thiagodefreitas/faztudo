@@ -203,7 +203,8 @@ func TestOpenCodeAuthFollowsPrivateXDGData(t *testing.T) {
 	home, root := t.TempDir(), t.TempDir()
 	worktree, git, state := filepath.Join(root, "run"), filepath.Join(root, "git"), filepath.Join(root, "state")
 	auth := filepath.Join(home, ".local", "share", "opencode", "auth.json")
-	for _, p := range []string{worktree, git, state, filepath.Dir(auth)} {
+	config := filepath.Join(home, ".config", "opencode", "opencode.json")
+	for _, p := range []string{worktree, git, state, filepath.Dir(auth), filepath.Dir(config)} {
 		if err := os.MkdirAll(p, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -211,16 +212,34 @@ func TestOpenCodeAuthFollowsPrivateXDGData(t *testing.T) {
 	if err := os.WriteFile(auth, []byte("{}"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(config, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "opencode", StateDir: state})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasMount(args, "--bind", auth, filepath.Join(state, "xdg-data", "opencode", "auth.json")) {
-		t.Fatal("OpenCode auth missing from private XDG data")
+	if !hasMount(args, "--ro-bind", auth, filepath.Join(state, "xdg-data", "opencode", "auth.json")) {
+		t.Fatal("OpenCode auth is not read-only in private XDG data")
 	}
-	if hasBind(args, "--bind", auth) {
-		t.Fatal("OpenCode auth also writable at its old path")
+	if !hasMount(args, "--ro-bind", config, filepath.Join(state, "xdg-config", "opencode", "opencode.json")) {
+		t.Fatal("OpenCode config is not read-only in private XDG config")
 	}
+	if hasBind(args, "--bind", auth) || hasBind(args, "--ro-bind", filepath.Dir(auth)) || hasBind(args, "--ro-bind", filepath.Dir(config)) {
+		t.Fatal("OpenCode host state or config directory is exposed")
+	}
+	if !containsPair(args, "--setenv", "XDG_CONFIG_HOME", filepath.Join(state, "xdg-config")) {
+		t.Fatal("OpenCode does not use private XDG config")
+	}
+}
+
+func containsPair(args []string, flag, key, value string) bool {
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == flag && args[i+1] == key && args[i+2] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestKimiPrivateHomeMountsWork(t *testing.T) {

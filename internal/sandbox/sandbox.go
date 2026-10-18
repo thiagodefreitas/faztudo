@@ -132,8 +132,9 @@ func Build(o Options) ([]string, error) {
 	perRunCodex := o.CLI == "codex" && o.StateDir != ""
 	perRunKimi := o.CLI == "kimi" && o.StateDir != ""
 	perRunAgy := o.CLI == "agy" && o.StateDir != ""
+	perRunOpenCode := o.CLI == "opencode" && o.StateDir != ""
 	listed := o.CLI
-	if perRunCodex || perRunKimi || perRunAgy {
+	if perRunCodex || perRunKimi || perRunAgy || perRunOpenCode {
 		listed = ""
 	}
 	paths := authPaths(o.Home, listed)
@@ -158,11 +159,7 @@ func Build(o Options) ([]string, error) {
 	}
 	// OAuth refresh is the narrow exception to read-only credentials. These
 	// files contain credentials, not executable CLI settings or hooks.
-	refreshCLI := listed
-	if o.CLI == "opencode" && o.StateDir != "" {
-		refreshCLI = ""
-	}
-	for _, path := range refreshPaths(o.Home, refreshCLI) {
+	for _, path := range refreshPaths(o.Home, listed) {
 		info, err := os.Lstat(path)
 		if os.IsNotExist(err) {
 			continue
@@ -244,8 +241,8 @@ func Build(o Options) ([]string, error) {
 				return nil, err
 			}
 		}
-		if o.CLI == "opencode" {
-			openCodeArgs, err := openCodeAuth(o)
+		if perRunOpenCode {
+			openCodeArgs, err := openCodeHome(o)
 			if err != nil {
 				return nil, err
 			}
@@ -307,6 +304,9 @@ func Build(o Options) ([]string, error) {
 		}
 	}
 	args = append(args, "--chdir", o.Worktree, "--setenv", "HOME", o.Home, "--setenv", "TMPDIR", "/tmp", "--setenv", NestedEnv, "1")
+	if perRunOpenCode {
+		args = append(args, "--setenv", "XDG_CONFIG_HOME", filepath.Join(o.StateDir, "xdg-config"))
+	}
 	for _, name := range []string{"SSH_AUTH_SOCK", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"} {
 		args = append(args, "--unsetenv", name)
 	}
@@ -448,28 +448,52 @@ func privateCLIHome(o Options, rel, stateName string, readOnly, credentials []st
 	return args, nil
 }
 
-// OpenCode honors XDG_DATA_HOME. Its sqlite database and logs live in the
-// run's XDG directory; the existing auth file alone can refresh on the host.
-func openCodeAuth(o Options) ([]string, error) {
-	from := filepath.Join(o.Home, ".local", "share", "opencode", "auth.json")
-	info, err := os.Lstat(from)
-	if os.IsNotExist(err) {
-		return nil, nil
+// OpenCode writes its package metadata, database and logs under XDG paths.
+// Keep those paths private and expose only existing settings and credentials.
+func openCodeHome(o Options) ([]string, error) {
+	config := filepath.Join(o.StateDir, "xdg-config", "opencode")
+	data := filepath.Join(o.StateDir, "xdg-data", "opencode")
+	for _, dir := range []string{config, data} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
 	}
-	if err != nil {
+	var args []string
+	mount := func(from, to string) error {
+		info, err := os.Lstat(from)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("unsafe opencode path: %s", from)
+		}
+		if info.IsDir() {
+			err = os.MkdirAll(to, 0700)
+		} else {
+			err = os.MkdirAll(filepath.Dir(to), 0700)
+			if err == nil {
+				err = os.WriteFile(to, nil, 0600)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		args = append(args, "--ro-bind", from, to)
+		return nil
+	}
+	settings := []string{"config.json", "opencode.json", "opencode.jsonc", "package.json", "bun.lock", "bun.lockb", "node_modules"}
+	for _, name := range settings {
+		if err := mount(filepath.Join(o.Home, ".config", "opencode", name), filepath.Join(config, name)); err != nil {
+			return nil, err
+		}
+	}
+	if err := mount(filepath.Join(o.Home, ".local", "share", "opencode", "auth.json"), filepath.Join(data, "auth.json")); err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("unsafe opencode auth path: %s", from)
-	}
-	to := filepath.Join(o.StateDir, "xdg-data", "opencode", "auth.json")
-	if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(to, nil, 0600); err != nil {
-		return nil, err
-	}
-	return []string{"--bind", from, to}, nil
+	return args, nil
 }
 
 var branchPattern = regexp.MustCompile(`^fz/[A-Za-z0-9_-]+$`)

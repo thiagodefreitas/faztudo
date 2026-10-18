@@ -184,3 +184,19 @@ func (OpenCode) Command(r Request) (Cmd, error) {
 func (OpenCode) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)
 }
+
+var openCodeANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// OpenCode 1.16.2 prints provider errors but exits 0. Recognize its own
+// formatted error line so an incompatible CLI fails promptly and visibly.
+func (OpenCode) ClassifyOutput(code int, stdout, stderr string) (domain.FailureClass, LaneSignal, string) {
+	if code == 0 {
+		for _, raw := range strings.Split(stdout+"\n"+stderr, "\n") {
+			line := strings.TrimSpace(openCodeANSI.ReplaceAllString(raw, ""))
+			if strings.HasPrefix(line, "Error: OpenCode ") && strings.Contains(line, "or newer is required to use the free tier") {
+				return domain.FailureSemantic, LaneSignal{Kind: SignalUnavailable}, line
+			}
+		}
+	}
+	return classify(code, stderr)
+}

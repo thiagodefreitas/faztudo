@@ -97,6 +97,20 @@ func TestAdditionalClassification(t *testing.T) {
 	}
 }
 
+func TestOpenCodeZeroExitProviderError(t *testing.T) {
+	output := "\x1b[91m\x1b[1mError: \x1b[0mOpenCode 1.18.0 or newer is required to use the free tier\n"
+	for _, streams := range [][2]string{{output, ""}, {"", output}} {
+		class, signal, reason := Classify(OpenCode{}, 0, streams[0], streams[1])
+		if class != domain.FailureSemantic || signal.Kind != SignalUnavailable || !strings.Contains(reason, "OpenCode 1.18.0 or newer") {
+			t.Fatalf("zero-exit error: %s %s %q", class, signal.Kind, reason)
+		}
+	}
+	class, signal, reason := OpenCode{}.ClassifyOutput(0, "Completed task.\n", "")
+	if class != "" || signal.Kind != SignalNone || reason != "" {
+		t.Fatalf("successful output: %s %s %q", class, signal.Kind, reason)
+	}
+}
+
 func TestKimiCleanAnswer(t *testing.T) {
 	got := Kimi{}.CleanAnswer("\u2022 OK\n\n\u2022 second paragraph\n\nTo resume this session: kimi -r session_x\n")
 	if got != "OK\n\nsecond paragraph" {
