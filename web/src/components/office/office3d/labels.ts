@@ -101,7 +101,29 @@ export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlac
   return labels.map((label) => byId.get(label.id) ?? { id: label.id, offsetX: 0, offsetY: 0, opacity: 1 })
 }
 
-// Back edge of a zone, pod, or rug, lifted above desks. The back of the room is -z.
+// Zone and Director names lie on the floor in strips the layout keeps free of desks:
+// the zone header (layout ZONE_HEAD = 30 units) and the margin below the Director rug
+// (layout BOTTOM = 24 units). One unit is 0.02 m.
+export const ZONE_LABEL_Y = 0.06
+const ZONE_HEAD_HALF_M = 0.3
+const ROOM_BOTTOM_HALF_M = 0.24
+
+// Center of a zone's header strip, near its left edge. Always inside the zone.
+export function zoneLabelAnchor(rect: FloorRect): { x: number; y: number; z: number } {
+  const insetX = Math.min(Math.max(rect.w * 0.5 - 0.04, 0.2), 0.95)
+  return {
+    x: rect.x - rect.w / 2 + insetX,
+    y: ZONE_LABEL_Y,
+    z: rect.z - rect.d / 2 + Math.min(ZONE_HEAD_HALF_M, rect.d / 2),
+  }
+}
+
+// Just in front of the Director rug (toward the camera, +z), centered on it.
+export function directorLabelAnchor(rug: FloorRect): { x: number; y: number; z: number } {
+  return { x: rug.x, y: ZONE_LABEL_Y, z: rug.z + rug.d / 2 + ROOM_BOTTOM_HALF_M }
+}
+
+// Back edge of a pod, lifted above desks. The back of the room is -z.
 export function floorLabelAnchor(
   rect: FloorRect,
   kind: "zone" | "pod" | "director",

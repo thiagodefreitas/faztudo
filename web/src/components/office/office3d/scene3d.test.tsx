@@ -2,7 +2,8 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import type { Approval, Channel, Department, Lane, Member, Run, StreamEvent } from "../../../types"
-import { layoutRoom } from "../layout"
+import { DESK_H, DESK_W, layoutRoom } from "../layout"
+import { directorLabelAnchor, zoneLabelAnchor } from "./labels"
 import { deriveMemberDesk, deriveOfficeDesks } from "../state"
 import {
   createAnimationQueue,
@@ -24,6 +25,12 @@ import {
   sampleMergePop,
   toWorld,
 } from "./scene3d"
+
+// jsdom has no WebGL: keep the scene shell and its keyboard handling, drop the canvas.
+vi.mock("@react-three/fiber", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@react-three/fiber")>()),
+  Canvas: () => null,
+}))
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
 
@@ -532,5 +539,69 @@ describe("Office3DScene", () => {
     fireEvent.click(screen.getByTestId("approval-card3d-m-claude"))
     expect(onOpenApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalChannelId: "ch-general" }))
     expect(screen.getByTestId("mini-approval-card")).toHaveTextContent("Ship 3D characters")
+  })
+
+  it("opens the side panel on Enter for the focused desk and closes it on Escape, restoring focus", async () => {
+    await renderScene3D({ webglAvailable: true })
+    const surface = screen.getByTestId("office3d-canvas")
+    surface.focus()
+    expect(screen.queryByRole("complementary")).toBeNull()
+
+    fireEvent.keyDown(surface, { key: "Tab" })
+    fireEvent.keyDown(surface, { key: "Enter" })
+    const panel = screen.getByRole("complementary")
+    expect(panel).toBeVisible()
+    expect(panel).toHaveAccessibleName(/details$/)
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    expect(screen.queryByRole("complementary")).toBeNull()
+    expect(document.activeElement).toBe(surface)
+
+    fireEvent.keyDown(surface, { key: "Tab" })
+    fireEvent.keyDown(surface, { key: " " })
+    expect(screen.getByRole("complementary")).toBeVisible()
+  })
+
+  it("closes the fallback side panel on Escape and returns focus to the desk button", async () => {
+    await renderScene3D()
+    const button = screen.getByTestId("fallback-desk-m-claude")
+    button.focus()
+    fireEvent.click(button)
+    expect(screen.getByRole("complementary", { name: "Claude details" })).toBeVisible()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+    expect(screen.queryByRole("complementary")).toBeNull()
+    expect(document.activeElement).toBe(button)
+  })
+
+  it("places every zone label inside its own zone and outside the others, and the Director label in front of the rug", () => {
+    const roster: Member[] = [
+      ...members,
+      { id: "m-rev", kind: "agent", handle: "reviewer", display_name: "Reviewer", presence: "online", agent: { lanes: ["claude/opus"] } },
+      { id: "m-cx", kind: "agent", handle: "codex", display_name: "Codex", presence: "online" },
+    ]
+    const desks = deriveOfficeDesks({ members: roster, runs: [], approvals: [], lanes: [], now })
+    const room = layoutRoom(desks, { departments })
+    expect(room.zones.length).toBeGreaterThan(1)
+    const inside = (rect: { x: number; z: number; w: number; d: number }, p: { x: number; z: number }) =>
+      Math.abs(p.x - rect.x) <= rect.w / 2 && Math.abs(p.z - rect.z) <= rect.d / 2
+    const worlds = room.zones.map((zone) => ({ zone, rect: toWorld(zone, room.width, room.height) }))
+    for (const { zone, rect } of worlds) {
+      const label = zoneLabelAnchor(rect)
+      expect(inside(rect, label), zone.id).toBe(true)
+      for (const other of worlds) {
+        if (other.zone.id !== zone.id) expect(inside(other.rect, label), `${zone.id} in ${other.zone.id}`).toBe(false)
+      }
+      for (const seat of room.seats) {
+        const desk = toWorld({ x: seat.x, y: seat.y, w: DESK_W * seat.scale, h: DESK_H * seat.scale }, room.width, room.height)
+        expect(inside(desk, label), `${zone.id} over desk`).toBe(false)
+      }
+    }
+
+    expect(room.rug).not.toBeNull()
+    const rug = toWorld(room.rug as NonNullable<typeof room.rug>, room.width, room.height)
+    const dirLabel = directorLabelAnchor(rug)
+    expect(dirLabel.z).toBeGreaterThan(rug.z + rug.d / 2)
+    expect(Math.abs(dirLabel.x - rug.x)).toBeLessThan(rug.w / 2)
+    for (const { rect } of worlds) expect(inside(rect, dirLabel)).toBe(false)
   })
 })

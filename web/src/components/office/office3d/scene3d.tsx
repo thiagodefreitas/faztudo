@@ -42,7 +42,7 @@ import {
   mentionRecordsFromEvents,
   type MentionRecord,
 } from "./life"
-import { floorLabelAnchor, type NameLabelPlacement } from "./labels"
+import { directorLabelAnchor, floorLabelAnchor, zoneLabelAnchor, type NameLabelPlacement } from "./labels"
 import {
   deriveCharacterIdentity,
   deriveCharacterPose,
@@ -297,7 +297,7 @@ function RoomWorld({
       {/* Zone mats, pod mats, and department/pod labels lifted above the desks */}
       {zones.map((zone) => {
         const zWorld = toWorld(zone, width, height)
-        const zoneLabel = floorLabelAnchor(zWorld, "zone")
+        const zoneLabel = zoneLabelAnchor(zWorld)
         return (
           <group key={zone.id}>
             <mesh position={[zWorld.x, 0.005, zWorld.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -342,7 +342,7 @@ function RoomWorld({
       {/* Director rug */}
       {rug && (() => {
         const rWorld = toWorld(rug, width, height)
-        const rugLabel = floorLabelAnchor(rWorld, "director")
+        const rugLabel = directorLabelAnchor(rWorld)
         return (
           <group>
             <mesh position={[rWorld.x, 0.008, rWorld.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -462,6 +462,8 @@ export function Office3DScene({
   const [liveMentions, setLiveMentions] = useState<MentionRecord[]>([])
   const orbitDeltaRef = useRef<OrbitDelta>({ yaw: 0, pitch: 0, radiusDelta: 0 })
   const pageVisible = useDocumentVisible()
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   const members = useMemo(() => desks.map((d) => d.member), [desks])
   const runs = useMemo(
@@ -575,13 +577,22 @@ export function Office3DScene({
     setMoveToken((token) => token + 1)
   }
 
+  // Close the side panel and give focus back to what opened it, else the 3D surface.
+  const closePanel = () => {
+    setSelectedId(null)
+    const back = returnFocusRef.current
+    returnFocusRef.current = null
+    const target = back && back.isConnected ? back : surfaceRef.current
+    target?.focus({ preventScroll: true })
+  }
+
   useEffect(() => {
     if (!webglAvailable || desks.length === 0) {
       if (!selectedDesk) return
       function onEscape(event: KeyboardEvent) {
         if (event.key !== "Escape") return
         if (isTypingTarget(event.target)) return
-        setSelectedId(null)
+        closePanel()
       }
       window.addEventListener("keydown", onEscape)
       return () => window.removeEventListener("keydown", onEscape)
@@ -591,10 +602,20 @@ export function Office3DScene({
       if (isTypingTarget(event.target)) return
       const inPanel = event.target instanceof HTMLElement && Boolean(event.target.closest("aside"))
       if (inPanel && event.key !== "Escape") return
+      if ((event.key === "Enter" || event.key === " ") && !inPanel && focusedId) {
+        const onControl = event.target instanceof HTMLElement && Boolean(event.target.closest("button, a, [role=button]"))
+        const seat = room.seats.find((item) => item.desk.member.id === focusedId)
+        if (seat && !onControl && !event.metaKey && !event.ctrlKey && !event.altKey) {
+          event.preventDefault()
+          handleSelect(seat.desk)
+          return
+        }
+      }
       const action = mapOfficeKey(event)
       if (!action) return
       if (action.type === "reset") {
-        setSelectedId(null)
+        if (selectedDesk) closePanel()
+        else setSelectedId(null)
         showOverview()
         return
       }
@@ -620,9 +641,15 @@ export function Office3DScene({
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
+    // handleSelect and closePanel only touch state setters and refs, so a stale copy is safe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [webglAvailable, desks.length, selectedDesk, room.seats, focusedId])
 
   function handleSelect(desk: DeskInfo) {
+    const active = document.activeElement
+    if (selectedId === null && active instanceof HTMLElement && active !== document.body) {
+      returnFocusRef.current = active
+    }
     setSelectedId(desk.member.id)
     focusDesk(desk.member.id)
   }
@@ -808,6 +835,9 @@ export function Office3DScene({
         ) : (
           <div
             data-testid="office3d-canvas"
+            ref={surfaceRef}
+            tabIndex={0}
+            aria-label="3D office. Tab cycles desks, Enter opens details."
             className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs"
           >
             <Canvas
@@ -862,7 +892,7 @@ export function Office3DScene({
           channels={channels}
           now={now}
           reducedMotion={reducedMotion}
-          onClose={() => setSelectedId(null)}
+          onClose={closePanel}
           onOpenApproval={onOpenApproval}
           onResolveApproval={onResolveApproval}
           onMessage={onMessage}
