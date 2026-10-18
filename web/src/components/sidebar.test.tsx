@@ -2,6 +2,7 @@ import * as Tooltip from "@radix-ui/react-tooltip"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 import { qk } from "../state/keys"
 import type { Approval, Channel, Member, Project, Run } from "../types"
@@ -119,12 +120,30 @@ describe("WorkspaceNav", () => {
     const dev: Channel = { ...general, id: "c3", name: "dev", unread: 2 }
     const project: Project = { handle: "faztudo", name: "Faztudo", channels: ["Dev"], departments: [], specialists: [] }
     await setup({ projects: [project], channels: [general, dev, coderDm] })
-    const header = await screen.findByRole("link", { name: /Project$/ })
+    const header = await screen.findByRole("link", { name: /^Faztudo/ })
     expect(header).toHaveAttribute("href", "/p/faztudo")
-    const group = header.parentElement as HTMLElement
+    const group = header.closest("[data-project]") as HTMLElement
     expect(within(group).getByText("dev")).toBeInTheDocument()
     expect(within(group).queryByText("general")).not.toBeInTheDocument()
     expect(screen.getByText("general")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "New project" })).toBeInTheDocument()
+  })
+
+  it("folds a project to one row that keeps the unread and waiting counts", async () => {
+    const user = userEvent.setup()
+    const dev: Channel = { ...general, id: "c3", name: "dev", unread: 2 }
+    const project: Project = { handle: "faztudo", name: "Faztudo", channels: ["dev"], departments: [], specialists: [] }
+    const waiting: Approval = { id: "a", run_id: "r", channel_id: "c3", requested_by: coder.id, title: "Merge", detail: "", options: [], state: "pending" }
+    await setup({ projects: [project], channels: [general, dev, coderDm], approvals: [waiting] })
+    const header = await screen.findByRole("link", { name: /^Faztudo/ })
+    expect(within(header).getByLabelText("1 waiting for you")).toBeInTheDocument()
+    expect(within(header).queryByLabelText("2 unread")).not.toBeInTheDocument()
+    const group = header.closest("[data-project]") as HTMLElement
+    expect(within(group).getByTestId("team-icon")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Collapse Faztudo" }))
+    expect(within(group).queryByText("dev")).not.toBeInTheDocument()
+    expect(within(header).getByLabelText("2 unread")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Expand Faztudo" })).toHaveAttribute("aria-expanded", "false")
   })
 
   it("counts the approvals that wait for me and links to the first", async () => {

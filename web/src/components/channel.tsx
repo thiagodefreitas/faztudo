@@ -8,7 +8,8 @@ import { ulid } from "../lib/id"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { sortMessages } from "../state/reduce"
-import { useChannels, useMe, useMembers, type PendingMessage } from "../state/queries"
+import { projectOfChannel } from "../lib/projects"
+import { useChannels, useMe, useMembers, useOrg, type PendingMessage } from "../state/queries"
 import { toggleChannelMute, useNotifyPrefs } from "../lib/notify-prefs"
 import type { Attachment, Channel, Message } from "../types"
 import { ActivityStrip } from "./activity-strip"
@@ -17,6 +18,7 @@ import { MessageList } from "./message-list"
 import { RunPanel } from "./run-panel"
 import { ChannelSettingsDialog } from "./channel-dialogs"
 import { AgentAvatar } from "./agent-avatar"
+import { MembersPanel } from "./members-panel"
 import { TeamIcon } from "./team-icon"
 import { ThreadPanel } from "./thread-panel"
 import { OPEN_SETTINGS_EVENT } from "./palette"
@@ -48,9 +50,11 @@ export function ChannelPage() {
   const channels = useChannels()
   const members = useMembers()
   const me = useMe()
+  const org = useOrg()
   const navigate = useNavigate()
   const channel = channels.data?.find((item) => item.id === channelId)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [membersOpen, setMembersOpen] = useState(false)
   const [pinsOpen, setPinsOpen] = useState(false)
   const notify = useNotifyPrefs()
   const muted = notify.muted.includes(channelId)
@@ -130,6 +134,9 @@ export function ChannelPage() {
   const title = direct ? (peer?.display_name ?? channel.name) : channel.name
   const agents = (members.data ?? []).filter((member) => member.kind === "agent" && channel.member_ids.includes(member.id))
   const defaultAgent = agents.find((agent) => agent.id === channel.default_agent_id)
+  const project = direct ? undefined : projectOfChannel(channel, org.data?.projects ?? [])
+  const others = channel.member_ids.filter((id) => id !== me.data?.id).length
+  const membersLabel = `${others} ${others === 1 ? "member" : "members"}${defaultAgent ? `, default @${defaultAgent.handle}` : ""}`
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -148,20 +155,47 @@ export function ChannelPage() {
             {direct && peer ? (
               <AgentAvatar member={peer} size={28} decorative />
             ) : (
-              <TeamIcon channel={channel} members={members.data ?? []} excludeId={me.data?.id} size={20} />
+              <button
+                type="button"
+                onClick={() => setMembersOpen(true)}
+                aria-label={`Members: ${membersLabel}`}
+                title="Members"
+                className="inline-flex shrink-0 items-center rounded-md hover:bg-sidebar"
+              >
+                <TeamIcon channel={channel} members={members.data ?? []} excludeId={me.data?.id} size={20} />
+              </button>
             )}
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-[15px] font-semibold">
-                <span className="text-faint">{direct ? "@ " : "# "}</span>
-                {title}
+              <h1 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold">
+                <span className="truncate">
+                  <span className="text-faint">{direct ? "@ " : "# "}</span>
+                  {title}
+                </span>
+                {project && (
+                  <Link
+                    to="/p/$handle"
+                    params={{ handle: project.handle }}
+                    className="hidden shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent hover:underline md:inline-block"
+                    title={`Project ${project.name}`}
+                  >
+                    {project.name}
+                  </Link>
+                )}
               </h1>
               {channel.topic && <p className="truncate text-[13px] text-muted max-md:hidden">{channel.topic}</p>}
             </div>
           </div>
-          {defaultAgent && (
-            <p className="hidden shrink-0 text-[12px] text-faint sm:block" title="Default agent for this channel">
-              Default: @{defaultAgent.handle}
-            </p>
+          {!direct && (
+            <button
+              type="button"
+              onClick={() => setMembersOpen(true)}
+              className="hidden shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted hover:bg-sidebar hover:text-ink sm:flex"
+              title="Members"
+            >
+              <span className="font-mono tabular-nums">{others}</span>
+              <span>{others === 1 ? "member" : "members"}</span>
+              {defaultAgent && <span className="text-faint">, default @{defaultAgent.handle}</span>}
+            </button>
           )}
           {channel.repo_path && (
             <p
@@ -231,9 +265,11 @@ export function ChannelPage() {
                 <Menu.Item onSelect={() => setSettingsOpen(true)} className={MENU_ITEM}>
                   Settings
                 </Menu.Item>
-                <Menu.Item onSelect={() => setSettingsOpen(true)} className={MENU_ITEM}>
-                  Members
-                </Menu.Item>
+                {!direct && (
+                  <Menu.Item onSelect={() => setMembersOpen(true)} className={MENU_ITEM}>
+                    Members
+                  </Menu.Item>
+                )}
                 <Menu.Item asChild>
                   <Link to="/lanes" className={MENU_ITEM}>
                     Lanes
@@ -243,6 +279,7 @@ export function ChannelPage() {
             </Menu.Portal>
           </Menu.Root>
           <ChannelSettingsDialog channel={channel} agents={agents} open={settingsOpen} onOpenChange={setSettingsOpen} />
+          <MembersPanel channel={channel} open={membersOpen} onOpenChange={setMembersOpen} />
         </header>
         <ActivityStrip
           key={channelId}

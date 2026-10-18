@@ -27,6 +27,8 @@ import type {
   PairingTicket,
   Pin,
   Project,
+  ProjectCreate,
+  ProjectPatch,
   ReadCursor,
   ReadResult,
   ResolveBody,
@@ -388,6 +390,67 @@ export class MockWorld {
   // refuse mentions in project channels the way the daemon does.
   getOrg(): Org {
     return structuredClone({ director_id: this.me.id, departments: this.departments, projects: this.projects })
+  }
+
+  // The mock checks what the daemon checks: a human handle, known agents and
+  // departments, and a channel listed by one project at most.
+  createProject(body: ProjectCreate): Result<Project> {
+    const handle = (body.handle ?? "").trim()
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(handle)) return err(400, "bad_request", "handle: use letters, digits, - and _")
+    if (this.projects.some((item) => item.handle.toLowerCase() === handle.toLowerCase())) {
+      return err(409, "conflict", `a project with handle ${handle} exists`)
+    }
+    const project: Project = { handle, name: handle, channels: [], departments: [], specialists: [] }
+    const problem = this.applyProject(project, body)
+    if (problem) return err(400, "bad_request", problem)
+    this.projects.push(project)
+    this.emit("project.updated", undefined, project, `human:${this.me.id}`)
+    return ok(structuredClone(project))
+  }
+
+  patchProject(handle: string, body: ProjectPatch): Result<Project> {
+    const project = this.projects.find((item) => item.handle.toLowerCase() === handle.toLowerCase())
+    if (!project) return err(404, "not_found", "resource not found")
+    const problem = this.applyProject(project, body)
+    if (problem) return err(400, "bad_request", problem)
+    this.emit("project.updated", undefined, project, `human:${this.me.id}`)
+    return ok(structuredClone(project))
+  }
+
+  private applyProject(project: Project, body: ProjectCreate | ProjectPatch): string | null {
+    const dedupe = (list: string[]) => {
+      const out: string[] = []
+      for (const raw of list) {
+        const item = raw.trim()
+        if (item && !out.some((seen) => seen.toLowerCase() === item.toLowerCase())) out.push(item)
+      }
+      return out
+    }
+    const next: Project = { ...project }
+    if (body.name !== undefined) next.name = body.name.trim() || project.handle
+    if (body.repo_path !== undefined) next.repo_path = body.repo_path.trim() || undefined
+    if (body.lead !== undefined) next.lead = body.lead.trim() || undefined
+    if (body.channels !== undefined) next.channels = dedupe(body.channels)
+    if ("departments" in body && body.departments !== undefined) next.departments = dedupe(body.departments)
+    if ("specialists" in body && body.specialists !== undefined) next.specialists = dedupe(body.specialists)
+    const agent = (handle: string) => this.members.some((item) => item.kind === "agent" && item.handle.toLowerCase() === handle.toLowerCase())
+    if (next.lead && !agent(next.lead)) return `unknown lead ${next.lead}`
+    for (const handle of next.departments) {
+      if (!this.departments.some((item) => item.handle.toLowerCase() === handle.toLowerCase())) return `unknown department ${handle}`
+    }
+    for (const handle of next.specialists) if (!agent(handle)) return `unknown specialist ${handle}`
+    for (const name of next.channels) {
+      if (!NAME_RE.test(name)) return `invalid channel name ${name}`
+      const other = this.projects.find(
+        (item) => item.handle !== project.handle && item.channels.some((own) => own.toLowerCase() === name.toLowerCase()),
+      )
+      if (other) return `channel ${name} already belongs to project ${other.handle}`
+    }
+    if (next.repo_path && !isMockGitPath(next.repo_path)) return REPO_ERROR
+    Object.assign(project, next)
+    if (!next.repo_path) delete project.repo_path
+    if (!next.lead) delete project.lead
+    return null
   }
 
   assign(project: string, body: AssignBody): Result<Project> {

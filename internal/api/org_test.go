@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -168,5 +170,73 @@ func TestProjectHandleGoesToTheProjectLead(t *testing.T) {
 	}
 	if n := f.notices(t, f.team); len(n) != 1 || n[0].Level != "warn" {
 		t.Fatalf("want a notice about the missing lead, got %+v", n)
+	}
+}
+
+func TestProjectsAreCreatedAndChangedByHumans(t *testing.T) {
+	f := newOrgFixture(t)
+	repo := t.TempDir()
+	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+
+	f.h.actorForRequest = func(*http.Request) (domain.Member, error) { return f.coder, nil }
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch"}`, 403, nil)
+	f.do(t, "PATCH", "/api/v1/projects/faztudo", `{"name":"X"}`, 403, nil)
+	f.h.actorForRequest = nil
+
+	f.do(t, "POST", "/api/v1/projects", `{"handle":""}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"bad handle"}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"Faztudo"}`, 409, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch","lead":"nobody"}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch","departments":["sales"]}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch","specialists":["nobody"]}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch","channels":["faztudo-dev"]}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch","channels":["Bad Name"]}`, 400, nil)
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"launch","repo_path":"`+filepath.Join(repo, "missing")+`"}`, 400, nil)
+
+	var p domain.Project
+	body := `{"handle":"launch","name":" Launch ","repo_path":"` + repo + `","lead":"reviewer","channels":["launch","launch","launch-release"],"departments":["engineering"],"specialists":["reviewer"]}`
+	f.do(t, "POST", "/api/v1/projects", body, 201, &p)
+	if p.Handle != "launch" || p.Name != "Launch" || p.RepoPath != repo || p.Lead != "reviewer" {
+		t.Fatalf("created %+v", p)
+	}
+	if !slices.Equal(p.Channels, []string{"launch", "launch-release"}) || !slices.Equal(p.Departments, []string{"engineering"}) || !slices.Equal(p.Specialists, []string{"reviewer"}) {
+		t.Fatalf("created lists %+v", p)
+	}
+	// A name defaults to the handle.
+	f.do(t, "POST", "/api/v1/projects", `{"handle":"bare"}`, 201, &p)
+	if p.Name != "bare" || p.Channels == nil || p.Departments == nil || p.Specialists == nil {
+		t.Fatalf("bare project %+v", p)
+	}
+
+	var org orgView
+	f.do(t, "GET", "/api/v1/org", "", 200, &org)
+	if len(org.Projects) != 3 {
+		t.Fatalf("projects after creating: %+v", org.Projects)
+	}
+
+	// The lead of a new project is already allowed to run in its channels.
+	launch := domain.Channel{ID: store.NewID(), Name: "launch", Kind: domain.ChannelProject, Visibility: domain.VisibilityPublic, MemberIDs: []string{f.human.ID, f.coder.ID, f.review.ID}}
+	if _, err := f.h.Store.Append(context.Background(), events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: launch.ID, Payload: launch}); err != nil {
+		t.Fatal(err)
+	}
+	f.post(t, launch, "@reviewer plan it")
+	if !slices.Equal(f.who.handles, []string{"reviewer"}) {
+		t.Fatalf("lead in a created project: %v", f.who.handles)
+	}
+
+	f.do(t, "PATCH", "/api/v1/projects/missing", `{"name":"X"}`, 404, nil)
+	f.do(t, "PATCH", "/api/v1/projects/launch", `{"lead":"nobody"}`, 400, nil)
+	f.do(t, "PATCH", "/api/v1/projects/launch", `{"channels":["faztudo-dev"]}`, 400, nil)
+	// A patch changes only the fields it names and never the assignments.
+	f.do(t, "PATCH", "/api/v1/projects/launch", `{"name":"Launch 2","channels":["launch"],"specialists":[]}`, 200, &p)
+	if p.Name != "Launch 2" || p.Lead != "reviewer" || p.RepoPath != repo || !slices.Equal(p.Channels, []string{"launch"}) || !slices.Equal(p.Specialists, []string{"reviewer"}) {
+		t.Fatalf("patched %+v", p)
+	}
+	p = domain.Project{}
+	f.do(t, "PATCH", "/api/v1/projects/launch", `{"lead":""}`, 200, &p)
+	if p.Lead != "" || p.Name != "Launch 2" {
+		t.Fatalf("lead not cleared: %+v", p)
 	}
 }

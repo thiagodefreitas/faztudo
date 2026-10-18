@@ -34,7 +34,7 @@ const org: Org = {
   departments: [{ handle: "eng", display_name: "Engineering", lead: "coder", members: ["coder"] }],
   projects: [
     { handle: "faztudo", name: "Faztudo", lead: "architect", channels: ["dev", "Release"], departments: ["eng"], specialists: ["writer"] },
-    { handle: "other", name: "Other", channels: ["elsewhere"], departments: [], specialists: [] },
+    { handle: "other", name: "Other", channels: ["elsewhere", "ghost"], departments: [], specialists: [] },
   ],
 }
 
@@ -72,6 +72,8 @@ async function renderHome(handle = "faztudo") {
     run("r-live", "running", "c1", { started_at: new Date(Date.now() - 65_000).toISOString() }),
     run("r-other", "running", "c3"),
     run("r-merged", "done", "c2", { diff_stat: { files: 3, insertions: 10, deletions: 2 }, ended_at: new Date().toISOString() }),
+    run("r-failed", "failed", "c1", { failure_reason: "tests red", ended_at: new Date(Date.now() - 5_000).toISOString() }),
+    run("r-failed-elsewhere", "failed", "c3", { failure_reason: "elsewhere", ended_at: new Date().toISOString() }),
   ])
   client.setQueryData(qk.routines, [routine, { ...routine, handle: "x", name: "Elsewhere routine", channel: "elsewhere" }])
   const rootRoute = createRootRoute({ component: () => <ProjectHome handle={handle} /> })
@@ -93,9 +95,11 @@ describe("ProjectHome", () => {
     const channels = await screen.findByRole("region", { name: "Channels" })
     expect(within(channels).getAllByRole("link").map((link) => link.textContent)).toEqual(["#dev2", "#release"])
     expect(screen.queryByText("elsewhere")).not.toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Faztudo")
+    expect(screen.getAllByRole("button", { name: "New channel" }).length).toBeGreaterThan(0)
   })
 
-  it("lists what needs me, the live runs and the recent merges of this project only", async () => {
+  it("lists what needs me, the live runs and the activity of this project only", async () => {
     await renderHome()
     const needs = await screen.findByRole("region", { name: "Needs you" })
     expect(within(needs).getAllByRole("link")).toHaveLength(1)
@@ -103,9 +107,12 @@ describe("ProjectHome", () => {
     const active = screen.getByRole("region", { name: "Active runs" })
     expect(within(active).getAllByRole("link")).toHaveLength(1)
     expect(active).toHaveTextContent("Coder is working.")
-    const merges = screen.getByRole("region", { name: "Recent merges" })
-    expect(merges).toHaveTextContent("Coder in #release")
-    expect(merges).toHaveTextContent("+10 -2 in 3")
+    const activity = screen.getByRole("region", { name: "Activity" })
+    expect(within(activity).getAllByRole("listitem")).toHaveLength(2)
+    expect(activity).toHaveTextContent("Coder merged in #release")
+    expect(activity).toHaveTextContent("+10 -2 in 3")
+    expect(activity).toHaveTextContent("Coder failed in #dev: tests red")
+    expect(activity).not.toHaveTextContent("elsewhere")
   })
 
   it("lists the team with the lead first and the routines that post here", async () => {
@@ -116,6 +123,21 @@ describe("ProjectHome", () => {
     const routines = screen.getByRole("region", { name: "Routines" })
     expect(routines).toHaveTextContent("Daily debrief")
     expect(routines).not.toHaveTextContent("Elsewhere routine")
+  })
+
+  it("lists channels the project names that nobody created yet, with a way to create them", async () => {
+    await renderHome("other")
+    const channels = await screen.findByRole("region", { name: "Channels" })
+    expect(within(channels).getAllByRole("link").map((link) => link.textContent)).toEqual(["#elsewhere5"])
+    const ghost = within(channels).getByText("ghost").closest("li") as HTMLElement
+    expect(ghost).toHaveTextContent("Listed, not created")
+    expect(within(ghost).getByRole("button", { name: "Create" })).toBeInTheDocument()
+  })
+
+  it("teaches what to do next when a section is empty", async () => {
+    await renderHome("other")
+    expect(await screen.findByText(/Nobody is assigned yet/)).toBeInTheDocument()
+    expect(screen.getAllByRole("link", { name: "Assign" })[0]).toHaveAttribute("href", "/organization")
   })
 
   it("says so when the project does not exist", async () => {

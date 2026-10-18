@@ -10,15 +10,15 @@ import { DevicesPanel } from "./auth"
 
 export const CHANNEL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
-const inputClass = "mt-1 min-h-8 w-full rounded-md border border-line bg-canvas px-2 text-[13px]"
-const buttonClass = "min-h-8 rounded-md border border-line px-3 text-[13px]"
+export const inputClass = "mt-1 min-h-8 w-full rounded-md border border-line bg-canvas px-2 text-[13px]"
+export const buttonClass = "min-h-8 rounded-md border border-line px-3 text-[13px]"
 
-function errorText(error: unknown): string {
+export function errorText(error: unknown): string {
   if (error instanceof Error && error.message) return error.message
   return "Request failed"
 }
 
-function Field({
+export function Field({
   label,
   help,
   error,
@@ -53,7 +53,8 @@ function Field({
   )
 }
 
-function Shell({
+// Shell is the frame every creation and settings dialog shares.
+export function Shell({
   title,
   description,
   onSubmit,

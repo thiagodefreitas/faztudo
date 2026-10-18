@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -75,6 +76,181 @@ func (a *API) assignment(w http.ResponseWriter, r *http.Request, kind, handle st
 		}
 	} else {
 		*list = slices.DeleteFunc(*list, func(h string) bool { return strings.EqualFold(h, handle) })
+	}
+	if _, ok := a.append(w, r, events.ProjectUpdated, "", "", p); ok {
+		respond(w, 200, p)
+	}
+}
+
+// projectHandle matches the handles lanes.toml accepts.
+var projectHandle = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// projectBody is what POST /api/v1/projects and PATCH /api/v1/projects/{project}
+// accept. A nil field is left as it is.
+type projectBody struct {
+	Handle      string    `json:"handle"`
+	Name        *string   `json:"name"`
+	RepoPath    *string   `json:"repo_path"`
+	Lead        *string   `json:"lead"`
+	Channels    *[]string `json:"channels"`
+	Departments *[]string `json:"departments"`
+	Specialists *[]string `json:"specialists"`
+}
+
+// applyProject copies the body onto p and checks every handle it names. The
+// returned message is empty when the project is valid.
+func (a *API) applyProject(ctx context.Context, p *domain.Project, v projectBody, others []domain.Project) (string, error) {
+	if v.Name != nil {
+		p.Name = strings.TrimSpace(*v.Name)
+	}
+	if v.RepoPath != nil {
+		p.RepoPath = strings.TrimSpace(*v.RepoPath)
+	}
+	if v.Lead != nil {
+		p.Lead = strings.TrimSpace(*v.Lead)
+	}
+	if v.Channels != nil {
+		p.Channels = dedupeFold(*v.Channels)
+	}
+	if v.Departments != nil {
+		p.Departments = dedupeFold(*v.Departments)
+	}
+	if v.Specialists != nil {
+		p.Specialists = dedupeFold(*v.Specialists)
+	}
+	if p.Name == "" {
+		p.Name = p.Handle
+	}
+	if p.Lead != "" {
+		known, err := a.knownHandle(ctx, "specialist", p.Lead)
+		if err != nil {
+			return "", err
+		}
+		if !known {
+			return "unknown lead " + p.Lead, nil
+		}
+	}
+	for _, h := range p.Departments {
+		known, err := a.knownHandle(ctx, "department", h)
+		if err != nil {
+			return "", err
+		}
+		if !known {
+			return "unknown department " + h, nil
+		}
+	}
+	for _, h := range p.Specialists {
+		known, err := a.knownHandle(ctx, "specialist", h)
+		if err != nil {
+			return "", err
+		}
+		if !known {
+			return "unknown specialist " + h, nil
+		}
+	}
+	for _, name := range p.Channels {
+		if !channelName.MatchString(name) {
+			return "invalid channel name " + name, nil
+		}
+		for _, other := range others {
+			if !strings.EqualFold(other.Handle, p.Handle) && containsFold(other.Channels, name) {
+				return fmt.Sprintf("channel %s already belongs to project %s", name, other.Handle), nil
+			}
+		}
+	}
+	if err := validateRepo(ctx, p.RepoPath); err != nil {
+		return err.Error(), nil
+	}
+	return "", nil
+}
+
+func dedupeFold(list []string) []string {
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		s = strings.TrimSpace(s)
+		if s != "" && !containsFold(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// createProject records a new project. Only a human may create one, and the
+// handle must be new. It is stored in the org projection like a project from
+// lanes.toml, so it survives a restart; a project that is also in lanes.toml
+// takes its name, repository, lead and channels from the file on each start.
+func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
+	if current(r).Kind != domain.MemberHuman {
+		fail(w, 403, "forbidden", "only a human can create a project")
+		return
+	}
+	var v projectBody
+	if !decode(w, r, &v) {
+		return
+	}
+	v.Handle = strings.TrimSpace(v.Handle)
+	if !projectHandle.MatchString(v.Handle) {
+		fail(w, 400, "bad_request", "handle: use letters, digits, - and _")
+		return
+	}
+	a.orgMu.Lock()
+	defer a.orgMu.Unlock()
+	projects, err := a.Store.Projects(r.Context())
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if slices.ContainsFunc(projects, func(p domain.Project) bool { return strings.EqualFold(p.Handle, v.Handle) }) {
+		fail(w, 409, "conflict", "a project with handle "+v.Handle+" exists")
+		return
+	}
+	p := domain.Project{Handle: v.Handle, Channels: []string{}, Departments: []string{}, Specialists: []string{}}
+	msg, err := a.applyProject(r.Context(), &p, v, projects)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if msg != "" {
+		fail(w, 400, "bad_request", msg)
+		return
+	}
+	if _, ok := a.append(w, r, events.ProjectUpdated, "", "", p); ok {
+		respond(w, 201, p)
+	}
+}
+
+// patchProject changes a project's name, repository, lead or channels.
+// Assignments change through the assignments endpoints.
+func (a *API) patchProject(w http.ResponseWriter, r *http.Request) {
+	if current(r).Kind != domain.MemberHuman {
+		fail(w, 403, "forbidden", "only a human can change a project")
+		return
+	}
+	var v projectBody
+	if !decode(w, r, &v) {
+		return
+	}
+	v.Departments, v.Specialists = nil, nil
+	a.orgMu.Lock()
+	defer a.orgMu.Unlock()
+	p, err := a.Store.Project(r.Context(), r.PathValue("project"))
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	projects, err := a.Store.Projects(r.Context())
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	msg, err := a.applyProject(r.Context(), &p, v, projects)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if msg != "" {
+		fail(w, 400, "bad_request", msg)
+		return
 	}
 	if _, ok := a.append(w, r, events.ProjectUpdated, "", "", p); ok {
 		respond(w, 200, p)

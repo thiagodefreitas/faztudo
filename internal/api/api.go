@@ -140,6 +140,8 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/local/code", a.localCode)
 	m.HandleFunc("GET /api/v1/members", a.members)
 	m.HandleFunc("GET /api/v1/org", a.org)
+	m.HandleFunc("POST /api/v1/projects", a.createProject)
+	m.HandleFunc("PATCH /api/v1/projects/{project}", a.patchProject)
 	m.HandleFunc("POST /api/v1/projects/{project}/assignments", a.assign)
 	m.HandleFunc("DELETE /api/v1/projects/{project}/assignments/{kind}/{handle}", a.unassign)
 	m.HandleFunc("GET /api/v1/routines", a.routines)

@@ -69,3 +69,58 @@ const LIVE = new Set(["queued", "running", "verifying", "waiting_approval"])
 export function activeRuns(runs: Run[], channelIds: Set<string>): Run[] {
   return runs.filter((run) => channelIds.has(run.channel_id) && LIVE.has(run.state))
 }
+
+/** The daemon's rule: the lead, an assigned specialist, or the lead or a member of an assigned department. */
+export function isAssigned(project: Project, departments: Org["departments"], handle: string): boolean {
+  if (same(project.lead ?? "", handle) || project.specialists.some((item) => same(item, handle))) return true
+  return departments.some(
+    (department) =>
+      project.departments.some((item) => same(item, department.handle)) &&
+      (same(department.lead ?? "", handle) || department.members.some((item) => same(item, handle))),
+  )
+}
+
+export type ActivityKind = "merge" | "failure" | "approved" | "declined"
+
+/** One line of a project's past: a merge, a failure, or an answered approval. */
+export interface ActivityItem {
+  kind: ActivityKind
+  at: string
+  run?: Run
+  approval?: Approval
+}
+
+/** Recent merges, failures and answered approvals in the project's channels, newest first. */
+export function projectActivity(runs: Run[], approvals: Approval[], channelIds: Set<string>, limit = 12): ActivityItem[] {
+  const out: ActivityItem[] = []
+  for (const run of runs) {
+    if (!channelIds.has(run.channel_id)) continue
+    if (run.state === "done" && run.mode === "write" && (run.diff_stat?.files ?? 0) > 0) out.push({ kind: "merge", at: run.ended_at ?? "", run })
+    else if (run.state === "failed") out.push({ kind: "failure", at: run.ended_at ?? run.started_at ?? "", run })
+  }
+  for (const approval of approvals) {
+    if (!channelIds.has(approval.channel_id) || approval.state !== "resolved" || !approval.resolution) continue
+    const option = approval.options.find((item) => item.key === approval.resolution?.option)
+    out.push({ kind: option?.style === "danger" ? "declined" : "approved", at: approval.resolution.at, approval })
+  }
+  return out.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
+}
+
+/** Unread messages and approvals waiting in a project's channels, for the rail. */
+export function projectCounts(channels: Channel[], approvals: Approval[]): { unread: number; waiting: number } {
+  const ids = new Set(channels.map((channel) => channel.id))
+  return {
+    unread: channels.reduce((sum, channel) => sum + channel.unread, 0),
+    waiting: pendingApprovals(approvals, ids).length,
+  }
+}
+
+/** A handle from a name: lowercase words joined by dashes. */
+export function handleFromName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}

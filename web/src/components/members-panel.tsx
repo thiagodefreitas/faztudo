@@ -1,0 +1,236 @@
+import * as Dialog from "@radix-ui/react-dialog"
+import { useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
+import { useState } from "react"
+import { api } from "../api/client"
+import { cx } from "../lib/cx"
+import { isAssigned, projectOfChannel } from "../lib/projects"
+import { qk } from "../state/keys"
+import { replaceById } from "../state/merge"
+import { useNow } from "../state/now"
+import { useApprovals, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
+import type { Channel, Member } from "../types"
+import { AgentAvatar } from "./agent-avatar"
+import { buttonClass, errorText, inputClass } from "./channel-dialogs"
+import { avatarState } from "./office/avatar"
+import { deriveMemberDesk, type DeskState } from "./office/state"
+import { TeamIcon } from "./team-icon"
+
+const STATE_CLASS: Record<DeskState, string> = {
+  idle: "bg-sidebar text-muted",
+  working: "bg-accent-soft text-accent",
+  queued: "bg-sidebar text-muted",
+  waiting_approval: "bg-warn-soft text-warn",
+  failed: "bg-danger-soft text-danger",
+  out_of_quota: "bg-sidebar text-faint",
+}
+
+const SMALL = "min-h-8 rounded-md px-2 text-[12px] text-muted hover:bg-canvas hover:text-ink disabled:opacity-50 md:min-h-7"
+
+// The people and agents in a channel, with what each agent is doing, which
+// lane it runs on and whether the project lets it act here. The Director
+// adds and removes members, assigns an agent to the project and picks the
+// agent that answers plain messages.
+export function MembersPanel({ channel, open, onOpenChange }: { channel: Channel; open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      {open && <Panel channel={channel} />}
+    </Dialog.Root>
+  )
+}
+
+function Panel({ channel }: { channel: Channel }) {
+  const qc = useQueryClient()
+  const me = useMe()
+  const members = useMembers()
+  const org = useOrg()
+  const runs = useRuns()
+  const approvals = useApprovals()
+  const lanes = useLanes()
+  const now = useNow()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [adding, setAdding] = useState("")
+
+  const all = members.data ?? []
+  const meId = me.data?.id
+  const isHuman = me.data?.kind === "human"
+  const project = org.data ? projectOfChannel(channel, org.data.projects) : undefined
+  const inside = all.filter((member) => channel.member_ids.includes(member.id))
+  const outside = all.filter((member) => !channel.member_ids.includes(member.id))
+  // Agents first, the default agent at the top, then people.
+  const sorted = inside.slice().sort((a, b) => {
+    if (a.id === channel.default_agent_id) return -1
+    if (b.id === channel.default_agent_id) return 1
+    return Number(b.kind === "agent") - Number(a.kind === "agent")
+  })
+  const agentsInside = inside.filter((member) => member.kind === "agent").length
+
+  async function change(work: () => Promise<unknown>) {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await work()
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function patchMembers(ids: string[], defaultAgent?: string) {
+    return change(async () => {
+      const next = await api.patchChannel(channel.id, { member_ids: ids, ...(defaultAgent !== undefined ? { default_agent_id: defaultAgent } : {}) })
+      qc.setQueryData<Channel[]>(qk.channels, (list = []) => replaceById(list, next))
+    })
+  }
+
+  function assign(member: Member) {
+    if (!project) return
+    return change(async () => {
+      await api.assign(project.handle, { kind: "specialist", handle: member.handle })
+      await qc.invalidateQueries({ queryKey: qk.org })
+    })
+  }
+
+  return (
+    <Dialog.Portal>
+      <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
+      <Dialog.Content
+        aria-describedby={undefined}
+        className="fixed inset-y-0 right-0 z-50 flex w-[min(24rem,100vw)] flex-col border-l border-line bg-surface shadow-lg max-md:inset-x-0 max-md:w-auto"
+      >
+        <header className="flex items-center gap-2 border-b border-line px-3 py-2">
+          <TeamIcon channel={channel} members={all} excludeId={meId} size={28} layout="cluster" />
+          <div className="min-w-0 flex-1">
+            <Dialog.Title className="truncate text-[15px] font-semibold">Members of #{channel.name}</Dialog.Title>
+            <p className="truncate text-[12px] text-muted">
+              {inside.length} {inside.length === 1 ? "member" : "members"}, {agentsInside} {agentsInside === 1 ? "agent" : "agents"}
+              {project && (
+                <>
+                  {" "}
+                  in{" "}
+                  <Link to="/p/$handle" params={{ handle: project.handle }} className="text-accent hover:underline">
+                    {project.name}
+                  </Link>
+                </>
+              )}
+            </p>
+          </div>
+          <Dialog.Close className={buttonClass} aria-label="Close members">
+            Close
+          </Dialog.Close>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {error && (
+            <p role="alert" className="px-3 pt-2 text-[12px] text-danger">
+              {error}
+            </p>
+          )}
+          <ul className="divide-y divide-line" aria-label="Members">
+            {sorted.map((member) => {
+              const desk =
+                member.kind === "agent"
+                  ? deriveMemberDesk({ member, runs: runs.data ?? [], approvals: approvals.data ?? [], lanes: lanes.data ?? [], now })
+                  : undefined
+              const assigned = project && member.kind === "agent" ? isAssigned(project, org.data?.departments ?? [], member.handle) : undefined
+              const isDefault = member.id === channel.default_agent_id
+              const you = member.id === meId
+              const director = member.id === org.data?.director_id
+              return (
+                <li key={member.id} className="flex items-start gap-2.5 px-3 py-2" data-member={member.id} data-assigned={assigned}>
+                  <AgentAvatar member={member} size={36} state={desk ? avatarState(desk.state) : undefined} decorative className="mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
+                      <span className="font-medium">{member.display_name}</span>
+                      <span className="font-mono text-[11px] text-faint">@{member.handle}</span>
+                      {you && <span className="text-[11px] text-faint">(you)</span>}
+                      {isDefault && <span className="rounded bg-accent-soft px-1.5 text-[11px] text-accent">Default</span>}
+                      {assigned === false && <span className="rounded bg-warn-soft px-1.5 text-[11px] text-warn">Not assigned</span>}
+                    </p>
+                    <p className="truncate text-[12px] text-muted">
+                      {member.kind === "human" ? (director ? "Director" : "Human") : (member.agent?.role ?? "Agent")}
+                    </p>
+                    {desk && (
+                      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className={cx("rounded-full px-2 py-0.5", STATE_CLASS[desk.state])}>{desk.stateLabel}</span>
+                        {desk.laneId && <span className="font-mono text-faint">{desk.laneId}</span>}
+                        {desk.resetTimeText && <span className="text-faint">{desk.resetTimeText}</span>}
+                      </p>
+                    )}
+                    {isHuman && (
+                      <p className="mt-1 flex flex-wrap gap-1">
+                        {assigned === false && project && (
+                          <button type="button" disabled={busy} onClick={() => void assign(member)} className={cx(SMALL, "text-accent")}>
+                            Assign to {project.name}
+                          </button>
+                        )}
+                        {member.kind === "agent" && !isDefault && (
+                          <button type="button" disabled={busy} onClick={() => void patchMembers(channel.member_ids, member.id)} className={SMALL}>
+                            Make default
+                          </button>
+                        )}
+                        {member.kind === "agent" && isDefault && (
+                          <button type="button" disabled={busy} onClick={() => void patchMembers(channel.member_ids, "")} className={SMALL}>
+                            Clear default
+                          </button>
+                        )}
+                        {!you && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            aria-label={`Remove ${member.display_name}`}
+                            onClick={() =>
+                              void patchMembers(
+                                channel.member_ids.filter((id) => id !== member.id),
+                                isDefault ? "" : undefined,
+                              )
+                            }
+                            className={SMALL}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+        {isHuman && (
+          <footer className="border-t border-line px-3 py-2">
+            <label htmlFor="members-add" className="text-[12px] font-medium">
+              Add a member
+            </label>
+            <div className="flex gap-2">
+              <select id="members-add" value={adding} onChange={(event) => setAdding(event.target.value)} className={cx(inputClass, "mt-1 flex-1")} disabled={outside.length === 0}>
+                <option value="">{outside.length === 0 ? "Everyone is here" : "Choose..."}</option>
+                {outside.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.display_name}
+                    {member.kind === "agent" ? " (agent)" : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!adding || busy}
+                onClick={() => {
+                  const id = adding
+                  setAdding("")
+                  void patchMembers([...channel.member_ids, id])
+                }}
+                className="mt-1 min-h-8 rounded-md bg-accent px-3 text-[13px] text-canvas disabled:opacity-60"
+              >
+                Add
+              </button>
+            </div>
+          </footer>
+        )}
+      </Dialog.Content>
+    </Dialog.Portal>
+  )
+}

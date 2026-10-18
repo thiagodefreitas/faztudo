@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useState, type ReactNode } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
@@ -10,6 +10,11 @@ import type { AssignKind, Department, Member, Project } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { avatarState } from "./office/avatar"
 import { deriveMemberDesk, type DeskInfo, type DeskState } from "./office/state"
+import { CreateProjectDialog } from "./project-dialogs"
+
+const CARD = "rounded-lg border border-line bg-surface p-3"
+const CHIP = "inline-flex items-center rounded-full bg-sidebar px-2 py-0.5 text-[11px] text-muted"
+const PRIMARY = "inline-flex min-h-8 items-center rounded-md bg-accent px-2.5 text-[12px] font-medium text-canvas hover:opacity-90"
 
 const STATE_CLASS: Record<DeskState, string> = {
   idle: "bg-sidebar text-muted",
@@ -77,7 +82,9 @@ export function OrganizationPage() {
   const approvals = useApprovals()
   const now = useNow()
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const all = members.data ?? []
   const director = all.find((member) => member.id === (org.data?.director_id ?? me.data?.id))
@@ -113,7 +120,11 @@ export function OrganizationPage() {
         <Link to="/routines" className="ml-auto min-h-10 py-2 text-[13px] text-accent hover:underline md:min-h-0 md:py-0">
           Routines
         </Link>
+        <button type="button" onClick={() => setCreating(true)} className={PRIMARY}>
+          New project
+        </button>
       </header>
+      <CreateProjectDialog open={creating} onOpenChange={setCreating} onCreated={(project) => void navigate({ to: "/p/$handle", params: { handle: project.handle } })} />
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3">
         {error && (
           <p role="alert" className="text-[13px] text-danger">
@@ -155,17 +166,29 @@ export function OrganizationPage() {
                   No departments yet. Add <code className="font-mono">[[department]]</code> entries to lanes.toml.
                 </p>
               ) : (
-                <div className="grid items-start gap-3 lg:grid-cols-2">
-                  {departments.map((department) => (
+                <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+                  {departments.map((department) => {
+                    const worksOn = projects.filter((project) => project.departments.some((h) => sameHandle(h, department.handle)))
+                    return (
                     <article
                       key={department.handle}
                       aria-label={department.display_name}
-                      className="rounded-lg border border-line bg-surface p-3"
+                      className={CARD}
                     >
                       <h3 className="flex items-baseline gap-2 text-[14px] font-semibold">
                         {department.display_name}
                         <span className="font-mono text-[11px] font-normal text-faint">@{department.handle}</span>
+                        <span className="ml-auto font-mono text-[11px] font-normal text-faint">{departmentHandles(department).length}</span>
                       </h3>
+                      <p className="pb-1 text-[12px] text-muted">
+                        {department.lead ? (
+                          <>
+                            @{department.handle} goes to its lead, who splits the work.
+                          </>
+                        ) : (
+                          "No lead: @" + department.handle + " reaches nobody yet."
+                        )}
+                      </p>
                       <ul className="divide-y divide-line">
                         {departmentHandles(department).map((handle) => {
                           const member = byHandle(handle)
@@ -180,20 +203,38 @@ export function OrganizationPage() {
                           )
                         })}
                       </ul>
+                      <p className="flex flex-wrap items-center gap-1 pt-2 text-[12px] text-muted">
+                        <span className="text-faint">Works on</span>
+                        {worksOn.length === 0 ? (
+                          <span>no project yet</span>
+                        ) : (
+                          worksOn.map((project) => (
+                            <Link key={project.handle} to="/p/$handle" params={{ handle: project.handle }} className={cx(CHIP, "hover:text-ink")}>
+                              {project.name}
+                            </Link>
+                          ))
+                        )}
+                      </p>
                     </article>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
 
             <div>
-              <h2 className="pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Projects</h2>
+              <h2 className="flex items-baseline gap-2 pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">
+                Projects
+                <button type="button" onClick={() => setCreating(true)} className="ml-auto text-[12px] font-medium normal-case tracking-normal text-accent hover:underline">
+                  New project
+                </button>
+              </h2>
               {projects.length === 0 ? (
-                <p className="text-[13px] text-muted">
-                  No projects yet. Add <code className="font-mono">[[project]]</code> entries to lanes.toml.
+                <p className="rounded-lg border border-dashed border-line px-3 py-2.5 text-[13px] text-muted">
+                  No projects yet. Create one here or add <code className="font-mono">[[project]]</code> entries to lanes.toml.
                 </p>
               ) : (
-                <div className="grid items-start gap-3 lg:grid-cols-2">
+                <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                   {projects.map((project) => (
                     <ProjectCard
                       key={project.handle}
@@ -247,20 +288,37 @@ function ProjectCard({
     </button>
   )
 
+  const leadMember = project.lead ? byHandle(project.lead) : undefined
   return (
-    <article aria-label={project.name} className="rounded-lg border border-line bg-surface p-3">
+    <article aria-label={project.name} className={CARD}>
       <h3 className="flex items-baseline gap-2 text-[14px] font-semibold">
-        {project.name}
+        <Link to="/p/$handle" params={{ handle: project.handle }} className="hover:underline">
+          {project.name}
+        </Link>
         <span className="font-mono text-[11px] font-normal text-faint">@{project.handle}</span>
+        <Link to="/p/$handle" params={{ handle: project.handle }} className="ml-auto text-[12px] font-normal text-accent hover:underline">
+          Open
+        </Link>
       </h3>
-      <p className="truncate text-[12px] text-muted">
-        {project.channels.length > 0 ? project.channels.map((name) => `#${name}`).join(" ") : "No channels listed"}
+      <p className="flex flex-wrap items-center gap-1 pt-1 text-[12px] text-muted">
+        {project.channels.length > 0 ? (
+          project.channels.map((name) => (
+            <span key={name} className={CHIP}>
+              #{name}
+            </span>
+          ))
+        ) : (
+          <span>No channels listed</span>
+        )}
+        {project.repo_path && <span className="font-mono text-[11px] text-faint">{project.repo_path.split(/[\\/]+/).filter(Boolean).pop()}</span>}
       </p>
 
-      {project.lead && (
+      {project.lead ? (
         <ul className="divide-y divide-line">
-          <AgentRow handle={project.lead} member={byHandle(project.lead)} desk={deskOf(byHandle(project.lead))} badge="Project lead" />
+          <AgentRow handle={project.lead} member={leadMember} desk={deskOf(leadMember)} badge="Project lead" />
         </ul>
+      ) : (
+        <p className="py-1 text-[12px] text-muted">No lead: @{project.handle} reaches nobody yet.</p>
       )}
 
       <p className="pt-2 text-[11px] font-medium uppercase tracking-wide text-faint">Departments</p>

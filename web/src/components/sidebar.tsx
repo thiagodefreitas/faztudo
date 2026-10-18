@@ -5,16 +5,18 @@ import { identityOf } from "../lib/avatar"
 import { cx } from "../lib/cx"
 import { directPeer, findDirect, isDirect } from "../lib/direct"
 import { primaryWindow } from "../lib/lanes"
-import { groupChannels, pendingApprovals } from "../lib/projects"
+import { groupChannels, pendingApprovals, projectCounts } from "../lib/projects"
 import { useTheme } from "../lib/theme"
 import { formatAge } from "../lib/time"
 import { useNow } from "../state/now"
 import { useOpenDirect } from "../state/direct"
 import { useApprovals, useChannels, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
 import { useStreamStatus } from "../state/status"
-import type { Channel, Lane, LaneHealth, Member, Presence, Run } from "../types"
+import type { Approval, Channel, Lane, LaneHealth, Member, Presence, Project, Run } from "../types"
 import { WORKSPACE_NAME } from "../types"
 import { CreateChannelDialog } from "./channel-dialogs"
+import { CreateProjectDialog } from "./project-dialogs"
+import { TeamIcon } from "./team-icon"
 import { healthDotClass } from "./lane-chip"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
 import { laneBorrower } from "./office/state"
@@ -44,6 +46,29 @@ const STATUS_LABEL = {
 
 const ROW = "flex min-h-10 items-center gap-2 rounded-md px-2 text-[13px] md:min-h-7"
 const HEADING = "px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint"
+const PLUS = "inline-flex h-10 w-10 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas md:h-7 md:w-7"
+
+const COLLAPSED_KEY = "faztudo-rail-collapsed"
+
+// Which projects the rail shows folded. Kept per browser; a wiped store
+// means every project is open.
+function readCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    const list: unknown = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeCollapsed(set: Set<string>) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set]))
+  } catch {
+    // Private mode or a full store: the fold is forgotten on reload.
+  }
+}
 
 export function Sidebar() {
   return (
@@ -67,6 +92,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const theme = useTheme()
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
+  const [creatingProject, setCreatingProject] = useState(false)
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const meId = me.data?.id
   const all = channels.data ?? []
@@ -85,6 +112,15 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   }
   function directOf(member: Member): Channel | undefined {
     return meId ? findDirect(all, meId, member.id) : undefined
+  }
+  function toggleProject(handle: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(handle)) next.delete(handle)
+      else next.add(handle)
+      writeCollapsed(next)
+      return next
+    })
   }
 
   return (
@@ -107,37 +143,39 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
             </span>
           </Link>
         )}
-        {grouped.groups.map(({ project, channels }) => (
-          <div key={project.handle} className="mb-3">
-            <Link
-              to="/p/$handle"
-              params={{ handle: project.handle }}
-              onClick={onNavigate}
-              className={cx(
-                ROW,
-                "font-medium",
-                pathname === `/p/${project.handle}` ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas",
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              <span className="text-[11px] font-normal uppercase tracking-wide text-faint">Project</span>
-            </Link>
-            <ul className="flex flex-col gap-px pl-3">
-              {channels.map((channel) => (
-                <ChannelRow key={channel.id} channel={channel} pathname={pathname} onNavigate={onNavigate} />
-              ))}
-            </ul>
+        {org.data && (
+          <div className="flex items-center justify-between pb-1 pl-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Projects</p>
+            <button type="button" aria-label="New project" title="New project" onClick={() => setCreatingProject(true)} className={PLUS}>
+              +
+            </button>
           </div>
+        )}
+        <CreateProjectDialog
+          open={creatingProject}
+          onOpenChange={setCreatingProject}
+          onCreated={(project) => {
+            onNavigate?.()
+            void navigate({ to: "/p/$handle", params: { handle: project.handle } })
+          }}
+        />
+        {grouped.groups.map(({ project, channels }) => (
+          <ProjectGroup
+            key={project.handle}
+            project={project}
+            channels={channels}
+            approvals={approvals.data ?? []}
+            members={members.data ?? []}
+            meId={meId}
+            pathname={pathname}
+            collapsed={collapsed.has(project.handle)}
+            onToggle={() => toggleProject(project.handle)}
+            onNavigate={onNavigate}
+          />
         ))}
         <div className="flex items-center justify-between pb-1 pl-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Channels</p>
-          <button
-            type="button"
-            aria-label="Create channel"
-            title="Create channel"
-            onClick={() => setCreating(true)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas md:h-7 md:w-7"
-          >
+          <button type="button" aria-label="Create channel" title="Create channel" onClick={() => setCreating(true)} className={PLUS}>
             +
           </button>
         </div>
@@ -151,7 +189,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         />
         <ul className="flex flex-col gap-px">
           {grouped.rest.map((channel) => (
-            <ChannelRow key={channel.id} channel={channel} pathname={pathname} onNavigate={onNavigate} />
+            <ChannelRow key={channel.id} channel={channel} pathname={pathname} onNavigate={onNavigate} members={members.data ?? []} meId={meId} />
           ))}
         </ul>
         {(people.length > 0 || orphans.length > 0) && (
@@ -249,8 +287,84 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function ChannelRow({ channel, pathname, onNavigate }: { channel: Channel; pathname: string; onNavigate: (() => void) | undefined }) {
+// A project folds to one row that keeps its counts: unread messages and
+// approvals waiting for the Director in its channels.
+function ProjectGroup({
+  project,
+  channels,
+  approvals,
+  members,
+  meId,
+  pathname,
+  collapsed,
+  onToggle,
+  onNavigate,
+}: {
+  project: Project
+  channels: Channel[]
+  approvals: Approval[]
+  members: Member[]
+  meId: string | undefined
+  pathname: string
+  collapsed: boolean
+  onToggle: () => void
+  onNavigate: (() => void) | undefined
+}) {
+  const counts = projectCounts(channels, approvals)
+  const active = pathname === `/p/${project.handle}`
+  const listId = `project-${project.handle}-channels`
+  return (
+    <div className="mb-2" data-project={project.handle}>
+      <div className={cx(ROW, "gap-1 pl-0 pr-1", active ? "bg-accent-soft" : "hover:bg-canvas")}>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          aria-controls={listId}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${project.name}`}
+          className="inline-flex h-7 w-6 shrink-0 items-center justify-center rounded text-faint hover:text-ink"
+        >
+          <svg viewBox="0 0 12 12" className={cx("h-3 w-3 transition-transform duration-100 motion-reduce:transition-none", collapsed && "-rotate-90")} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m3 4.5 3 3 3-3" />
+          </svg>
+        </button>
+        <Link to="/p/$handle" params={{ handle: project.handle }} onClick={onNavigate} className="flex min-h-7 min-w-0 flex-1 items-center gap-2 font-medium text-ink">
+          <span className="min-w-0 flex-1 truncate">{project.name}</span>
+          {counts.waiting > 0 && (
+            <span className="rounded-full bg-warn px-1.5 text-[11px] font-medium text-canvas" aria-label={`${counts.waiting} waiting for you`}>
+              {counts.waiting}
+            </span>
+          )}
+          {collapsed && <Unread count={counts.unread} />}
+        </Link>
+      </div>
+      {!collapsed && (
+        <ul id={listId} className="flex flex-col gap-px pl-3">
+          {channels.map((channel) => (
+            <ChannelRow key={channel.id} channel={channel} pathname={pathname} onNavigate={onNavigate} members={members} meId={meId} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function ChannelRow({
+  channel,
+  pathname,
+  onNavigate,
+  members,
+  meId,
+}: {
+  channel: Channel
+  pathname: string
+  onNavigate: (() => void) | undefined
+  members: Member[]
+  meId: string | undefined
+}) {
   const active = pathname === `/c/${channel.id}`
+  // A channel with a team shows its faces; a channel with nobody else, a #.
+  const team = channel.member_ids.filter((id) => id !== meId).length > 0
   return (
     <li>
       <Link
@@ -259,7 +373,11 @@ function ChannelRow({ channel, pathname, onNavigate }: { channel: Channel; pathn
         onClick={onNavigate}
         className={cx(ROW, active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")}
       >
-        <span className="text-faint">#</span>
+        {team ? (
+          <TeamIcon channel={channel} members={members} excludeId={meId} size={20} layout="cluster" className="shrink-0" />
+        ) : (
+          <span className="inline-flex w-5 justify-center text-faint">#</span>
+        )}
         <span className="min-w-0 flex-1 truncate">{channel.name}</span>
         <Unread count={channel.unread} />
       </Link>

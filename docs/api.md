@@ -281,6 +281,8 @@ interface NoticeAction {
 | GET | `/api/v1/me` | the signed-in member |
 | GET | `/api/v1/members` | all members, humans and agents |
 | GET | `/api/v1/org` | `Org`: the Director's member id, the departments and the projects with their assignments |
+| POST | `/api/v1/projects` | create `{handle, name?, repo_path?, lead?, channels?, departments?, specialists?}`; humans only (403 for an agent), 400 for a bad handle, an unknown lead, department or specialist, a channel another project lists or a `repo_path` that is not a git work tree, 409 when the handle exists; the name defaults to the handle; 201 with the `Project`, and a `project.updated` event; the project is stored like one from lanes.toml and survives a restart |
+| PATCH | `/api/v1/projects/{project}` | change `{name?, repo_path?, lead?, channels?}` of a project; humans only; same checks as creating; assignments stay; returns the `Project`. A project that is also in lanes.toml takes its name, repository, lead and channels from the file again on the next start |
 | POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/routines` | `Routine[]` with the time of the next run |
@@ -365,7 +367,7 @@ Event types in version 1:
 | `lane.updated` | `Lane` |
 | `lane.switched` | `{run_id, from, to, reason}` |
 | `department.updated` | `Department` |
-| `project.updated` | `Project` (sent when the Director changes an assignment) |
+| `project.updated` | `Project` (sent when the Director creates a project or changes its fields or assignments) |
 | `routine.updated` | `Routine` (sent when it is switched or has run) |
 | `handoff.created` | `Handoff` plus `message_id` |
 | `notice` | `{level: "info" or "warn" or "error", text, action?: NoticeAction}` |

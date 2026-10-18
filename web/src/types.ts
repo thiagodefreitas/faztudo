@@ -428,6 +428,25 @@ export interface Routine {
 
 export type AssignKind = "department" | "specialist"
 
+/** POST /projects. Channels are names; lead, departments and specialists are handles. */
+export interface ProjectCreate {
+  handle: string
+  name?: string
+  repo_path?: string
+  lead?: string
+  channels?: string[]
+  departments?: string[]
+  specialists?: string[]
+}
+
+/** PATCH /projects/{handle}. Assignments change through assign and unassign. */
+export interface ProjectPatch {
+  name?: string
+  repo_path?: string
+  lead?: string
+  channels?: string[]
+}
+
 export interface AssignBody {
   kind: AssignKind
   handle: string

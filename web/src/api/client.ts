@@ -24,6 +24,8 @@ import type {
   PairingTicket,
   Pin,
   Project,
+  ProjectCreate,
+  ProjectPatch,
   ReadCursor,
   ReadResult,
   ResolveBody,
@@ -76,6 +78,8 @@ export interface Api {
   approvals: (state?: Approval["state"]) => Promise<Approval[]>
   resolveApproval: (id: ID, body: ResolveBody) => Promise<Approval>
   org: () => Promise<Org>
+  createProject: (body: ProjectCreate) => Promise<Project>
+  patchProject: (handle: string, body: ProjectPatch) => Promise<Project>
   assign: (project: string, body: AssignBody) => Promise<Project>
   unassign: (project: string, kind: AssignKind, handle: string) => Promise<Project>
   routines: () => Promise<Routine[]>
@@ -162,6 +166,8 @@ export function createApi(options: ApiOptions = {}): Api {
     approvals: (state) => request("GET", query("/approvals", { state })),
     resolveApproval: (id, body) => request("POST", `/approvals/${encodeURIComponent(id)}/resolve`, body),
     org: () => request("GET", "/org"),
+    createProject: (body) => request("POST", "/projects", body),
+    patchProject: (handle, body) => request("PATCH", `/projects/${encodeURIComponent(handle)}`, body),
     assign: (project, body) => request("POST", `/projects/${encodeURIComponent(project)}/assignments`, body),
     unassign: (project, kind, handle) =>
       request("DELETE", `/projects/${encodeURIComponent(project)}/assignments/${kind}/${encodeURIComponent(handle)}`),

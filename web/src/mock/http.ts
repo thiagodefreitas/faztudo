@@ -1,4 +1,4 @@
-import type { ApprovalState, RunState } from "../types"
+import type { ApprovalState, ProjectCreate, ProjectPatch, RunState } from "../types"
 import type { Result } from "./result"
 import { err } from "./result"
 import type { MockWorld } from "./world"
@@ -224,6 +224,25 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     if (parts.length === 3 && parts[2] === "run" && method === "POST") return send(world.runRoutine(parts[1]))
   }
 
+  if (parts[0] === "projects" && parts.length === 1 && method === "POST") {
+    const list = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined)
+    const project: ProjectCreate = { handle: text(body.handle) ?? "" }
+    if (text(body.name) !== undefined) project.name = text(body.name)
+    if (text(body.repo_path) !== undefined) project.repo_path = text(body.repo_path)
+    if (text(body.lead) !== undefined) project.lead = text(body.lead)
+    if (list(body.channels)) project.channels = list(body.channels)
+    if (list(body.departments)) project.departments = list(body.departments)
+    if (list(body.specialists)) project.specialists = list(body.specialists)
+    return send(world.createProject(project))
+  }
+  if (parts[0] === "projects" && parts.length === 2 && method === "PATCH") {
+    const patch: ProjectPatch = {}
+    if (text(body.name) !== undefined) patch.name = text(body.name)
+    if (text(body.repo_path) !== undefined) patch.repo_path = text(body.repo_path)
+    if (text(body.lead) !== undefined) patch.lead = text(body.lead)
+    if (Array.isArray(body.channels)) patch.channels = body.channels.filter((item): item is string => typeof item === "string")
+    return send(world.patchProject(parts[1] ?? "", patch))
+  }
   if (parts[0] === "projects" && parts[2] === "assignments") {
     const project = parts[1]
     if (!project) return send(err(404, "not_found", "resource not found"))

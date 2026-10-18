@@ -12,6 +12,10 @@ way to the right agent.
 | :--- | :--- |
 | Departments and projects in `lanes.toml`, personas with description and standing instructions | built, see [configuration](configuration.md) |
 | `GET /api/v1/org`, and assigning or removing a department or specialist on a project (humans only) | built, see [API](api.md) |
+| Creating a project in the app (`POST /api/v1/projects`: name, handle, repository, lead, departments, specialists, first channels) and changing its name, repository, lead or channels (`PATCH`); humans only | built; a project also listed in lanes.toml takes those fields from the file on the next start |
+| New project and new team channel flows in the web app; a members panel on every channel with role, lane, live state and assignment, add and remove members, set the default agent | built |
+| Project home: lead and team in the header, new channel and assign actions, sections with counts and empty states, an activity timeline of merges, failures and answered approvals | built |
+| Rail: projects fold to one row that keeps unread and "needs you" counts; team channels show their faces | built |
 | In a project's channels only assigned agents run; others get a notice with an Assign button (the Director can use it; agents get 403) | built |
 | `@<department>` goes to its lead, `@<project>` to the project lead (a group with no lead answers with a notice) | built |
 | Organization page: the Director, departments, projects, assign and unassign | built |
@@ -22,7 +26,7 @@ way to the right agent.
 | `faztudo init --template solo\|team\|empty` | built |
 | A lead or the Chief of Staff waiting for the delegated results to write one combined answer | not built: results land in the thread and the delegating agent does not wait |
 | Routines for a trigger other than a new message (an issue, a failing CI run) | not built |
-| Working groups, drag-to-assign, lane budgets shared across projects | not built, next pass |
+| Working groups, drag-to-assign, lane budgets shared across projects, deleting a project from the app | not built, next pass |
 | A project's `repo_path` choosing where runs happen | not built: runs use the channel's `repo_path` |
 
 The rest of this page describes where the design is going.
