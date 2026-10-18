@@ -380,6 +380,34 @@ func TestSandboxedVerificationCannotReadHostFile(t *testing.T) {
 	}
 }
 
+func TestVerificationOutputIsRecorded(t *testing.T) {
+	root := t.TempDir()
+	repo := tamperRepo(t, root)
+	log := &eventstest.Appender{}
+	r := Runner{RunDir: filepath.Join(root, "runs"), Appender: log, Backoff: []time.Duration{}}
+	run := domain.Run{ID: "verify-output", ChannelID: "room", Mode: domain.RunWrite, State: domain.RunQueued}
+	err := r.ExecuteWrite(context.Background(), &run, sandboxShell{script: "printf new > file.txt"}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")},
+		TestCommand: "echo check-stdout; echo check-stderr >&2; exit 7", TestTimeout: time.Second,
+	})
+	if err == nil || run.State != domain.RunFailed || run.Verification == nil || !strings.Contains(run.Verification.Detail, "check-stdout") || !strings.Contains(run.Verification.Detail, "check-stderr") {
+		t.Fatalf("verification detail: %v, %+v", err, run.Verification)
+	}
+	var output strings.Builder
+	for _, d := range log.Snapshot() {
+		if d.Type == events.RunOutput {
+			output.WriteString(d.Payload.(events.RunOutputPayload).Text)
+		}
+	}
+	if !strings.Contains(output.String(), "check-stdout") || !strings.Contains(output.String(), "check-stderr") {
+		t.Fatalf("verification output events: %s", output.String())
+	}
+	data, readErr := os.ReadFile(filepath.Join(r.RunDir, run.ID, "stderr.log"))
+	if readErr != nil || !strings.Contains(string(data), "check-stderr") {
+		t.Fatalf("verification log: %q %v", data, readErr)
+	}
+}
+
 type toolchainCLI struct{ name string }
 
 func (a toolchainCLI) Name() string { return a.name }
@@ -487,6 +515,80 @@ func TestLiveSandboxedCLIWriteRun(t *testing.T) {
 				t.Fatalf("%s live write: %v, state=%s, reason=%s", tc.name, err, run.State, run.FailureReason)
 			}
 		})
+	}
+}
+
+func TestLiveSandboxedGoVerification(t *testing.T) {
+	if os.Getenv("FAZTUDO_LIVE_SANDBOX") != "1" {
+		t.Skip("set FAZTUDO_LIVE_SANDBOX=1 for live bubblewrap test")
+	}
+	if err := sandbox.Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, "dep"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-q")
+	for name, body := range map[string]string{
+		"go.mod":          "module example.invalid/fixture\n\ngo 1.25.0\n\nrequire example.invalid/dep v0.0.0\nreplace example.invalid/dep => ./dep\n",
+		"dep/go.mod":      "module example.invalid/dep\n\ngo 1.25.0\n",
+		"dep/dep.go":      "package dep\nfunc Answer() int { return 42 }\n",
+		"fixture.go":      "package fixture\nimport \"example.invalid/dep\"\nfunc Answer() int { return dep.Answer() }\n",
+		"fixture_test.go": "package fixture\nimport \"testing\"\nfunc TestAnswer(t *testing.T) { if Answer() != 42 { t.Fatal(\"wrong answer\") } }\n",
+		"README.md":       "Before.\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "base")
+	r := Runner{RunDir: filepath.Join(root, "runs"), Backoff: []time.Duration{}}
+	run := domain.Run{ID: "go-verify", Mode: domain.RunWrite, State: domain.RunQueued}
+	err := r.ExecuteWrite(context.Background(), &run, sandboxShell{script: "printf 'After.\\n' > README.md"}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+		TestCommand: "go vet ./... && go test ./...", TestTimeout: 2 * time.Minute, MemoryMax: "4G", TasksMax: 512,
+	})
+	if err != nil || run.State != domain.RunWaitingApproval {
+		t.Fatalf("sandboxed Go verification: %v; state=%s; detail=%+v", err, run.State, run.Verification)
+	}
+	if run.Verification == nil || !strings.Contains(run.Verification.Detail, "example.invalid/fixture") {
+		t.Fatalf("missing Go test output: %+v", run.Verification)
+	}
+	failed := domain.Run{ID: "go-verify-fail", Mode: domain.RunWrite, State: domain.RunQueued}
+	err = r.ExecuteWrite(context.Background(), &failed, sandboxShell{script: "printf 'After.\\n' > README.md"}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+		TestCommand: "echo sandbox-stdout; echo sandbox-stderr >&2; exit 7", TestTimeout: time.Minute, MemoryMax: "4G", TasksMax: 512,
+	})
+	if err == nil || failed.State != domain.RunFailed || failed.Verification == nil || !strings.Contains(failed.Verification.Detail, "sandbox-stdout") || !strings.Contains(failed.Verification.Detail, "sandbox-stderr") {
+		t.Fatalf("sandboxed failure output: %v; state=%s; detail=%+v", err, failed.State, failed.Verification)
+	}
+}
+
+func TestLiveSandboxedRepositoryVerification(t *testing.T) {
+	if os.Getenv("FAZTUDO_LIVE_SANDBOX") != "1" {
+		t.Skip("set FAZTUDO_LIVE_SANDBOX=1 for live repository verification")
+	}
+	if err := sandbox.Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	root := t.TempDir()
+	source := gitRun(t, ".", "rev-parse", "--show-toplevel")
+	repo := filepath.Join(root, "repo")
+	clone := exec.Command("git", "clone", "-q", "--no-hardlinks", source, repo)
+	if out, err := clone.CombinedOutput(); err != nil {
+		t.Fatalf("clone repository: %v: %s", err, out)
+	}
+	r := Runner{RunDir: filepath.Join(root, "runs"), Backoff: []time.Duration{}}
+	run := domain.Run{ID: "repo-verify", Mode: domain.RunWrite, State: domain.RunQueued}
+	err := r.ExecuteWrite(context.Background(), &run, sandboxShell{script: "printf 'ok\\n' > SANDBOX_SMOKE.txt"}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+		TestCommand: "go vet ./... && go test ./...", TestTimeout: 5 * time.Minute, MemoryMax: "4G", TasksMax: 512,
+	})
+	if err != nil || run.State != domain.RunWaitingApproval {
+		t.Fatalf("repository verification: %v; state=%s; detail=%+v", err, run.State, run.Verification)
 	}
 }
 func TestRetryAndSanitizedEnv(t *testing.T) {

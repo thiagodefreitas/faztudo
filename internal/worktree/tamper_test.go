@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,6 +157,70 @@ func TestHostGitDisablesConfiguredWorktreeFilters(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("host ran configured filter: %v", err)
+	}
+}
+
+func TestHostGitDoesNotRunConfiguredSignerOrMergeDriver(t *testing.T) {
+	root := t.TempDir()
+	repo, _ := repoWithCommit(t, root)
+	marker := filepath.Join(root, "extension-ran")
+	m := Manager{BaseDir: filepath.Join(root, "worktrees")}
+	w, err := m.Create(context.Background(), repo, "no-sign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An existing include.path can read a file that an unsandboxed agent
+	// controls without changing the shared Git configuration itself.
+	include := filepath.Join(w.Path, "agent.conf")
+	gitTest(t, repo, "config", "include.path", include)
+	if err := os.WriteFile(include, []byte("[commit]\ngpgsign = true\n[gpg]\nprogram = touch "+marker+"\n[merge \"pwn\"]\ndriver = touch "+marker+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.Path, "tracked.txt"), []byte("new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Stage(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Commit(context.Background(), w, "change"); err != nil {
+		t.Fatalf("host commit honored signing config: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("host commit ran gpg.program: %v", err)
+	}
+	// A custom driver can be named by worktree attributes while its command
+	// comes from repository config. It must never execute on the host.
+	baseBranch := gitTest(t, repo, "symbolic-ref", "--short", "HEAD")
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("tracked.txt merge=pwn\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", ".gitattributes")
+	gitTest(t, repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "attributes")
+	gitTest(t, repo, "checkout", "-q", "-b", "other")
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("other\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "tracked.txt")
+	gitTest(t, repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "other")
+	gitTest(t, repo, "checkout", "-q", baseBranch)
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("main\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "tracked.txt")
+	gitTest(t, repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "main")
+	// Confirm the fixture really selects the custom driver without overrides.
+	raw := exec.Command("git", "-C", repo, "merge", "--no-commit", "--no-ff", "other")
+	_, _ = raw.CombinedOutput()
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("fixture did not select merge driver: %v", err)
+	}
+	gitTest(t, repo, "merge", "--abort")
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = HostGit(context.Background(), repo, "merge", "--no-commit", "--no-ff", "other")
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("host merge ran configured driver: %v", err)
 	}
 }
 

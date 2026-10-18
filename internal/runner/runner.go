@@ -157,6 +157,7 @@ type WriteOptions struct {
 	runStateDir string
 	sandboxArgs []string
 	sandboxEnv  map[string]string
+	scopeUsed   bool
 }
 
 func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, opts WriteOptions) error {
@@ -192,20 +193,25 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if diff == "" {
 			// Nothing to approve. The run is done, unless the channel's test
 			// command fails on the untouched tree.
-			if err := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts); err != nil {
+			output, verifyErr := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts)
+			if err := r.recordVerification(run, "no changes", output, verifyErr); err != nil {
 				return err
 			}
 			if err := opts.Worktrees.Cleanup(context.Background(), w); err != nil {
 				return err
 			}
 			run.Worktree, run.BaseCommit = "", ""
-			run.Verification = &domain.Verification{OK: true, Detail: "no changes"}
 			return nil
 		}
 		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
 			return err
 		}
-		if err := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts); err != nil {
+		output, verifyErr := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts)
+		detail := "diff exists"
+		if opts.TestCommand != "" {
+			detail = "diff exists and verification passed"
+		}
+		if err := r.recordVerification(run, detail, output, verifyErr); err != nil {
 			return err
 		}
 		_, after, err := opts.Worktrees.Diff(ctx, w)
@@ -215,11 +221,6 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if after != diff {
 			return errors.New("verification changed the worktree diff")
 		}
-		detail := "diff exists"
-		if opts.TestCommand != "" {
-			detail = "diff exists and verification passed"
-		}
-		run.Verification = &domain.Verification{OK: true, Detail: detail}
 		return nil
 	}, domain.RunWaitingApproval)
 	if err != nil && run.StartedAt == nil {
@@ -231,6 +232,67 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		return errors.Join(err, cleanupErr)
 	}
 	return err
+}
+
+func (r *Runner) recordVerification(run *domain.Run, passedDetail, output string, verifyErr error) error {
+	detail := passedDetail
+	if verifyErr != nil {
+		detail = verifyErr.Error()
+	}
+	if output != "" {
+		detail += "\n" + strings.TrimRight(output, "\n")
+	}
+	run.Verification = &domain.Verification{OK: verifyErr == nil, Detail: detail}
+	if output != "" {
+		if err := r.appendVerificationOutput(run, output); err != nil {
+			return errors.Join(verifyErr, fmt.Errorf("record verification output: %w", err))
+		}
+	}
+	return verifyErr
+}
+
+func (r *Runner) appendVerificationOutput(run *domain.Run, output string) error {
+	r.outputMu.Lock()
+	defer r.outputMu.Unlock()
+	m, err := r.load(run.ID)
+	if err != nil {
+		return err
+	}
+	text := "\n[verification]\n" + output
+	path := filepath.Join(r.RunDir, run.ID, "stderr.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.WriteString(text); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	for len(text) > 0 {
+		n := len(text)
+		if n > 16*1024 {
+			n = 16 * 1024
+		}
+		chunk := text[:n]
+		text = text[n:]
+		m.OutputSeq++
+		if err := r.emitRun(context.Background(), run, events.RunOutput, events.RunOutputPayload{RunID: run.ID, Seq: int(m.OutputSeq), Stream: "stderr", Text: chunk}); err != nil {
+			return err
+		}
+		offset += int64(n)
+		if err := r.updateOutput(run.ID, "stderr", offset, m.OutputSeq); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Runner) Execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request) error {
@@ -317,7 +379,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 					return err
 				}
 				if err := verify(); err != nil {
-					run.Verification = &domain.Verification{OK: false, Detail: err.Error()}
+					if run.Verification == nil || run.Verification.OK {
+						run.Verification = &domain.Verification{OK: false, Detail: err.Error()}
+					}
 					state := domain.RunFailed
 					class := domain.FailureSemantic
 					if ctx.Err() != nil {

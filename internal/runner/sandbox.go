@@ -1,12 +1,15 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -90,7 +93,16 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 			return fallback(fmt.Errorf("read-only path is a symlink: %s", path))
 		}
 	}
-	readOnly = append(readOnly, toolchainRoots(home, opts.ReadOnly, worktree, gitDir, opts.runStateDir)...)
+	toolchainPaths := append([]string(nil), opts.ReadOnly...)
+	// A locally built daemon may have been started by systemd with /usr/bin
+	// before its build toolchain on PATH. Use that toolchain for agent commands
+	// and verification when it still exists on this host. Released binaries
+	// whose build-machine GOROOT is absent keep the configured PATH.
+	if root := availableGoRoot(home, worktree, gitDir, opts.runStateDir); root != "" {
+		toolchainPaths = append(toolchainPaths, root)
+		cache["PATH"] = filepath.Join(root, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
+	}
+	readOnly = append(readOnly, toolchainRoots(home, toolchainPaths, worktree, gitDir, opts.runStateDir)...)
 	if modcache := goModCache(home); modcache != "" {
 		if coversWritable(modcache, worktree, gitDir, opts.runStateDir) {
 			return fallback(fmt.Errorf("Go module cache covers a writable run path: %s", modcache))
@@ -117,17 +129,45 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 	}
 	args = append(args, "--", program)
 	args = append(args, command.Args...)
-	path, err := exec.LookPath("bwrap")
+	opts.scopeUsed = opts.MemoryMax != "" && opts.TasksMax > 0 && sandbox.ScopeAvailable(ctx, opts.MemoryMax, opts.TasksMax)
+	command.Path, command.Args, err = sandboxLaunch(args, opts)
 	if err != nil {
 		return fallback(err)
 	}
-	command.Path = path
-	command.Args = args
-	if opts.MemoryMax != "" && opts.TasksMax > 0 && sandbox.ScopeAvailable(ctx, opts.MemoryMax, opts.TasksMax) {
-		command.Args = sandbox.ScopeArgs(opts.MemoryMax, opts.TasksMax, append([]string{command.Path}, command.Args...))
-		command.Path, _ = exec.LookPath("systemd-run")
-	}
 	return command, nil
+}
+
+func availableGoRoot(home string, writable ...string) string {
+	root := filepath.Clean(runtime.GOROOT())
+	if !filepath.IsAbs(root) || coversWritable(root, append(writable, home)...) || strings.HasPrefix(root, filepath.Join(home, ".ssh")+string(os.PathSeparator)) {
+		return ""
+	}
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	goBin := filepath.Join(root, "bin", "go")
+	info, err = os.Lstat(goBin)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return ""
+	}
+	return root
+}
+
+// sandboxLaunch gives the agent and its verification command the same scope.
+func sandboxLaunch(args []string, opts *WriteOptions) (string, []string, error) {
+	path, err := exec.LookPath("bwrap")
+	if err != nil {
+		return "", nil, err
+	}
+	if opts.scopeUsed {
+		scope, err := exec.LookPath("systemd-run")
+		if err != nil {
+			return "", nil, err
+		}
+		return scope, sandbox.ScopeArgs(opts.MemoryMax, opts.TasksMax, append([]string{path}, args...)), nil
+	}
+	return path, args, nil
 }
 
 // Codex's own workspace sandbox needs user namespaces and conflicts with the
@@ -222,37 +262,89 @@ func goModCache(home string) string {
 	return ""
 }
 
-func (r *Runner) verifyWrite(ctx context.Context, w worktree.Worktree, testCommand string, timeout time.Duration, opts WriteOptions) error {
-	if testCommand == "" {
-		return nil
+// verificationTail keeps the end of both command streams without retaining an
+// unbounded compiler or test log in the run record.
+type verificationTail struct {
+	mu        sync.Mutex
+	data      []byte
+	truncated bool
+}
+
+func (t *verificationTail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.data = append(t.data, p...)
+	const maxBytes = 256 * 1024
+	if len(t.data) > maxBytes {
+		t.data = append([]byte(nil), t.data[len(t.data)-maxBytes:]...)
+		t.truncated = true
 	}
-	if len(opts.sandboxArgs) == 0 {
-		return opts.Worktrees.Verify(ctx, w, testCommand, timeout)
+	const maxLines = 200
+	if lines := bytes.Count(t.data, []byte{'\n'}); lines > maxLines {
+		drop := lines - maxLines
+		for drop > 0 {
+			idx := bytes.IndexByte(t.data, '\n')
+			t.data = t.data[idx+1:]
+			drop--
+		}
+		t.truncated = true
 	}
+	return len(p), nil
+}
+
+func (t *verificationTail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.truncated {
+		return "[earlier verification output omitted]\n" + string(t.data)
+	}
+	return string(t.data)
+}
+
+func runVerification(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) (string, error) {
 	if timeout <= 0 {
-		return fmt.Errorf("verification timeout required")
+		return "", fmt.Errorf("verification timeout required")
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	args := append(append([]string(nil), opts.sandboxArgs...), "--", "/bin/sh", "-c", testCommand)
-	cmd := exec.Command("bwrap", args...)
-	cmd.Dir = w.Path
-	cmd.Env = stripEnv(os.Environ(), r.ExtraEnvRemove, opts.sandboxEnv, envKeys(opts.sandboxEnv)...)
+	tail := &verificationTail{}
+	cmd.Stdin = nil
+	cmd.Stdout, cmd.Stderr = tail, tail
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("verification failed: %w", err)
+		return tail.String(), fmt.Errorf("verification failed: %w", err)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
 		if err != nil {
-			return fmt.Errorf("verification failed: %w", err)
+			return tail.String(), fmt.Errorf("verification failed: %w", err)
 		}
-		return nil
+		return tail.String(), nil
 	case <-verifyCtx.Done():
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-done
-		return verifyCtx.Err()
+		return tail.String(), fmt.Errorf("verification failed: %w", verifyCtx.Err())
 	}
+}
+
+func (r *Runner) verifyWrite(ctx context.Context, w worktree.Worktree, testCommand string, timeout time.Duration, opts WriteOptions) (string, error) {
+	if testCommand == "" {
+		return "", nil
+	}
+	if len(opts.sandboxArgs) == 0 {
+		cmd := exec.Command("sh", "-c", testCommand)
+		cmd.Dir = w.Path
+		return runVerification(ctx, cmd, timeout)
+	}
+	args := append(append([]string(nil), opts.sandboxArgs...), "--", "/bin/sh", "-c", testCommand)
+	path, args, err := sandboxLaunch(args, &opts)
+	if err != nil {
+		return "", fmt.Errorf("verification failed: %w", err)
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Dir = w.Path
+	cmd.Env = stripEnv(os.Environ(), r.ExtraEnvRemove, opts.sandboxEnv, envKeys(opts.sandboxEnv)...)
+	return runVerification(ctx, cmd, timeout)
 }

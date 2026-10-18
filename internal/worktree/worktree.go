@@ -37,13 +37,13 @@ func HostGit(ctx context.Context, dir string, args ...string) (string, error) {
 // runGit runs host-side git. Repository configuration may have been changed
 // by an agent, so never run its executable Git extensions in the host process.
 func runGit(ctx context.Context, dir string, prefix []string, args ...string) (string, error) {
-	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null"}
+	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "gpg.program="}
 	flags = append(flags, prefix...)
-	filters, err := disabledFilters(ctx, dir, flags)
+	extensions, err := disabledExtensions(ctx, dir, flags)
 	if err != nil {
 		return "", err
 	}
-	flags = append(flags, filters...)
+	flags = append(flags, extensions...)
 	if len(args) > 0 && args[0] == "diff" {
 		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
 	}
@@ -57,12 +57,12 @@ func runGit(ctx context.Context, dir string, prefix []string, args ...string) (s
 	return strings.TrimSpace(string(out)), nil
 }
 
-// disabledFilters reads the effective repo, global and system configuration
+// disabledExtensions reads the effective repo, global and system configuration
 // before any host command touches agent-controlled paths. Attributes in the
 // worktree may select a configured driver, so each driver's executable
 // commands are overridden with empty values for this invocation.
-func disabledFilters(ctx context.Context, dir string, flags []string) ([]string, error) {
-	args := append(append([]string(nil), flags...), "config", "--includes", "--null", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`)
+func disabledExtensions(ctx context.Context, dir string, flags []string) ([]string, error) {
+	args := append(append([]string(nil), flags...), "config", "--includes", "--null", "--name-only", "--get-regexp", `^(filter\..*\.(clean|smudge|process|required)|merge\..*\.driver)$`)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_ATTR_NOSYSTEM=1")
@@ -72,7 +72,7 @@ func disabledFilters(ctx context.Context, dir string, flags []string) ([]string,
 		if errors.As(err, &exited) && exited.ExitCode() == 1 {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("list git filters: %w", err)
+		return nil, fmt.Errorf("list git executable extensions: %w", err)
 	}
 	seen := map[string]bool{}
 	var overrides []string
@@ -85,11 +85,16 @@ func disabledFilters(ctx context.Context, dir string, flags []string) ([]string,
 		if first < 0 || last <= first+1 {
 			continue
 		}
+		kind := key[:first]
 		name := key[first+1 : last]
-		if seen[name] {
+		if seen[kind+"."+name] {
 			continue
 		}
-		seen[name] = true
+		seen[kind+"."+name] = true
+		if kind == "merge" {
+			overrides = append(overrides, "-c", "merge."+name+".driver=")
+			continue
+		}
 		for _, field := range []string{"clean=", "smudge=", "process=", "required=false"} {
 			overrides = append(overrides, "-c", "filter."+name+"."+field)
 		}
@@ -123,12 +128,12 @@ func (m Manager) Commit(ctx context.Context, w Worktree, message string) error {
 	if err := m.Check(w); err != nil {
 		return err
 	}
-	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null", "--git-dir=" + w.Admin, "--work-tree=" + w.Path}
-	filters, err := disabledFilters(ctx, w.Path, flags)
+	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null", "-c", "commit.gpgsign=false", "-c", "gpg.program=", "--git-dir=" + w.Admin, "--work-tree=" + w.Path}
+	extensions, err := disabledExtensions(ctx, w.Path, flags)
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", append(append(flags, filters...), "commit", "-q", "-m", message)...)
+	cmd := exec.CommandContext(ctx, "git", append(append(flags, extensions...), "commit", "-q", "-m", message)...)
 	cmd.Dir = w.Path
 	cmd.Env = []string{"GIT_ATTR_NOSYSTEM=1"}
 	for _, kv := range os.Environ() {

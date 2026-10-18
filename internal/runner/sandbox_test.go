@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,33 @@ func TestCodexUsesOuterSandboxOnly(t *testing.T) {
 	}
 	if strings.Join(outerSandboxArgs("claude", args), " ") != strings.Join(args, " ") {
 		t.Fatal("changed another CLI")
+	}
+}
+
+func TestVerificationReusesAgentScope(t *testing.T) {
+	opts := WriteOptions{MemoryMax: "4G", TasksMax: 512, scopeUsed: true}
+	path, args, err := sandboxLaunch([]string{"--unshare-all"}, &opts)
+	if err != nil || filepath.Base(path) != "systemd-run" || !strings.Contains(strings.Join(args, " "), "--property=MemoryMax=4G") || !strings.Contains(strings.Join(args, " "), "--property=TasksMax=512") || !strings.Contains(strings.Join(args, " "), "bwrap --unshare-all") {
+		t.Fatalf("verification scope: %s %q %v", path, args, err)
+	}
+}
+
+func TestVerificationTailKeepsLastLines(t *testing.T) {
+	var tail verificationTail
+	for i := 0; i < 250; i++ {
+		if _, err := tail.Write([]byte(fmt.Sprintf("line-%03d\n", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := tail.String()
+	if strings.Contains(got, "line-000") || !strings.Contains(got, "line-249") || !strings.Contains(got, "earlier verification output omitted") {
+		t.Fatalf("wrong tail: %q", got)
+	}
+	if _, err := tail.Write([]byte(strings.Repeat("x", 300*1024))); err != nil {
+		t.Fatal(err)
+	}
+	if len(tail.String()) > 257*1024 {
+		t.Fatalf("verification tail grew without bound: %d", len(tail.String()))
 	}
 }
 
