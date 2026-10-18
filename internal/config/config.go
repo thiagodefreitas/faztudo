@@ -15,6 +15,8 @@ import (
 
 type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir, TLSDir string }
 
+var memoryLimitPattern = regexp.MustCompile(`^[1-9][0-9]*[KMGT]?$`)
+
 func PathsFromEnv() Paths {
 	home, _ := os.UserHomeDir()
 	cfg := os.Getenv("XDG_CONFIG_HOME")
@@ -51,8 +53,11 @@ type LAN struct {
 	CAListen string `toml:"ca_listen"`
 }
 type Runs struct {
-	DefaultTimeout  string `toml:"default_timeout"`
-	ContextMessages int    `toml:"context_messages"`
+	DefaultTimeout   string `toml:"default_timeout"`
+	ContextMessages  int    `toml:"context_messages"`
+	Sandbox          string `toml:"sandbox"`
+	SandboxMemoryMax string `toml:"sandbox_memory_max"`
+	SandboxTasksMax  int    `toml:"sandbox_tasks_max"`
 }
 type Lane struct {
 	ID              string `toml:"id"`
@@ -65,7 +70,8 @@ type Lane struct {
 	// AllowedTools lists tools a claude run may use without asking, passed
 	// as --allowedTools. Unset keeps the write-run default; an empty list
 	// allows none.
-	AllowedTools []string `toml:"allowed_tools"`
+	AllowedTools   []string `toml:"allowed_tools"`
+	SandboxNetwork *bool    `toml:"sandbox_network"`
 }
 type Persona struct {
 	Handle      string   `toml:"handle"`
@@ -116,7 +122,7 @@ func Defaults() Config {
 	return Config{
 		Server: Server{Listen: "127.0.0.1:7457", OpenBrowser: true},
 		LAN:    LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
-		Runs:   Runs{DefaultTimeout: "30m", ContextMessages: 40},
+		Runs:   Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "off", SandboxMemoryMax: "4G", SandboxTasksMax: 512},
 	}
 }
 func Load(p Paths) (Config, error) {
@@ -151,6 +157,15 @@ func (c Config) Validate() error {
 	}
 	if c.Runs.ContextMessages < 1 {
 		return errors.New("runs.context_messages: must be positive")
+	}
+	if c.Runs.Sandbox != "auto" && c.Runs.Sandbox != "off" && c.Runs.Sandbox != "required" {
+		return errors.New("runs.sandbox: must be auto, off or required")
+	}
+	if !memoryLimitPattern.MatchString(c.Runs.SandboxMemoryMax) {
+		return errors.New("runs.sandbox_memory_max: use a positive size such as 4G")
+	}
+	if c.Runs.SandboxTasksMax < 1 {
+		return errors.New("runs.sandbox_tasks_max: must be positive")
 	}
 	seen := map[string]bool{}
 	for i, l := range c.Lanes.Lane {
@@ -271,7 +286,7 @@ func WriteDefaults(p Paths) error {
 			return err
 		}
 	}
-	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\nca_listen = \"0.0.0.0:7459\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
+	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\nca_listen = \"0.0.0.0:7459\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\nsandbox = \"off\"\nsandbox_memory_max = \"4G\"\nsandbox_tasks_max = 512\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n# sandbox_network = true\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
 		h, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if errors.Is(err, os.ErrExist) {
 			continue

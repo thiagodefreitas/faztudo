@@ -22,7 +22,7 @@ func TestRoundTrip(t *testing.T) {
 	if c.Server.Listen != "127.0.0.1:7457" || len(c.Lanes.Lane) != 0 {
 		t.Fatalf("unexpected config: %+v", c)
 	}
-	lanes := "[[lane]]\nid = \"codex/default\"\ncli = \"codex\"\ncost_class = \"standard\"\ncapacity = 2\nconserve_at = 65\n[[persona]]\nhandle = \"coder\"\ndisplay_name = \"Coder\"\nlanes = [\"codex/default\"]\nmode = \"write\"\n"
+	lanes := "[[lane]]\nid = \"codex/default\"\ncli = \"codex\"\ncost_class = \"standard\"\ncapacity = 2\nconserve_at = 65\nsandbox_network = false\n[[persona]]\nhandle = \"coder\"\ndisplay_name = \"Coder\"\nlanes = [\"codex/default\"]\nmode = \"write\"\n"
 	if err := os.WriteFile(p.LanesFile, []byte(lanes), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Lanes.Lane) != 1 || c.Lanes.Lane[0].CostClass != "standard" || c.Lanes.Lane[0].ConserveAt == nil || *c.Lanes.Lane[0].ConserveAt != 65 || c.Lanes.Persona[0].DisplayName != "Coder" {
+	if len(c.Lanes.Lane) != 1 || c.Lanes.Lane[0].CostClass != "standard" || c.Lanes.Lane[0].ConserveAt == nil || *c.Lanes.Lane[0].ConserveAt != 65 || c.Lanes.Lane[0].SandboxNetwork == nil || *c.Lanes.Lane[0].SandboxNetwork || c.Lanes.Persona[0].DisplayName != "Coder" {
 		t.Fatalf("lane config: %+v", c.Lanes)
 	}
 	if err := os.WriteFile(p.ConfigFile, []byte("[runs]\ncontext_messages = -1\n"), 0600); err != nil {
@@ -52,6 +52,28 @@ func TestConserveAt(t *testing.T) {
 		if got := c.Validate() == nil; got != tc.valid {
 			t.Errorf("conserve_at %d valid=%t, want %t", tc.value, got, tc.valid)
 		}
+	}
+}
+
+func TestSandboxConfig(t *testing.T) {
+	c := Defaults()
+	if c.Runs.Sandbox != "off" || c.Runs.SandboxMemoryMax != "4G" || c.Runs.SandboxTasksMax != 512 {
+		t.Fatalf("sandbox defaults: %+v", c.Runs)
+	}
+	for _, mode := range []string{"auto", "required", "off"} {
+		c.Runs.Sandbox = mode
+		if err := c.Validate(); err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+	}
+	c.Runs.Sandbox = "invalid"
+	if err := c.Validate(); err == nil {
+		t.Fatal("accepted invalid sandbox mode")
+	}
+	c.Runs.Sandbox = "auto"
+	c.Runs.SandboxMemoryMax = "no-limit"
+	if err := c.Validate(); err == nil {
+		t.Fatal("accepted invalid memory limit")
 	}
 }
 

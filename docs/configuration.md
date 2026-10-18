@@ -29,6 +29,9 @@ ca_listen = "0.0.0.0:7459"
 [runs]
 default_timeout = "30m"
 context_messages = 40       # recent messages sent to an agent
+sandbox = "off"             # off (default for now), auto or required for write runs
+sandbox_memory_max = "4G"  # systemd user scope, when available
+sandbox_tasks_max = 512    # systemd user scope, when available
 ```
 
 `allowed_hosts` (under `[server]`) lists extra host names accepted from a
@@ -46,6 +49,22 @@ listener on `lan.listen` (default `0.0.0.0:7458`) and the plain-HTTP CA
 helper listener on `lan.ca_listen` (default `0.0.0.0:7459`). Run
 `faztudo passwd` before starting LAN mode for the first time.
 
+The write-run sandbox is off by default for now: agents running inside it
+cannot yet see toolchains and caches installed under your home (a Go
+toolchain, Node from nvm, module caches), so their builds and tests can
+fail. Turn it on per machine with `auto` or `required` once your tools live
+in system paths. With `auto`, write runs use bubblewrap on Linux when it and
+unprivileged user namespaces work. `auto` posts a notice once per run if it falls back to the old process
+mode. `required` refuses the run instead; `off` disables the sandbox. The
+worktree and git directory stay writable, while the rest of home is hidden
+apart from the CLI's own sign-in and config paths and its executable file.
+`faztudo doctor` reports
+bubblewrap, user namespace and systemd user-scope availability. When a scope
+works, `sandbox_memory_max` and `sandbox_tasks_max` cap memory and tasks.
+Read runs are unchanged. See [SECURITY.md](../SECURITY.md) for limits.
+Use `required` when a lane's `sandbox_network = false` must be enforced;
+an `auto` fallback runs with the host network.
+
 ## lanes.toml
 
 A lane is one agent CLI with one model route. A persona is a name you can
@@ -59,6 +78,7 @@ model = "opus"
 cost_class = "premium"
 capacity = 1
 conserve_at = 80
+sandbox_network = true       # default; false hides the network in write runs
 # plan_limit_tokens = 1000000 # optional manual limit for token-based usage (claude, grok)
 
 [[lane]]

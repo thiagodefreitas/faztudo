@@ -148,6 +148,11 @@ type WriteOptions struct {
 	Worktrees   worktree.Manager
 	TestCommand string
 	TestTimeout time.Duration
+	SandboxMode string
+	Network     bool
+	MemoryMax   string
+	TasksMax    int
+	OnFallback  func(string)
 }
 
 func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, opts WriteOptions) error {
@@ -170,7 +175,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 	run.Worktree = w.Path
 	run.BaseCommit = w.BaseCommit
 	req.Workdir = w.Path
-	return r.execute(ctx, run, adapter, req, func() error {
+	err = r.execute(ctx, run, adapter, req, &opts, func() error {
 		stat, diff, err := opts.Worktrees.Diff(ctx, w)
 		if err != nil {
 			return err
@@ -203,15 +208,24 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		run.Verification = &domain.Verification{OK: true, Detail: detail}
 		return nil
 	}, domain.RunWaitingApproval)
+	if err != nil && run.StartedAt == nil {
+		cleanupErr := opts.Worktrees.Cleanup(context.Background(), w)
+		if cleanupErr == nil {
+			run.Worktree = ""
+			run.BaseCommit = ""
+		}
+		return errors.Join(err, cleanupErr)
+	}
+	return err
 }
 
 func (r *Runner) Execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request) error {
 	if run.Mode == domain.RunWrite || req.Mode == domain.RunWrite {
 		return errors.New("write runs require ExecuteWrite")
 	}
-	return r.execute(ctx, run, adapter, req, nil, domain.RunDone)
+	return r.execute(ctx, run, adapter, req, nil, nil, domain.RunDone)
 }
-func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, verify func() error, successState domain.RunState) error {
+func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, write *WriteOptions, verify func() error, successState domain.RunState) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -242,6 +256,12 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 		return err
 	}
 	defer removePaths(command.Remove)
+	if write != nil && write.SandboxMode != "" && write.SandboxMode != "off" {
+		command, err = sandboxCommand(ctx, command, adapter.Name(), req, *write)
+		if err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(filepath.Join(r.RunDir, run.ID), 0700); err != nil {
 		return err
 	}

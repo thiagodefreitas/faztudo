@@ -48,10 +48,25 @@ design assumes that agents make mistakes and that messages from outside
 - **Isolated write runs.** An agent that changes code works in its own git
   worktree, not in your checkout. Pushing a branch, sending to a bridge and
   other actions that go through faztudo need an approval.
-- **Honest limits.** An agent CLI runs as your user. faztudo cannot stop a
-  CLI from doing what that CLI can do on its own; it starts each CLI in the
-  strictest sandbox and permission mode the run allows, and can wrap write
-  runs in a Linux sandbox (bubblewrap).
+- **Write-run sandbox.** Opt in with `runs.sandbox = "auto"` or
+  `"required"` (off by default until toolchains under your home can be
+  made visible inside it). On Linux, write runs then use bubblewrap when
+  unprivileged user namespaces work. The worktree and shared git directory
+  are writable. System tools and a small set of `/etc` files are read-only.
+  Only the selected CLI's own config and sign-in paths and its exact
+  executable file are bound from your home. The rest of home, including
+  `~/.ssh`, is hidden. SSH agent, desktop
+  and DBus sockets are not bound. Network stays on by default so CLIs can
+  reach their APIs; a lane can turn it off. Where a systemd user scope works,
+  it sets memory and task limits.
+- **Honest limits.** The sandbox shares the host kernel, and the CLI still
+  runs as your user. It can change its worktree and git metadata, read its
+  own bound sign-in files, and access the network when allowed. It does not
+  isolate the CLI from another process running as your user. In `auto` mode,
+  a missing or unusable sandbox falls back to an unsandboxed run with one
+  channel notice. Set `runs.sandbox = "required"` to refuse that run instead.
+  Read runs are unchanged. A sandboxed run ends if its parent exits; recovery
+  records an interrupted run rather than resuming its process.
 - **Stripped environment.** Agent processes start with known secret variables
   removed from their environment.
 - **Bridges are allowlisted.** Signal and Discord accept messages only from

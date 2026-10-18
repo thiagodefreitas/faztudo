@@ -15,6 +15,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/eventstest"
 	"github.com/thiagodefreitas/faztudo/internal/lanes"
+	"github.com/thiagodefreitas/faztudo/internal/sandbox"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
@@ -293,6 +294,58 @@ func TestExecuteWriteVerification(t *testing.T) {
 		if !tc.wantOK && (err == nil || run.State != domain.RunFailed || run.FailureClass != domain.FailureSemantic) {
 			t.Fatalf("%s: %+v %v", tc.id, run, err)
 		}
+	}
+}
+
+type sandboxShell struct{ script string }
+
+func (sandboxShell) Name() string { return "sh" }
+func (a sandboxShell) Command(r adapters.Request) (adapters.Cmd, error) {
+	script := a.script
+	if script == "" {
+		script = "printf new > file.txt; git status --short >/dev/null"
+	}
+	return adapters.Cmd{Path: "/bin/sh", Args: []string{"-c", script}, Dir: r.Workdir}, nil
+}
+func (sandboxShell) Classify(code int, tail string) (domain.FailureClass, adapters.LaneSignal, string) {
+	return (adapters.Codex{}).Classify(code, tail)
+}
+
+func TestExecuteWriteInSandbox(t *testing.T) {
+	if err := sandbox.Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap or user namespaces unavailable: %v", err)
+	}
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "file.txt")
+	tree := gitRun(t, repo, "write-tree")
+	base := gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit-tree", tree, "-m", "base")
+	gitRun(t, repo, "update-ref", "HEAD", base)
+	r := Runner{RunDir: filepath.Join(root, "runs"), Backoff: []time.Duration{}}
+	run := domain.Run{ID: "sandbox", Mode: domain.RunWrite, State: domain.RunQueued}
+	err := r.ExecuteWrite(context.Background(), &run, sandboxShell{}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+	})
+	if err != nil || run.State != domain.RunWaitingApproval {
+		t.Fatalf("sandboxed write: %+v: %v", run, err)
+	}
+	timed := domain.Run{ID: "timeout", Mode: domain.RunWrite, State: domain.RunQueued}
+	err = r.ExecuteWrite(context.Background(), &timed, sandboxShell{script: "sleep 1; printf leaked > leaked.txt"}, adapters.Request{Mode: domain.RunWrite, Prompt: "x", Timeout: 100 * time.Millisecond}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+	})
+	if err == nil || timed.State != domain.RunFailed {
+		t.Fatalf("sandboxed timeout: %+v: %v", timed, err)
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(timed.Worktree, "leaked.txt")); !os.IsNotExist(err) {
+		t.Fatalf("sandboxed child outlived timeout: %v", err)
 	}
 }
 func TestRetryAndSanitizedEnv(t *testing.T) {

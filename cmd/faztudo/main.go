@@ -23,6 +23,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/sandbox"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/version"
 	"github.com/thiagodefreitas/faztudo/internal/webui"
@@ -308,6 +309,25 @@ func doctor(p config.Paths) error {
 		fmt.Print(string(out))
 	} else {
 		fmt.Println("git:", e)
+	}
+	if path, e := exec.LookPath("bwrap"); e == nil {
+		fmt.Println("bubblewrap:", path)
+	} else {
+		fmt.Println("bubblewrap: unavailable")
+	}
+	if e := sandbox.Probe(ctx, true); e == nil {
+		fmt.Println("unprivileged user namespaces: available")
+	} else {
+		fmt.Println("unprivileged user namespaces:", e)
+	}
+	limits := config.Defaults().Runs
+	if err == nil {
+		limits = c.Runs
+	}
+	if sandbox.ScopeAvailable(ctx, limits.SandboxMemoryMax, limits.SandboxTasksMax) {
+		fmt.Println("systemd user scopes: available")
+	} else {
+		fmt.Println("systemd user scopes: unavailable")
 	}
 	for _, a := range agentsdetect.Versions(context.Background(), agentsdetect.Local()) {
 		if a.Path == "" {

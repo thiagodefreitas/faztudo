@@ -436,7 +436,18 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	if err == nil {
 		if mode == domain.RunWrite {
-			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand})
+			network := true
+			for _, configured := range a.Config.Lanes.Lane {
+				if configured.ID == lane.ID && configured.SandboxNetwork != nil {
+					network = *configured.SandboxNetwork
+					break
+				}
+			}
+			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{
+				Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand,
+				SandboxMode: a.Config.Runs.Sandbox, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax,
+				OnFallback: func(message string) { a.notice(ctx, channel.ID, "warn", message) },
+			})
 		} else {
 			err = a.Runner.Execute(runCtx, &run, adapter, req)
 		}
