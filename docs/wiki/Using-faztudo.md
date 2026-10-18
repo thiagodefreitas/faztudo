@@ -83,9 +83,25 @@ Personas and agent CLIs sit in separate pods, with the Director in front.
 The 3D view (the 3D toggle on the Office page) shows the same room with
 each agent as a character built from its avatar, acting out its state.
 
+To look closely at one part of the room, zoom: scroll or pinch over the
+room, drag empty floor to move around, or click a department, pod or the
+Director area to zoom to it. The control in the bottom right corner has zoom
+in and out, **Fit all** and **Jump to** a zone; `+`, `-`, `0` and the arrow
+keys do the same. In 3D, **Jump to** moves the camera to that zone.
+
 ![The 2D office](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/office-2d.png)
 
 ![The 3D office](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/office-3d.png)
+
+## Compare mode
+
+Mention a write persona with `x2`, for example `@coder x2 make the run card
+clearer`, and the same request runs on the first two healthy lanes of its
+chain. One card shows both candidates side by side. Merge one (the other is
+discarded), discard both, or choose **Combine** to start a third run that
+takes the best of both. Only people can start a compare.
+
+![Compare mode](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/compare.png)
 
 Each project also has a home page with what needs you, active runs,
 channels, team, recent merges and routines:

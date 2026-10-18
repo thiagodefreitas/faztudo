@@ -6,6 +6,8 @@ lead. Teams are assigned to projects, and each project has its own channels.
 You talk to a specialist, a team or the whole office, and the work finds its
 way to the right agent.
 
+![The Organization page: the Director, the Engineering, Quality and Product departments with their leads and members, and the projects they work on](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/organization.png)
+
 ## What is built
 
 | piece | state |

@@ -41,6 +41,8 @@ The full list is in the [changelog](CHANGELOG.md).
 </p>
 <p align="center">
   <a href="https://thiagodefreitas.github.io/faztudo/#the-office">Watch the 30 second tour</a> --
+  <a href="docs/images/compare.png">compare mode</a> --
+  <a href="docs/images/organization.png">organization</a> --
   <a href="docs/images/tasks-board.png">task board</a> --
   <a href="docs/images/approvals.png">approvals inbox</a> --
   <a href="docs/images/project-home.png">project home</a> --
