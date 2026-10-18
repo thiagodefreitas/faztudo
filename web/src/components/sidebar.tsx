@@ -2,7 +2,7 @@ import * as Tooltip from "@radix-ui/react-tooltip"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { useState } from "react"
 import { cx } from "../lib/cx"
-import { directPeer, isDirect } from "../lib/direct"
+import { directPeer, findDirect, isDirect } from "../lib/direct"
 import { primaryWindow } from "../lib/lanes"
 import { useTheme } from "../lib/theme"
 import { formatAge } from "../lib/time"
@@ -10,7 +10,7 @@ import { useNow } from "../state/now"
 import { useOpenDirect } from "../state/direct"
 import { useChannels, useLanes, useMe, useMembers } from "../state/queries"
 import { useStreamStatus } from "../state/status"
-import type { Lane, LaneHealth, Member, Presence } from "../types"
+import type { Channel, Lane, LaneHealth, Member, Presence } from "../types"
 import { WORKSPACE_NAME } from "../types"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { healthDotClass } from "./lane-chip"
@@ -28,6 +28,9 @@ const STATUS_LABEL = {
   connecting: "Connecting",
   closed: "Offline",
 } as const
+
+const ROW = "flex min-h-10 items-center gap-2 rounded-md px-2 text-[13px] md:min-h-7"
+const HEADING = "px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint"
 
 export function Sidebar() {
   return (
@@ -49,14 +52,20 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const people = (members.data ?? []).filter((member) => member.kind === "human")
-  const agents = (members.data ?? []).filter((member) => member.kind === "agent")
-  const rooms = (channels.data ?? []).filter((channel) => !isDirect(channel))
-  const directs = (channels.data ?? []).filter(isDirect)
   const meId = me.data?.id
+  const all = channels.data ?? []
+  const rooms = all.filter((channel) => !isDirect(channel))
+  const others = (members.data ?? []).filter((member) => member.id !== meId)
+  const people = others.filter((member) => member.kind === "human")
+  const agents = others.filter((member) => member.kind === "agent")
+  // A DM whose peer is no longer a member still deserves a row.
+  const orphans = all.filter((channel) => isDirect(channel) && !directPeer(channel, meId, members.data ?? []))
   function startDirect(member: Member) {
     onNavigate?.()
     void openDirect(member)
+  }
+  function directOf(member: Member): Channel | undefined {
+    return meId ? findDirect(all, meId, member.id) : undefined
   }
 
   return (
@@ -70,7 +79,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
             aria-label="Create channel"
             title="Create channel"
             onClick={() => setCreating(true)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas"
+            className="inline-flex h-10 w-10 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas md:h-7 md:w-7"
           >
             +
           </button>
@@ -83,7 +92,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
             void navigate({ to: "/c/$channelId", params: { channelId: channel.id } })
           }}
         />
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-px">
           {rooms.map((channel) => {
             const active = pathname === `/c/${channel.id}`
             return (
@@ -92,72 +101,84 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
                   to="/c/$channelId"
                   params={{ channelId: channel.id }}
                   onClick={onNavigate}
-                  className={cx(
-                    "flex min-h-8 items-center gap-2 rounded px-2 text-[13px]",
-                    active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas",
-                  )}
+                  className={cx(ROW, active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")}
                 >
                   <span className="text-faint">#</span>
                   <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-                  {channel.unread > 0 && (
-                    <span className="rounded-full bg-accent px-1.5 text-[11px] text-canvas">{channel.unread}</span>
-                  )}
+                  <Unread count={channel.unread} />
                 </Link>
               </li>
             )
           })}
         </ul>
-        {directs.length > 0 && (
+        {(people.length > 0 || orphans.length > 0) && (
           <div className="mt-4">
-            <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Direct messages</p>
-            <ul className="flex flex-col gap-0.5">
-              {directs.map((channel) => {
-                const active = pathname === `/c/${channel.id}`
-                const peer = directPeer(channel, meId, members.data ?? [])
-                return (
-                  <li key={channel.id}>
-                    <Link
-                      to="/c/$channelId"
-                      params={{ channelId: channel.id }}
-                      onClick={onNavigate}
-                      className={cx(
-                        "flex min-h-8 items-center gap-2 rounded px-2 text-[13px]",
-                        active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas",
-                      )}
-                    >
-                      <span
-                        className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[peer?.presence ?? "offline"])}
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{peer?.display_name ?? channel.name}</span>
-                      {channel.unread > 0 && (
-                        <span className="rounded-full bg-accent px-1.5 text-[11px] text-canvas">{channel.unread}</span>
-                      )}
-                    </Link>
-                  </li>
-                )
-              })}
+            <p className={HEADING}>Direct messages</p>
+            <ul className="flex flex-col gap-px">
+              {people.map((member) => (
+                <PeerRow
+                  key={member.id}
+                  member={member}
+                  channel={directOf(member)}
+                  pathname={pathname}
+                  lanes={[]}
+                  now={now}
+                  onNavigate={onNavigate}
+                  onOpen={startDirect}
+                />
+              ))}
+              {orphans.map((channel) => (
+                <li key={channel.id}>
+                  <Link
+                    to="/c/$channelId"
+                    params={{ channelId: channel.id }}
+                    onClick={onNavigate}
+                    className={cx(ROW, pathname === `/c/${channel.id}` ? "bg-accent-soft" : "hover:bg-canvas")}
+                  >
+                    <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE.offline)} aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+                    <Unread count={channel.unread} />
+                  </Link>
+                </li>
+              ))}
             </ul>
           </div>
         )}
-        <MemberList title="Agents" members={agents} lanes={lanes.data ?? []} now={now} meId={meId} onOpen={startDirect} />
-        <MemberList title="People" members={people} lanes={lanes.data ?? []} now={now} meId={meId} onOpen={startDirect} />
+        {agents.length > 0 && (
+          <div className="mt-4">
+            <p className={HEADING}>Agents</p>
+            <ul className="flex flex-col gap-px">
+              {agents.map((member) => (
+                <PeerRow
+                  key={member.id}
+                  member={member}
+                  channel={directOf(member)}
+                  pathname={pathname}
+                  lanes={lanes.data ?? []}
+                  now={now}
+                  onNavigate={onNavigate}
+                  onOpen={startDirect}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
-      <div className="border-t border-line px-3 py-2">
+      <div className="border-t border-line px-2 py-2">
         <LanesGauge lanes={lanes.data ?? []} />
-        <Link
-          to="/settings/devices"
-          onClick={onNavigate}
-          className="mt-0.5 flex min-h-8 items-center justify-between rounded px-2 text-[12px] text-ink hover:bg-canvas"
-        >
+        <Link to="/settings/devices" onClick={onNavigate} className={cx(ROW, "justify-between text-ink hover:bg-canvas")}>
           <span>Devices</span>
           <span className="font-mono text-[11px] text-faint">LAN</span>
         </Link>
-        <div className="mt-1 flex items-center justify-between gap-2">
+        <div className="mt-1 flex items-center justify-between gap-2 px-2">
           <p className="text-[12px] text-muted" role="status">
             {STATUS_LABEL[status]}
           </p>
-          <button type="button" onClick={theme.toggle} className="min-h-8 rounded px-2 text-[12px] text-ink hover:bg-canvas">
+          <button
+            type="button"
+            onClick={theme.toggle}
+            className="min-h-10 rounded px-2 text-[12px] text-ink hover:bg-canvas md:min-h-7"
+          >
             {theme.choice === "dark" ? "Use light theme" : "Use dark theme"}
           </button>
         </div>
@@ -166,57 +187,57 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function MemberList({
-  title,
-  members,
+function Unread({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span className="rounded-full bg-accent px-1.5 text-[11px] font-medium text-canvas" aria-label={`${count} unread`}>
+      {count}
+    </span>
+  )
+}
+
+// One row per member. It links to the DM when there is one and opens it on
+// click otherwise, so a member is never listed twice.
+function PeerRow({
+  member,
+  channel,
+  pathname,
   lanes,
   now,
-  meId,
+  onNavigate,
   onOpen,
 }: {
-  title: string
-  members: Member[]
+  member: Member
+  channel: Channel | undefined
+  pathname: string
   lanes: Lane[]
   now: number
-  meId: string | undefined
+  onNavigate: (() => void) | undefined
   onOpen: (member: Member) => void
 }) {
-  if (!members || members.length === 0) return null
+  const lane = lanes.find((item) => item.id === member.agent?.lanes[0])
+  const active = channel ? pathname === `/c/${channel.id}` : false
+  const className = cx(ROW, "min-w-0 flex-1 text-left", active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")
+  const inner = (
+    <>
+      <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
+      <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
+      {channel && <Unread count={channel.unread} />}
+    </>
+  )
   return (
-    <div className="mt-4">
-      <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint">{title}</p>
-      <ul className="flex flex-col gap-0.5">
-        {members.map((member) => {
-          const laneId = member.agent?.lanes[0]
-          const lane = lanes.find((item) => item.id === laneId)
-          const dot = (
-            <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
-          )
-          return (
-            <li key={member.id} className="flex min-h-8 items-center gap-1 text-[13px]">
-              {member.id === meId ? (
-                <span className="flex min-h-8 min-w-0 flex-1 items-center gap-2 px-2">
-                  {dot}
-                  <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onOpen(member)}
-                  title={`Message ${member.display_name}`}
-                  className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded px-2 text-left hover:bg-canvas"
-                >
-                  {dot}
-                  <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
-                  <span className="sr-only">Open direct message</span>
-                </button>
-              )}
-              {member.kind === "agent" && <LaneDot lane={lane} now={now} />}
-            </li>
-          )
-        })}
-      </ul>
-    </div>
+    <li className="flex items-center gap-1" data-member={member.id}>
+      {channel ? (
+        <Link to="/c/$channelId" params={{ channelId: channel.id }} onClick={onNavigate} className={className}>
+          {inner}
+        </Link>
+      ) : (
+        <button type="button" onClick={() => onOpen(member)} title={`Message ${member.display_name}`} className={className}>
+          {inner}
+        </button>
+      )}
+      {member.kind === "agent" && <LaneDot lane={lane} now={now} />}
+    </li>
   )
 }
 
@@ -228,7 +249,7 @@ function LaneDot({ lane, now }: { lane: Lane | undefined; now: number }) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <span className="inline-flex h-4 w-4 items-center justify-center" aria-label={label}>
+        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-label={label}>
           <span className={cx("h-2 w-2 rounded-full", healthDotClass(health))} />
         </span>
       </Tooltip.Trigger>

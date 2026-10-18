@@ -2,13 +2,16 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { api } from "../api/client"
+import { hueFor, initialOf } from "../lib/avatar"
+import { continuesGroup } from "../lib/group"
 import { formatClock } from "../lib/time"
 import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
+import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
 import { useMe, useMembers, useMessages, useNotices, usePending, useRuns, type PendingMessage } from "../state/queries"
-import type { Message, NoticeItem, Run } from "../types"
+import type { Member, Message, NoticeItem, Run } from "../types"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
 
@@ -33,6 +36,7 @@ export function MessageList({
   const runs = useRuns()
   const notices = useNotices()
   const pending = usePending(channelId)
+  const now = useNow()
   // Replies live in the thread panel; the cache also holds streamed replies.
   const messages = (messagesQuery.data ?? []).filter((message) => !message.thread_id)
   const parentRef = useRef<HTMLDivElement>(null)
@@ -144,19 +148,24 @@ export function MessageList({
             {virtualizer.getVirtualItems().map((item) => {
               const row = rows[item.index]
               if (!row) return null
+              const before = rows[item.index - 1]
+              const grouped = row.kind === "message" && before?.kind === "message" && continuesGroup(before.message, row.message)
+              const author = row.kind === "message" ? members.data?.find((member) => member.id === row.message.author_id) : undefined
               return (
                 <div
                   key={row.key}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
-                  className="absolute left-0 top-0 w-full px-4 py-2"
+                  className={cx("absolute left-0 top-0 w-full px-3 md:px-4", grouped ? "py-0.5" : "pb-0.5 pt-3")}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
                   {row.kind === "message" && (
                     <MessageRow
                       message={row.message}
                       channelId={channelId}
-                      authorName={members.data?.find((member) => member.id === row.message.author_id)?.display_name ?? "Member"}
+                      author={author}
+                      grouped={grouped}
+                      fresh={now - Date.parse(row.message.created_at) < 8000}
                       run={runs.data?.find((entry) => entry.id === row.message.run_id)}
                       onOpenThread={onOpenThread}
                     />
@@ -185,51 +194,84 @@ export function MessageList({
 function MessageRow({
   message,
   channelId,
-  authorName,
+  author,
+  grouped,
+  fresh,
   run,
   onOpenThread,
 }: {
   message: Message
   channelId: string
-  authorName: string
+  author: Member | undefined
+  grouped: boolean
+  fresh: boolean
   run: Run | undefined
   onOpenThread: ((message: Message) => void) | undefined
 }) {
   const replies = message.reply_count ?? 0
+  const authorName = author?.display_name ?? "Member"
+  const hue = hueFor(author)
+  const time = formatClock(message.created_at)
   return (
-    <article>
-      <header className="flex items-baseline gap-2">
-        <p className="text-[13px] font-medium">{authorName}</p>
-        <time className="font-mono text-[11px] text-faint" dateTime={message.created_at}>
-          {formatClock(message.created_at)}
-        </time>
-        {message.edited_at && <span className="text-[11px] text-faint">edited</span>}
-      </header>
-      <div className="mt-1 text-[14px]">
-        <Markdown text={message.body} />
+    <article className={cx("group/msg flex gap-2.5", fresh && "fz-rise")}>
+      <div className="w-8 shrink-0">
+        {grouped ? (
+          <time
+            className="block pt-0.5 text-center font-mono text-[10px] leading-5 text-faint opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100"
+            dateTime={message.created_at}
+          >
+            {time}
+          </time>
+        ) : (
+          <span
+            aria-hidden="true"
+            data-testid="avatar"
+            className={cx(
+              "flex h-8 w-8 items-center justify-center text-[13px] font-semibold",
+              author?.kind === "agent" ? "rounded-md" : "rounded-full",
+              hue.disc,
+            )}
+          >
+            {initialOf(authorName)}
+          </span>
+        )}
       </div>
-      {run && <RunCard run={run} channelId={channelId} />}
-      {onOpenThread && (
-        <p className="mt-1 flex items-center gap-3 text-[12px]">
-          {replies > 0 && (
+      <div className="min-w-0 flex-1">
+        {!grouped && (
+          <header className="flex items-baseline gap-2">
+            <p className="text-[13px] font-semibold">{authorName}</p>
+            <time className="font-mono text-[11px] text-faint" dateTime={message.created_at}>
+              {time}
+            </time>
+            {message.edited_at && <span className="text-[11px] text-faint">edited</span>}
+          </header>
+        )}
+        <div className={cx("text-[14px]", !grouped && "mt-0.5")}>
+          <Markdown text={message.body} />
+        </div>
+        {run && <RunCard run={run} channelId={channelId} />}
+        {onOpenThread && (
+          <p className="mt-0.5 flex items-center gap-3 text-[12px]">
+            {replies > 0 && (
+              <button
+                type="button"
+                onClick={() => onOpenThread(message)}
+                className="min-h-8 rounded px-1 font-medium text-accent hover:underline md:min-h-6"
+              >
+                {replies} {replies === 1 ? "reply" : "replies"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onOpenThread(message)}
-              className="min-h-8 rounded px-1 font-medium text-accent hover:underline"
+              aria-label={`Reply in thread to ${authorName}`}
+              className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline md:min-h-6 md:opacity-0 md:transition-opacity md:duration-150 md:group-hover/msg:opacity-100 md:focus-visible:opacity-100"
             >
-              {replies} {replies === 1 ? "reply" : "replies"}
+              Reply in thread
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => onOpenThread(message)}
-            aria-label={`Reply in thread to ${authorName}`}
-            className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline"
-          >
-            Reply in thread
-          </button>
-        </p>
-      )}
+          </p>
+        )}
+      </div>
     </article>
   )
 }
@@ -238,7 +280,7 @@ function NoticeRow({ notice }: { notice: NoticeItem }) {
   return (
     <p
       className={cx(
-        "text-[12px]",
+        "ml-[42px] text-[12px]",
         notice.level === "error" && "text-danger",
         notice.level === "warn" && "text-warn",
         notice.level === "info" && "text-muted",
@@ -251,7 +293,7 @@ function NoticeRow({ notice }: { notice: NoticeItem }) {
 
 function PendingRow({ item, onRetry }: { item: PendingMessage; onRetry: (item: PendingMessage) => void }) {
   return (
-    <article className="text-[13px] text-muted">
+    <article className="ml-[42px] text-[13px] text-muted">
       <Markdown text={item.body} />
       {item.error ? (
         <p className="mt-1 text-danger">

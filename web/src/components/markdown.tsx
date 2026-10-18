@@ -11,7 +11,7 @@ import tsx from "refractor/tsx"
 import typescript from "refractor/typescript"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import type { ReactNode } from "react"
+import { Children, isValidElement, useState, type ReactNode } from "react"
 import { cx } from "../lib/cx"
 
 refractor.register(bash)
@@ -87,12 +87,40 @@ function Anchor({ href, children }: { href?: string; children?: ReactNode }) {
   )
 }
 
+// Block code gets a copy button. The inner code element carries the raw source.
+function Pre({ children }: { children?: ReactNode }) {
+  const [copied, setCopied] = useState(false)
+  const inner = Children.toArray(children)[0]
+  const source = isValidElement<{ children?: ReactNode }>(inner) ? String(inner.props.children ?? "").replace(/\n$/, "") : ""
+
+  function copy() {
+    void navigator.clipboard?.writeText(source).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <div className="group/code relative mt-2">
+      <pre>{children}</pre>
+      <button
+        type="button"
+        onClick={copy}
+        aria-label="Copy code"
+        className="absolute right-1.5 top-1.5 min-h-7 rounded border border-line bg-surface px-2 text-[11px] text-muted opacity-100 transition-opacity duration-150 hover:text-ink md:opacity-0 md:group-hover/code:opacity-100 md:focus-visible:opacity-100"
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  )
+}
+
 const remarkPlugins = [remarkGfm]
 
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={{ code: Code, a: Anchor }}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={{ code: Code, a: Anchor, pre: Pre }}>
         {text}
       </ReactMarkdown>
     </div>

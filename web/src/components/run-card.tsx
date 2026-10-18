@@ -3,6 +3,7 @@ import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { api } from "../api/client"
+import { hueFor } from "../lib/avatar"
 import { cx } from "../lib/cx"
 import { formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
@@ -131,15 +132,21 @@ export function RunCardView({
     <article
       aria-label={`${agent?.display_name ?? "Agent"} run on ${run.lane_id}`}
       data-state={run.state}
-      className="mt-2 flex overflow-hidden rounded-md border border-line bg-surface"
+      className="fz-rise mt-2 flex max-w-2xl overflow-hidden rounded-lg border border-line bg-surface"
     >
-      <div className={cx("w-1 shrink-0", EDGE[run.state])} />
+      <div className={cx("w-1 shrink-0", hueFor(agent).edge)} aria-hidden="true" />
       <div className="min-w-0 flex-1 p-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <p className="text-[13px] font-medium">{agent?.display_name ?? "Agent"}</p>
+          <p className="text-[13px] font-semibold">{agent?.display_name ?? "Agent"}</p>
           <p className="font-mono text-[12px] text-muted">{run.lane_id}</p>
           <p className="text-[12px] text-faint">{run.mode}</p>
-          <span className={cx("rounded px-1.5 py-0.5 text-[11px] font-medium", STATE_CLASS[run.state])}>
+          <span
+            className={cx(
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
+              STATE_CLASS[run.state],
+            )}
+          >
+            <span className={cx("h-1.5 w-1.5 rounded-full", EDGE[run.state], live && "motion-safe:animate-pulse")} aria-hidden="true" />
             {STATE_LABEL[run.state]}
           </span>
           <p className="ml-auto font-mono text-[12px] tabular-nums text-muted">{formatElapsed(run.started_at, ended, now)}</p>
@@ -179,20 +186,20 @@ export function RunCardView({
         </details>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {run.diff_stat && (
-            <button type="button" onClick={onViewDiff} className="min-h-8 rounded-md border border-line px-2 text-[12px]">
+            <button type="button" onClick={onViewDiff} className="min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2">
               {run.diff_stat.files} {run.diff_stat.files === 1 ? "file" : "files"}{" "}
               <span className="text-ok">+{run.diff_stat.insertions}</span>{" "}
               <span className="text-danger">-{run.diff_stat.deletions}</span> View diff
             </button>
           )}
           {live && (
-            <button type="button" onClick={onCancel} className="min-h-8 rounded-md border border-line px-2 text-[12px]">
+            <button type="button" onClick={onCancel} className="min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2">
               Cancel
             </button>
           )}
           {retryable && lanes.length > 0 && (
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger className="min-h-8 rounded-md border border-line px-2 text-[12px]">Retry</DropdownMenu.Trigger>
+              <DropdownMenu.Trigger className="min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2">Retry</DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content
                   sideOffset={6}

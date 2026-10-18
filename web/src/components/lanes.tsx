@@ -288,10 +288,11 @@ export function LanesGauge({ lanes }: { lanes: Lane[] }) {
       to="/lanes"
       title="Lanes (Alt+L)"
       aria-label={`Lane health: ${meta.label}, ${summary.total} lanes`}
-      className="flex min-h-8 items-center gap-2 rounded px-2 text-[12px] hover:bg-canvas"
+      className="flex min-h-10 items-center gap-2 rounded px-2 text-[13px] hover:bg-canvas md:min-h-7"
     >
-      <HealthIcon health={summary.health} className="h-2.5 w-2.5 shrink-0" />
-      <span className={cx("font-medium", meta.gaugeClass)}>{meta.label}</span>
+      <HealthIcon health={summary.health} className={cx("h-2.5 w-2.5 shrink-0", meta.gaugeClass)} />
+      <span>Lanes</span>
+      <span className="sr-only">{meta.label}</span>
       <span className="ml-auto font-mono text-[12px] tabular-nums text-faint">{summary.total}</span>
     </Link>
   )

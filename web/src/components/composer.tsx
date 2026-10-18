@@ -36,6 +36,14 @@ export function Composer({
     el.setSelectionRange(next, next)
   }, [text])
 
+  // Grow with the text up to about eight lines, then scroll.
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+  }, [text])
+
   function sync(target: HTMLTextAreaElement) {
     setCursor(target.selectionStart ?? target.value.length)
   }
@@ -93,7 +101,7 @@ export function Composer({
 
   return (
     <form
-      className="shrink-0 border-t border-line bg-surface px-3 py-2"
+      className="shrink-0 bg-surface px-3 pb-3 pt-2 md:px-4"
       onSubmit={(event) => {
         event.preventDefault()
         send()
@@ -126,19 +134,20 @@ export function Composer({
             ))}
           </ul>
         )}
-        <label className="block">
+        <div className="flex items-end gap-2 rounded-2xl border border-line bg-canvas p-1.5 pl-3 transition-colors duration-150 focus-within:border-accent">
+        <label className="block min-w-0 flex-1">
           <span className="sr-only">{label}</span>
           <textarea
             ref={boxRef}
             value={text}
-            rows={2}
+            rows={1}
             placeholder={placeholder ?? `Message #${channelName}`}
             aria-label={label}
             aria-autocomplete="list"
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? listId : undefined}
             aria-activedescendant={menuOpen && selected ? `${listId}-${selected.id}` : undefined}
-            className="w-full resize-none rounded-md border border-line bg-canvas px-3 py-2 text-[16px] leading-5 text-ink outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent md:text-[14px]"
+            className="block max-h-[180px] min-h-10 w-full resize-none bg-transparent py-2 text-[16px] leading-6 text-ink outline-none placeholder:text-faint focus-visible:outline-none md:min-h-8 md:py-1.5 md:text-[14px] md:leading-5"
             onChange={(event) => {
               setText(event.target.value)
               sync(event.target)
@@ -150,16 +159,21 @@ export function Composer({
             onSelect={(event) => sync(event.currentTarget)}
           />
         </label>
-      </div>
-      <div className="mt-1 flex items-center justify-between gap-3">
-        <p className="hidden text-[12px] text-faint md:block">Enter to send, Shift+Enter for a new line</p>
         <button
           type="submit"
-          className="ml-auto min-h-11 rounded-md bg-accent px-4 text-[14px] text-canvas md:min-h-9 md:px-3 md:text-[13px]"
+          aria-label="Send"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 md:h-8 md:w-auto md:rounded-lg md:px-3 md:text-[13px]"
         >
-          Send
+          <svg viewBox="0 0 20 20" className="h-4 w-4 md:hidden" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 16V4M5 9l5-5 5 5" />
+          </svg>
+          <span className="hidden md:inline" aria-hidden="true">
+            Send
+          </span>
         </button>
+        </div>
       </div>
+      <p className="mt-1 hidden px-3 text-[11px] text-faint md:block">Enter to send, Shift+Enter for a new line</p>
     </form>
   )
 }

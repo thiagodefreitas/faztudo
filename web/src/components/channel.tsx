@@ -21,6 +21,12 @@ import { OPEN_SETTINGS_EVENT } from "./palette"
 
 const channelApi = getRouteApi("/c/$channelId")
 
+// The header shows the folder name only, so screenshots do not leak home paths.
+export function repoName(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean)
+  return parts[parts.length - 1] ?? path
+}
+
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
@@ -116,9 +122,9 @@ export function ChannelPage() {
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex items-start gap-3 border-b border-line px-3 py-2">
+        <header className="flex items-center gap-2 border-b border-line px-3 py-2 md:gap-3">
           <Dialog.Root open={navOpen} onOpenChange={setNavOpen}>
-            <Dialog.Trigger className="min-h-8 rounded border border-line px-2 text-[12px] md:hidden">Channels</Dialog.Trigger>
+            <Dialog.Trigger className="min-h-10 shrink-0 rounded-md border border-line px-3 text-[12px] md:hidden">Channels</Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
               <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-sidebar p-2 shadow-lg">
@@ -140,14 +146,19 @@ export function ChannelPage() {
             </p>
           )}
           {channel.repo_path && (
-            <p className="hidden max-w-48 truncate font-mono text-[12px] text-faint sm:block">{channel.repo_path}</p>
+            <p
+              className="hidden max-w-48 shrink-0 truncate font-mono text-[12px] text-faint sm:block"
+              title={channel.repo_path}
+            >
+              {repoName(channel.repo_path)}
+            </p>
           )}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
             aria-keyshortcuts="Control+Comma Meta+Comma"
             title="Channel settings (Ctrl+, or Cmd+,)"
-            className="min-h-8 shrink-0 rounded border border-line px-2 text-[12px]"
+            className="min-h-10 shrink-0 rounded-md border border-line px-3 text-[12px] hover:bg-sidebar md:min-h-8"
           >
             Settings <kbd className="ml-1 hidden font-mono text-[11px] text-faint sm:inline">Ctrl+,</kbd>
           </button>

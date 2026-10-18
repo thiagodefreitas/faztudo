@@ -35,7 +35,7 @@ export function ApprovalCard({
       aria-label={approval.title}
       tabIndex={pending ? 0 : undefined}
       onKeyDown={pending ? onKeyDown : undefined}
-      className="mt-3 rounded-md border border-line bg-canvas p-3 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="fz-rise mt-3 rounded-lg border border-l-2 border-line border-l-warn bg-canvas p-3 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       <h3 className="text-[14px] font-semibold">{approval.title}</h3>
       <div className="mt-1 text-[13px]">
