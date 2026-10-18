@@ -59,10 +59,19 @@ First usable alpha. Not tagged yet; the date is set when it ships.
 ### Security
 
 - Local API calls need a private token, also on loopback.
-- Write runs are sandboxed with bubblewrap by default: a read-only shared
-  `.git` except objects, per-run state, a stripped environment, and the test
-  command runs inside the sandbox. Host git ignores repository hooks, filters
-  and external diff programs. See SECURITY.md for the known limits.
+- Write runs are sandboxed with bubblewrap and fail closed by default
+  (`sandbox = "required"`): a read-only shared `.git` except objects,
+  per-run state, a stripped environment, and the test command runs inside
+  the sandbox. Host git ignores repository hooks, filters, external diff
+  programs and merge drivers. `sandbox = "auto"` is an explicit opt-in.
+- Read runs and channel summaries start in an empty scratch folder with the
+  stripped environment, never in the data directory.
+- Private channels, their messages, events and files are visible only to
+  members, and every change to channels, lanes, runs, approvals, tasks and
+  the organization is human-only.
+- Known limits for 0.1.0: write runs keep network access by default, CLI
+  OAuth refresh files stay writable inside the sandbox, and read runs are
+  not sandboxed. See SECURITY.md.
 
 ### Phone and LAN
 
