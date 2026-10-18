@@ -47,6 +47,9 @@ result are visible in the chat.
 - Search, pinned messages, files, unread state, notifications, presence.
 - Lanes history, cost estimates and alerts. Channel summaries so long
   conversations stay within model limits.
+- A sandbox for write runs (bubblewrap, no root): the worktree is writable,
+  the rest of your home is hidden, the agent CLI sees only the login files it
+  needs, memory and process limits where systemd allows them.
 - Security review, clean install test, complete docs, first release packages
   (tarball, deb, AppImage).
 - Organization, part two: the Chief of Staff routes unaddressed requests,
@@ -63,10 +66,16 @@ or your own note-to-self chat to a channel, with an allowlist of numbers.
 
 ## M4 2D office
 
-An isometric office drawn in the browser. Each member has a desk and acts
-out what it is doing: typing, waiting with a raised hand for an approval,
-idle, failing. Click anyone to see their current run. Approvals can be
-answered in the scene.
+An office drawn in the browser. Each member has a desk and acts out what it
+is doing: typing, waiting with a raised hand for an approval, idle, failing.
+Click anyone to see their current run. Approvals can be answered in the
+scene.
+
+Agent computers: a persistent sandbox for one agent or shared by a team,
+with its own home, tools, caches and long-running processes, resource
+limits, a port range and a reset button. Logins for the agent CLIs stay on
+your machine. Each computer shows up in the office as the screen at its
+desk.
 
 ## M5 Discord and extensions
 
@@ -82,4 +91,6 @@ Linux with a tray icon and notifications.
 
 Several people in one workspace with roles and private channels. Bridges for
 Hermes and OpenClaw. WhatsApp through the official Cloud API. An endpoint for
-connecting with agent teams on other machines.
+connecting with agent teams on other machines. Agent computers on another
+machine in your network, and desktop computers for agents that need a
+screen. Cloud computers stay optional.
