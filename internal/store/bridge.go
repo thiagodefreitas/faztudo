@@ -10,10 +10,13 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/events"
 )
 
-func (s *Store) MessageByKey(ctx context.Context, key string) (domain.Message, error) {
+// MessageByKey finds a posted message by the idempotency key it was appended
+// with. The lookup is scoped to the channel, like Append's uniqueness, so it
+// uses the (channel_id, idempotency_key) index.
+func (s *Store) MessageByKey(ctx context.Context, channelID, key string) (domain.Message, error) {
 	var typ string
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, "SELECT type,payload FROM events WHERE idempotency_key=?", key).Scan(&typ, &raw)
+	err := s.db.QueryRowContext(ctx, "SELECT type,payload FROM events WHERE channel_id=? AND idempotency_key=?", channelID, key).Scan(&typ, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, ErrNotFound
 	}

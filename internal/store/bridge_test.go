@@ -6,8 +6,35 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 )
+
+func TestMessageByKeyIsScopedToTheChannel(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, channel := range []string{"one", "two"} {
+		c := domain.Channel{ID: channel, Name: channel, Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic}
+		if _, err := s.Append(ctx, events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: channel, Payload: c}); err != nil {
+			t.Fatal(err)
+		}
+		m := domain.Message{ID: "msg-" + channel, ChannelID: channel, Body: channel}
+		if _, err := s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: channel, IdempotencyKey: "signal:a:1", Payload: m}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.MessageByKey(ctx, "two", "signal:a:1")
+	if err != nil || got.ID != "msg-two" {
+		t.Fatalf("channel two: %+v %v", got, err)
+	}
+	if _, err := s.MessageByKey(ctx, "three", "signal:a:1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("other channel: %v", err)
+	}
+}
 
 func TestBridgeCursorAndOutboundPersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db")

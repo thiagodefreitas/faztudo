@@ -52,6 +52,8 @@ the daemon checks them again on every inbound delivery.
 `{"external_id":"...","author_id":"..."}`. Attachments are optional;
 their names are cleaned and their content types are sniffed from the decoded
 bytes. Each file is capped by `server.max_upload_mb` (25 MB by default). The
+`body` is capped at 1 MiB, the same limit as the HTTP message API; a longer
+body fails with `too_large`. The
 result is `{"message_id":"...","duplicate":false}`. A repeated delivery
 uses the key `signal:<sender.id>:<external_id>`, returns the original ID with
 `duplicate:true`, and starts no second agent run. Validation failures use a
@@ -67,6 +69,15 @@ or `approval_id`. The bridge replies with `{"external_id":"..."}`. The
 daemon stores that mapping and advances its outbound event cursor after the
 reply. A newly enabled mirror starts at the current event, not old history.
 The daemon never echoes a message whose event actor is `bridge:signal`.
+If one `outbound.send` fails (an error reply, a timeout, a missing
+attachment), the daemon retries a transport failure a few times, then skips
+that event, posts a notice in the channel, and carries on with the next one.
+
+A bridge must keep reading stdin while it writes stdout. The daemon never
+lets its reader wait on its writer, but a bridge that stops reading stdin
+while it blocks on stdout can still stall itself once the pipe buffer is full.
+Read stdin on its own thread or task.
+
 On shutdown the daemon sends a `shutdown` notification, waits five seconds,
 then kills the bridge process group.
 

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/thiagodefreitas/faztudo/internal/api"
@@ -90,11 +91,19 @@ type Handler struct {
 }
 
 func (h *Handler) bindings(ctx context.Context) (map[string]string, error) {
+	out, _, err := h.resolveBindings(ctx)
+	return out, err
+}
+
+// resolveBindings returns the bindings that resolve to a channel and, as err,
+// the first one that does not.
+func (h *Handler) resolveBindings(ctx context.Context) (map[string]string, []domain.Channel, error) {
 	channels, err := h.Store.Channels(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make(map[string]string, len(h.Config.Bind))
+	var missing error
 	for key, configured := range h.Config.Bind {
 		found := false
 		for _, c := range channels {
@@ -104,11 +113,40 @@ func (h *Handler) bindings(ctx context.Context) (map[string]string, error) {
 				break
 			}
 		}
-		if !found {
-			return nil, fmt.Errorf("bridge binding %q: channel %q not found", key, configured)
+		if !found && missing == nil {
+			missing = fmt.Errorf("bridge binding %q: channel %q not found", key, configured)
 		}
 	}
-	return out, nil
+	if missing != nil {
+		return out, channels, missing
+	}
+	return out, channels, nil
+}
+
+// Notice posts a warning in the alerts conversation's channel, else the first
+// bound channel, else the first channel there is. It works even when some
+// binding names a channel that does not exist.
+func (h *Handler) Notice(ctx context.Context, text string) {
+	bound, channels, err := h.resolveBindings(ctx)
+	if channels == nil && err != nil {
+		return
+	}
+	channelID := bound[h.Config.Alerts]
+	if channelID == "" {
+		keys := make([]string, 0, len(bound))
+		for k := range bound {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if len(keys) > 0 {
+			channelID = bound[keys[0]]
+		} else if len(channels) > 0 {
+			channelID = channels[0].ID
+		}
+	}
+	if channelID != "" {
+		_, _ = h.Store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: channelID, Payload: events.NoticePayload{Level: "warn", Text: text}})
+	}
 }
 
 func (h *Handler) Hello(ctx context.Context, v Hello) (HelloResult, error) {
@@ -132,6 +170,9 @@ func (h *Handler) Inbound(ctx context.Context, v Inbound) (InboundResult, error)
 	}
 	if !allowed {
 		return InboundResult{}, RPCError{"not_allowed", "sender is not allowed"}
+	}
+	if len(v.Body) > api.MaxMessageBytes {
+		return InboundResult{}, RPCError{"too_large", "message is too large"}
 	}
 	bindings, err := h.bindings(ctx)
 	if err != nil {
@@ -162,7 +203,7 @@ func (h *Handler) Inbound(ctx context.Context, v Inbound) (InboundResult, error)
 	// The event append is the idempotency boundary. Check first to avoid
 	// rewriting attachments, then let Store.Append arbitrate concurrent posts.
 	key := "signal:" + v.Sender.ID + ":" + v.ExternalID
-	if old, err := h.Store.MessageByKey(ctx, key); err == nil {
+	if old, err := h.Store.MessageByKey(ctx, channelID, key); err == nil {
 		return InboundResult{MessageID: old.ID, Duplicate: true}, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return InboundResult{}, err
@@ -193,7 +234,7 @@ func (h *Handler) Inbound(ctx context.Context, v Inbound) (InboundResult, error)
 			return InboundResult{}, err
 		}
 		if threadID == "" && v.Quote.AuthorID != "" {
-			if quoted, err := h.Store.MessageByKey(ctx, "signal:"+v.Quote.AuthorID+":"+v.Quote.ExternalID); err == nil {
+			if quoted, err := h.Store.MessageByKey(ctx, channelID, "signal:"+v.Quote.AuthorID+":"+v.Quote.ExternalID); err == nil {
 				threadID = quoted.ID
 			} else if !errors.Is(err, store.ErrNotFound) {
 				return InboundResult{}, err

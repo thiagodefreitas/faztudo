@@ -159,18 +159,22 @@ func run(args []string) error {
 			}
 			bridgeHandler := &bridge.Handler{Config: c.Bridges.Signal, API: handler, Store: s, Human: human, FilesDir: p.FilesDir, MaxUpload: handler.MaxUploadBytes}
 			if _, err := bridgeHandler.Hello(context.Background(), bridge.Hello{Protocol: "1", Bridge: "signal", Version: "1"}); err != nil {
-				return err
-			}
-			if _, err := s.EnsureBridgeCursor(context.Background(), "signal"); err != nil {
-				return err
-			}
-			supervisor := bridge.Supervisor{Command: []string{self, "bridge", "signal"}, Handler: bridgeHandler}
-			go func() {
-				defer close(bridgeDone)
-				if err := supervisor.Run(bridgeCtx); err != nil {
-					logger.Error("signal bridge", "error", err)
+				// A bad bridge config must not keep faztudo from starting.
+				logger.Error("signal bridge not started", "error", err)
+				bridgeHandler.Notice(context.Background(), "Signal bridge is off: "+err.Error()+". Fix [bridges.signal] in config.toml and restart faztudo.")
+				close(bridgeDone)
+			} else {
+				if _, err := s.EnsureBridgeCursor(context.Background(), "signal"); err != nil {
+					return err
 				}
-			}()
+				supervisor := bridge.Supervisor{Command: []string{self, "bridge", "signal"}, Handler: bridgeHandler}
+				go func() {
+					defer close(bridgeDone)
+					if err := supervisor.Run(bridgeCtx); err != nil {
+						logger.Error("signal bridge", "error", err)
+					}
+				}()
+			}
 		} else {
 			close(bridgeDone)
 		}

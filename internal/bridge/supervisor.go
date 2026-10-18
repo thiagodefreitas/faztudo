@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
-	"sort"
 	"syscall"
 	"time"
-
-	"github.com/thiagodefreitas/faztudo/internal/events"
 )
 
 type Supervisor struct {
@@ -48,20 +46,48 @@ func (s Supervisor) Run(ctx context.Context) error {
 	backoff := min
 	disconnectedAt := time.Time{}
 	noticed := false
+	// wait sleeps out the backoff before the next start and posts the
+	// disconnect notice once. It reports false when ctx ended.
+	wait := func() bool {
+		if disconnectedAt.IsZero() {
+			disconnectedAt = time.Now()
+		}
+		if !noticed && time.Since(disconnectedAt) >= noticeAfter {
+			s.notice(ctx, "Signal bridge has been disconnected for over "+describeDuration(noticeAfter))
+			noticed = true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > max {
+			backoff = max
+		}
+		return true
+	}
 	for ctx.Err() == nil {
 		cmd := exec.Command(s.Command[0], s.Command[1:]...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		var stdin io.WriteCloser
+		var stdout io.ReadCloser
 		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			return err
+		if err == nil {
+			if stdout, err = cmd.StdoutPipe(); err == nil {
+				cmd.Stderr = os.Stderr
+				err = cmd.Start()
+			}
+			if err != nil {
+				_ = stdin.Close()
+			}
 		}
-		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			return err
-		}
-		cmd.Stderr = os.Stderr
-		if err = cmd.Start(); err != nil {
-			return err
+			slog.Error("signal bridge: starting process", "error", err)
+			if !wait() {
+				return nil
+			}
+			continue
 		}
 		if disconnectedAt.IsZero() {
 			disconnectedAt = time.Now()
@@ -125,7 +151,7 @@ func (s Supervisor) Run(ctx context.Context) error {
 				}
 			case <-ticker.C:
 				if !connected && !disconnectedAt.IsZero() && !noticed && time.Since(disconnectedAt) >= noticeAfter {
-					s.notice(ctx, "Signal bridge has been disconnected for over two minutes")
+					s.notice(ctx, "Signal bridge has been disconnected for over "+describeDuration(noticeAfter))
 					noticed = true
 				}
 			}
@@ -133,47 +159,25 @@ func (s Supervisor) Run(ctx context.Context) error {
 		if time.Since(started) > time.Minute {
 			backoff = min
 		}
-		if disconnectedAt.IsZero() {
-			disconnectedAt = time.Now()
-		}
-		if !noticed && time.Since(disconnectedAt) >= noticeAfter {
-			s.notice(ctx, "Signal bridge has been disconnected for over two minutes")
-			noticed = true
-		}
-		select {
-		case <-ctx.Done():
+		if !wait() {
 			return nil
-		case <-time.After(backoff):
-		}
-		backoff *= 2
-		if backoff > max {
-			backoff = max
 		}
 	}
 	return nil
 }
 
-func (s Supervisor) notice(ctx context.Context, message string) {
-	bindings, err := s.Handler.bindings(ctx)
-	if err != nil {
-		return
-	}
-	key := s.Handler.Config.Alerts
-	if key == "" {
-		keys := make([]string, 0, len(bindings))
-		for k := range bindings {
-			keys = append(keys, k)
+func (s Supervisor) notice(ctx context.Context, message string) { s.Handler.Notice(ctx, message) }
+
+// describeDuration prints a notice interval the way a person would say it:
+// "2 minutes", "1 minute", else Go's form such as "50ms".
+func describeDuration(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		if n := int(d / time.Minute); n > 1 {
+			return fmt.Sprintf("%d minutes", n)
 		}
-		sort.Strings(keys)
-		if len(keys) == 0 {
-			return
-		}
-		key = keys[0]
+		return "1 minute"
 	}
-	channel := bindings[key]
-	if channel != "" {
-		_, _ = s.Handler.Store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: channel, Payload: events.NoticePayload{Level: "warn", Text: message}})
-	}
+	return d.String()
 }
 
 // RunCommand runs a bridge process once. It is useful for test fixtures and

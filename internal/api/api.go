@@ -336,13 +336,18 @@ func failErr(w http.ResponseWriter, err error) {
 		fail(w, 500, "internal", "internal error")
 	}
 }
+
+// MaxMessageBytes caps a JSON request body, and so a message body. Bridges
+// apply the same limit to inbound text.
+const MaxMessageBytes = 1 << 20
+
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
 		fail(w, 400, "bad_request", "application/json required")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxMessageBytes)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
@@ -1016,6 +1021,13 @@ func (a *API) approvals(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, v)
 }
 
+// applyError marks a failure of the change behind an approval, such as a
+// merge that could not be done. It answers 409; any other unexpected error,
+// a store failure for example, stays a 500.
+type applyError struct{ error }
+
+func (e applyError) Unwrap() error { return e.error }
+
 // ResolveAs is the approval path shared by HTTP and trusted local bridges.
 func (a *API) ResolveAs(ctx context.Context, human domain.Member, approvalID, option, commitMessage string) (domain.Approval, error) {
 	return a.resolveAs(ctx, human, approvalID, option, commitMessage, false)
@@ -1056,7 +1068,11 @@ func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, op
 	if a.ResolveApproval != nil && v.RunID != "" {
 		note, err = a.ResolveApproval(ctx, v, option, commitMessage)
 		if err != nil {
-			return domain.Approval{}, err
+			var userErr domain.UserError
+			if errors.As(err, &userErr) {
+				return domain.Approval{}, err
+			}
+			return domain.Approval{}, applyError{err}
 		}
 	}
 	v, err = a.Store.ResolveApproval(ctx, v.ID, option, note, human.ID)
@@ -1089,6 +1105,8 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.As(err, &postErr):
 			fail(w, 403, postErr.Code, postErr.Message)
+		case errors.Is(err, store.ErrNotFound):
+			fail(w, 404, "not_found", "approval not found")
 		case errors.Is(err, store.ErrConflict):
 			fail(w, 409, "conflict", "approval is not pending")
 		case errors.Is(err, store.ErrInvalidOption):
@@ -1097,7 +1115,12 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 			fail(w, 409, "conflict", userErr.Message)
 		default:
 			slog.Error("resolve approval", "approval", r.PathValue("id"), "err", err)
-			fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
+			var applyErr applyError
+			if errors.As(err, &applyErr) {
+				fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
+			} else {
+				failErr(w, err)
+			}
 		}
 		return
 	}

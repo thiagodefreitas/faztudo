@@ -355,7 +355,7 @@ interface NoticeAction {
 | POST | `/api/v1/runs/{id}/cancel` | cancel a run |
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
-| POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message. A merge stores the short id of the new commit in `resolution.note`, which the approvals inbox shows as "Merged as <id>" |
+| POST | `/api/v1/approvals/{id}/resolve` | `{option, commit_message?}`; humans only. An unknown approval is 404. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message. A merge stores the short id of the new commit in `resolution.note`, which the approvals inbox shows as "Merged as <id>" |
 | GET | `/api/v1/channels/{id}/compares` | comparisons for a visible channel; each has `id`, `message_id`, `agent_id`, two `candidates` with `lane_id`, optional `run` and `output_tail`, optional `decision` and `winner_lane` |
 | POST | `/api/v1/channels/{id}/compares/{compare}/decide` | humans only; `{decision}` is `merge_a`, `merge_b`, `discard_both`, or `combine`; a merge records the winner lane in a `compare.decided` event |
 | GET | `/api/v1/lanes` | configured lanes (a detected-only default is hidden once lanes.toml configures that CLI) |
