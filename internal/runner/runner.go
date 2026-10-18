@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
+	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/lanes"
@@ -154,6 +155,7 @@ type WriteOptions struct {
 	TasksMax    int
 	ReadOnly    []string
 	OnFallback  func(string)
+	OnWait      func(string) // notice while queued for memory; defaults to OnFallback
 	runStateDir string
 	sandboxArgs []string
 	sandboxEnv  map[string]string
@@ -172,6 +174,17 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 	}
 	if !runIDPattern.MatchString(run.ID) || r.RunDir == "" {
 		return errors.New("run id and run dir required")
+	}
+	opts.MemoryMax = config.ResolveMemoryMax(opts.MemoryMax)
+	if opts.SandboxMode != "off" && opts.MemoryMax != "" {
+		// The run stays queued until its memory limit fits.
+		notify := opts.OnWait
+		if notify == nil {
+			notify = opts.OnFallback
+		}
+		if err := waitForMemory(ctx, opts.MemoryMax, notify); err != nil {
+			return err
+		}
 	}
 	w, err := opts.Worktrees.Create(ctx, opts.Repo, run.ID)
 	if err != nil {

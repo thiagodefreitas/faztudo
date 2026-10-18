@@ -170,7 +170,7 @@ func Defaults() Config {
 	return Config{
 		Server:   Server{Listen: "127.0.0.1:7457", OpenBrowser: true, MaxUploadMB: 25},
 		LAN:      LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
-		Runs:     Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "required", SandboxMemoryMax: "4G", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
+		Runs:     Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "required", SandboxMemoryMax: "auto", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
 		Routines: Routines{MaxPerDay: 20},
 	}
 }
@@ -185,6 +185,7 @@ func Load(p Paths) (Config, error) {
 	if err := c.Validate(); err != nil {
 		return c, err
 	}
+	c.Runs.SandboxMemoryMax = ResolveMemoryMax(c.Runs.SandboxMemoryMax)
 	return c, nil
 }
 func (c Config) Validate() error {
@@ -213,8 +214,8 @@ func (c Config) Validate() error {
 	if c.Runs.Sandbox != "auto" && c.Runs.Sandbox != "off" && c.Runs.Sandbox != "required" {
 		return errors.New("runs.sandbox: must be auto, off or required")
 	}
-	if !memoryLimitPattern.MatchString(c.Runs.SandboxMemoryMax) {
-		return errors.New("runs.sandbox_memory_max: use a positive size such as 4G")
+	if c.Runs.SandboxMemoryMax != MemoryAuto && !memoryLimitPattern.MatchString(c.Runs.SandboxMemoryMax) {
+		return errors.New("runs.sandbox_memory_max: use auto or a positive size such as 4G")
 	}
 	if c.Runs.SandboxTasksMax < 1 {
 		return errors.New("runs.sandbox_tasks_max: must be positive")
@@ -431,7 +432,7 @@ func WriteDefaults(p Paths) error {
 			return err
 		}
 	}
-	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\nca_listen = \"0.0.0.0:7459\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\nsandbox = \"required\"\nsandbox_memory_max = \"4G\"\nsandbox_tasks_max = 512\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n# sandbox_network = true\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
+	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\nca_listen = \"0.0.0.0:7459\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\nsandbox = \"required\"\nsandbox_memory_max = \"auto\"\nsandbox_tasks_max = 512\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n# sandbox_network = true\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
 		h, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if errors.Is(err, os.ErrExist) {
 			continue

@@ -35,7 +35,7 @@ summary_every = 20         # update the rolling channel summary after this many 
 context_limit_tokens = 128000 # model context estimate used for rollover
 # summary_lane = "kimi/default" # optional; otherwise the cheapest healthy lane
 sandbox = "required"        # required (default), auto or off for write runs
-sandbox_memory_max = "4G"  # systemd user scope, when available
+sandbox_memory_max = "auto" # auto (a quarter of RAM, 2G to 8G) or a size such as "4G"
 sandbox_tasks_max = 512    # systemd user scope, when available
 sandbox_read_only = []      # extra absolute toolchain paths to mount read-only
 request_max_runs = 6          # runs one request may start by delegation
@@ -113,6 +113,11 @@ read-only module cache. The rest of home is hidden.
 `faztudo doctor` reports
 bubblewrap, user namespace and systemd user-scope availability. When a scope
 works, `sandbox_memory_max` and `sandbox_tasks_max` cap memory and tasks.
+`sandbox_memory_max = "auto"` is a quarter of total RAM, at least 2G and at
+most 8G. Before a sandboxed write run starts, faztudo compares `MemAvailable`
+in `/proc/meminfo` with that limit. When less is free, the run stays queued,
+the channel gets one notice ("waiting for memory: N GB free, the run needs M
+GB"), and the run starts once memory frees up.
 Read runs are unchanged. See [SECURITY.md](../SECURITY.md) for limits.
 Use `required` when a lane's `sandbox_network = false` must be enforced;
 an `auto` fallback runs with the host network. A networkless sandboxed run

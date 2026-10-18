@@ -106,7 +106,7 @@ design assumes that agents make mistakes and that messages from outside
   bound. Network stays on by default so CLIs can reach their APIs; a lane
   turns it off with `sandbox_network = false`. Such a run gets no MCP config
   because it cannot reach the local endpoint. Where a systemd user scope
-  works, it sets `runs.sandbox_memory_max` (default `4G`) and
+  works, it sets `runs.sandbox_memory_max` (default `auto`: a quarter of RAM, 2G to 8G) and
   `runs.sandbox_tasks_max` (default 512). Without a scope the run is still
   sandboxed, just without those limits. Run `faztudo doctor` to check
   bubblewrap, unprivileged user namespaces and systemd user scope availability.

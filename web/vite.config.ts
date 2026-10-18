@@ -26,6 +26,9 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // One jsdom worker costs several hundred MB; unbounded workers on a
+    // many-core machine exceeded the sandbox memory limit.
+    maxWorkers: process.env.FAZTUDO_SANDBOXED === "1" ? 2 : 4,
     setupFiles: "./src/test/setup.ts",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
