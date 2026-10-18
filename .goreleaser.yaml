@@ -42,7 +42,8 @@ nfpms:
     license: MIT
     formats: [deb]
     bindir: /usr/bin
-    dependencies: [git]
+    # Write runs fail closed without bubblewrap (sandbox = "required").
+    dependencies: [git, bubblewrap]
     contents:
       - src: packaging/systemd/faztudo-package.service
         dst: /usr/lib/systemd/user/faztudo.service

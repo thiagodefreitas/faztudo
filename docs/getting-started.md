@@ -43,8 +43,10 @@ install -m 0755 faztudo ~/.local/bin/faztudo
 ```
 
 The archive also contains `systemd/faztudo.service`, the unit described under
-"Run it in the background". The web app is embedded in the binary, so there is
-nothing else to install.
+"Run it in the background". The web app is embedded in the binary. Install
+`git` and `bubblewrap` from your distribution: write runs are sandboxed and
+refuse to start without bubblewrap, unless you set `sandbox = "auto"` (see
+Configuration).
 
 ## Install and run
 

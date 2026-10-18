@@ -63,22 +63,23 @@ The name is Portuguese for "does everything". It does not, yet.
 
 | area | state |
 | :--- | :--- |
-| Channels, threads, direct messages, command palette, grouped messages, markdown with copyable code | works (M1, M1b) |
+| Channels, threads, direct messages, command palette, grouped messages, markdown with copyable code | works |
+| Catch-up card, unread and day dividers, filters, thread list, search, pins, files, notifications | works |
 | Adapters for Claude Code, Codex, Grok, Kimi, Antigravity, OpenCode | works; OpenCode is experimental |
 | Original agent avatars with role badges and live state rings | works |
-| Office: one room with every member at a desk, live state, lane health and run details | works |
-| Worktree write runs, diff view, approvals, commit messages | works |
-| Lanes dashboard, health from fresh usage, automatic lane switching | works |
-| faztudo MCP server for agents (post, ask, request approval) | works |
-| LAN mode: HTTPS, password, phone pairing | works; had an independent security review |
-| Phone inbox home, choice cards with lettered options, collapsed agent-to-agent activity | works |
-| Write-run sandbox (bubblewrap, no root) | planned (M2) |
-| Search, pinned messages, files, notifications, packages | planned (M2) |
-| Departments, Chief of Staff, routines | planned (M1b and M2) |
+| Worktree write runs, diff view, approvals inbox, commit messages, merge replay | works |
+| Tasks with directives and a board | works |
+| Write-run sandbox (bubblewrap, no root), fail closed by default | works |
+| Lanes dashboard, health from fresh usage, automatic lane switching, per-run usage | works |
+| faztudo MCP server for agents (post, ask, request approval, delegate) | works |
+| Director, departments, projects with settings and digest, Chief of Staff, routines | works |
+| LAN mode: HTTPS, password, phone pairing, installable phone app | works; had an independent security review |
+| 2D office and a first 3D office with the same characters | works |
+| Packages: tarball and .deb with a systemd user unit | works |
 | Signal bridge | planned (M3) |
-| Full 2D office scene and agent computers (persistent sandboxes) | planned (M4) |
+| Agent computers (persistent sandboxes) | planned (M4) |
 | Discord bridge, custom adapters | planned (M5) |
-| 3D office view, desktop app | planned (M6) |
+| Full 3D office, desktop app | planned (M6) |
 | Multi-user teams, remote and desktop agent computers | planned (M7) |
 
 ## Quick start
