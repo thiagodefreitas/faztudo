@@ -11,6 +11,8 @@ export interface AgentInfo {
   role?: string
   description?: string
   mode?: RunMode
+  /** Receives messages nobody is addressed in, in channels that opted in. */
+  chief_of_staff?: boolean
 }
 
 export interface Member {
@@ -51,9 +53,21 @@ export interface Message {
   mentions: ID[]
   options?: string[]
   run_id?: ID
+  /** Set when an agent handed work to another agent with the delegate tool. */
+  handoff?: Handoff
+  /** Handle of the routine that posted this message. */
+  routine?: string
   created_at: string
   edited_at?: string
   reply_count?: number
+}
+
+export interface Handoff {
+  request_id: ID
+  from: string
+  to: string
+  /** 1 for the first handoff of a request, 2 for a lead splitting it. */
+  depth: number
 }
 
 export type RunState =
@@ -229,6 +243,8 @@ export type EventType =
   | "lane.switched"
   | "department.updated"
   | "project.updated"
+  | "routine.updated"
+  | "handoff.created"
   | "notice"
 
 export interface StreamEvent<T = unknown> {
@@ -329,6 +345,30 @@ export interface Org {
   director_id: ID
   departments: Department[]
   projects: Project[]
+}
+
+export type RoutineStatus = "ok" | "failed" | "skipped"
+
+export interface RoutineResult {
+  at: string
+  status: RoutineStatus
+  detail?: string
+  run_id?: ID
+}
+
+/** A prompt that runs on a schedule (cron) or when a human posts in a channel. */
+export interface Routine {
+  handle: string
+  name: string
+  prompt: string
+  persona: string
+  channel: string
+  schedule?: string
+  trigger?: "message"
+  template?: "debrief"
+  enabled: boolean
+  next_run?: string
+  last?: RoutineResult
 }
 
 export type AssignKind = "department" | "specialist"

@@ -54,6 +54,7 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
   if (method === "GET" && parts[0] === "channels" && parts.length === 1) return { status: 200, body: world.getChannels() }
   if (method === "GET" && parts[0] === "lanes" && parts.length === 1) return { status: 200, body: world.getLanes() }
   if (method === "GET" && parts[0] === "org" && parts.length === 1) return { status: 200, body: world.getOrg() }
+  if (method === "GET" && parts[0] === "routines" && parts.length === 1) return { status: 200, body: world.getRoutines() }
 
   const parsed = jsonBody(rawBody)
   if (!parsed.ok) return send(parsed)
@@ -197,6 +198,14 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     const id = parts[1]
     if (!id) return send(err(404, "not_found", "lane not found"))
     return send(world.probeLane(id))
+  }
+
+  if (parts[0] === "routines" && parts[1]) {
+    if (parts.length === 2 && method === "PATCH") {
+      if (typeof body.enabled !== "boolean") return send(err(400, "bad_request", "enabled required"))
+      return send(world.setRoutineEnabled(parts[1], body.enabled))
+    }
+    if (parts.length === 3 && parts[2] === "run" && method === "POST") return send(world.runRoutine(parts[1]))
   }
 
   if (parts[0] === "projects" && parts[2] === "assignments") {

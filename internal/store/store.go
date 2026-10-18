@@ -196,6 +196,13 @@ func (s *Store) Event(ctx context.Context, id string) (events.Event, error) {
 	}
 	return e, err
 }
+
+// LastSeq is the sequence number of the newest event, 0 for an empty log.
+func (s *Store) LastSeq(ctx context.Context) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq)
+	return seq, err
+}
 func (s *Store) EventsAfter(ctx context.Context, after int64, limit int) ([]events.Event, error) {
 	if limit <= 0 {
 		limit = 200
@@ -430,6 +437,16 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('project',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", p.Handle, e.Payload)
 		return err
+	case events.RoutineUpdated:
+		var r domain.Routine
+		if err := json.Unmarshal(e.Payload, &r); err != nil {
+			return err
+		}
+		if r.Handle == "" {
+			return errors.New("routine handle required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('routine',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", r.Handle, e.Payload)
+		return err
 	case events.Type("channel.read"):
 		var read struct {
 			ChannelID string `json:"channel_id"`
@@ -614,6 +631,14 @@ func (s *Store) Projects(ctx context.Context) ([]domain.Project, error) {
 }
 func (s *Store) Project(ctx context.Context, handle string) (domain.Project, error) {
 	return oneJSON[domain.Project](ctx, s.db, "SELECT data FROM org WHERE kind='project' AND handle=?", handle)
+}
+
+// Routines lists the routines. They share the org table, as kind "routine".
+func (s *Store) Routines(ctx context.Context) ([]domain.Routine, error) {
+	return queryJSON[domain.Routine](ctx, s.db, "SELECT data FROM org WHERE kind='routine' ORDER BY handle")
+}
+func (s *Store) Routine(ctx context.Context, handle string) (domain.Routine, error) {
+	return oneJSON[domain.Routine](ctx, s.db, "SELECT data FROM org WHERE kind='routine' AND handle=?", handle)
 }
 func (s *Store) Lanes(ctx context.Context) ([]domain.Lane, error) {
 	return queryJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes ORDER BY id")

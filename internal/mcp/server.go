@@ -15,6 +15,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
 
@@ -30,12 +31,24 @@ type Handler struct {
 	tokens  *tokens
 	trigger Trigger
 	http    http.Handler
+	ledger  *org.Ledger
+	// Policy is set by the app before the first request.
+	Policy Policy
+}
+
+// Policy is what the delegate tool takes from the configuration.
+type Policy struct {
+	// ChiefOfStaff is the handle of the Chief of Staff, empty when there is none.
+	ChiefOfStaff string
+	// Limits caps the runs one request may start by delegation. A zero value
+	// means the defaults (6 runs, 2 of them premium).
+	Limits org.Limits
 }
 
 type grantKey struct{}
 
 func New(s *store.Store, trigger Trigger) *Handler {
-	h := &Handler{store: s, tokens: newTokens(), trigger: trigger}
+	h := &Handler{store: s, tokens: newTokens(), trigger: trigger, ledger: org.NewLedger()}
 	// Stateless: every POST is authorized by the bearer token on that
 	// request. A session id cannot be reused with a different run's token.
 	h.http = sdkmcp.NewStreamableHTTPHandler(h.serverFor, &sdkmcp.StreamableHTTPOptions{
@@ -74,7 +87,7 @@ func (h *Handler) serverFor(r *http.Request) *sdkmcp.Server {
 		return nil
 	}
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "faztudo", Version: "0"}, &sdkmcp.ServerOptions{
-		Instructions: "Tools act only in this run's channel, as this run's agent. request_approval creates a pending request. No tool resolves an approval.",
+		Instructions: "Tools act only in this run's channel, as this run's agent. request_approval creates a pending request. delegate hands work to another agent and works only for the Chief of Staff and department leads. No tool resolves an approval.",
 		Logger:       slog.New(slog.DiscardHandler),
 	})
 	h.addTools(server, grant)

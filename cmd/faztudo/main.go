@@ -38,7 +38,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: faztudo serve|open|token --rotate|init|doctor|agents detect|lanes|passwd|version")
+		return fmt.Errorf("usage: faztudo serve|open|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|passwd|version")
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
@@ -49,7 +49,7 @@ func run(args []string) error {
 		fmt.Println(version.Get())
 		return nil
 	case "init":
-		return config.WriteDefaults(p)
+		return runInit(p, args[1:], os.Stdout)
 	case "passwd":
 		return runPasswd(p, os.Stdin, os.Stderr)
 	case "agents":
@@ -274,7 +274,7 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 		byHandle[cli] = m
 	}
 	for _, persona := range c.Lanes.Persona {
-		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: persona.Handle, DisplayName: persona.DisplayName, Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: persona.Lanes, Role: persona.Role, Description: persona.Description, Mode: domain.RunMode(persona.Mode)}}
+		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: persona.Handle, DisplayName: persona.DisplayName, Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: persona.Lanes, Role: persona.Role, Description: persona.Description, Mode: domain.RunMode(persona.Mode), ChiefOfStaff: persona.ChiefOfStaff}}
 		if existing, ok := byHandle[persona.Handle]; ok {
 			m.ID = existing.ID
 		}
@@ -286,6 +286,9 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 		}
 	}
 	if err = seedOrg(ctx, s, c); err != nil {
+		return "", err
+	}
+	if err = seedRoutines(ctx, s, c); err != nil {
 		return "", err
 	}
 	channels, err := s.Channels(ctx)
@@ -326,6 +329,28 @@ func seedOrg(ctx context.Context, s *store.Store, c config.Config) error {
 			return err
 		}
 		if _, err := s.Append(ctx, events.Draft{Type: events.ProjectUpdated, Actor: events.System, Payload: proj}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedRoutines records the routines from lanes.toml. The file sets what a
+// routine does; whether it is switched on and how its last run ended stay as
+// the app left them. A new routine is on unless the file says enabled = false.
+func seedRoutines(ctx context.Context, s *store.Store, c config.Config) error {
+	for _, r := range c.Lanes.Routine {
+		name := r.Name
+		if name == "" {
+			name = r.Handle
+		}
+		routine := domain.Routine{Handle: r.Handle, Name: name, Prompt: r.Prompt, Persona: r.Persona, Channel: r.Channel, Schedule: r.Schedule, Trigger: r.Trigger, Template: r.Template, Enabled: r.Enabled == nil || *r.Enabled}
+		if cur, err := s.Routine(ctx, r.Handle); err == nil {
+			routine.Enabled, routine.Last = cur.Enabled, cur.Last
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if _, err := s.Append(ctx, events.Draft{Type: events.RoutineUpdated, Actor: events.System, Payload: routine}); err != nil {
 			return err
 		}
 	}

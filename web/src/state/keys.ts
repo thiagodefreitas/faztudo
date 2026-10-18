@@ -10,6 +10,7 @@ export const qk = {
   approvals: ["approvals"] as const,
   lanes: ["lanes"] as const,
   org: ["org"] as const,
+  routines: ["routines"] as const,
   notices: ["notices"] as const,
   seq: ["seq"] as const,
   pending: (id: string) => ["pending", id] as const,

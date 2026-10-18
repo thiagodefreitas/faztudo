@@ -136,28 +136,46 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 		out, err := h.listMembers(ctx)
 		return nil, out, err
 	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "delegate",
+		Description: delegateDescription,
+		Annotations: hints,
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in delegateIn) (*sdkmcp.CallToolResult, delegateOut, error) {
+		out, err := h.delegate(ctx, grant, in)
+		return nil, out, err
+	})
 }
 
 func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, choices []string, fanout bool) (messageOut, error) {
+	msg, err := h.postMessage(ctx, grant, body, threadID, choices, fanout, nil)
+	if err != nil {
+		return messageOut{}, err
+	}
+	return messageView(msg), nil
+}
+
+// postMessage posts as the run's agent. handoff is set when the message hands
+// work to another agent.
+func (h *Handler) postMessage(ctx context.Context, grant Grant, body, threadID string, choices []string, fanout bool, handoff *domain.Handoff) (domain.Message, error) {
 	if strings.TrimSpace(body) == "" {
-		return messageOut{}, errors.New("body required")
+		return domain.Message{}, errors.New("body required")
 	}
 	if len(body) > maxBodyBytes {
-		return messageOut{}, errors.New("body too long")
+		return domain.Message{}, errors.New("body too long")
 	}
 	channel, err := h.store.Channel(ctx, grant.ChannelID)
 	if err != nil {
-		return messageOut{}, errors.New("channel unavailable")
+		return domain.Message{}, errors.New("channel unavailable")
 	}
 	if threadID != "" {
 		root, err := h.store.Message(ctx, threadID)
 		if err != nil || root.ChannelID != grant.ChannelID {
-			return messageOut{}, errors.New("invalid thread_id")
+			return domain.Message{}, errors.New("invalid thread_id")
 		}
 	}
 	members, err := h.store.Members(ctx)
 	if err != nil {
-		return messageOut{}, err
+		return domain.Message{}, err
 	}
 	ids, agents := mentioned(body, members)
 	msg := domain.Message{
@@ -169,6 +187,7 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 		Mentions:  ids,
 		Options:   choices,
 		RunID:     grant.RunID,
+		Handoff:   handoff,
 		CreatedAt: time.Now().UTC(),
 	}
 	evt, err := h.store.Append(ctx, events.Draft{
@@ -178,10 +197,10 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 		Payload:   msg,
 	})
 	if err != nil {
-		return messageOut{}, err
+		return domain.Message{}, err
 	}
 	if err := unmarshalPayload(evt.Payload, &msg); err != nil {
-		return messageOut{}, err
+		return domain.Message{}, err
 	}
 	if fanout && h.trigger != nil {
 		others := make([]domain.Member, 0, len(agents))
@@ -199,7 +218,7 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 			h.trigger.OnMessage(ctx, msg, others)
 		}
 	}
-	return messageView(msg), nil
+	return msg, nil
 }
 
 // assignedOnly filters agents by the project rule. If the org cannot be read

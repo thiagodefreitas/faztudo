@@ -30,6 +30,7 @@ import type {
   ReadResult,
   ResolveBody,
   RetryBody,
+  Routine,
   Run,
   RunMode,
   RunState,
@@ -86,6 +87,18 @@ export class MockWorld {
   ]
   private projects: Project[] = [
     { handle: "faztudo", name: "Faztudo", channels: ["faztudo-dev"], departments: ["engineering"], specialists: [] },
+  ]
+  private routines: Routine[] = [
+    {
+      handle: "daily-debrief",
+      name: "Daily debrief",
+      prompt: "",
+      persona: "coder",
+      channel: "general",
+      schedule: "0 18 * * 1-5",
+      template: "debrief",
+      enabled: false,
+    },
   ]
 
   constructor(private readonly clock: Clock) {
@@ -395,6 +408,28 @@ export class MockWorld {
     else found.specialists = found.specialists.filter((item) => item !== handle)
     this.emit("project.updated", undefined, found, `human:${this.me.id}`)
     return ok(structuredClone(found))
+  }
+
+  // The mock keeps the routines and their switch, but never runs one on a
+  // schedule.
+  getRoutines(): Routine[] {
+    return structuredClone(this.routines)
+  }
+
+  setRoutineEnabled(handle: string, enabled: boolean): Result<Routine> {
+    const found = this.routines.find((item) => item.handle === handle)
+    if (!found) return err(404, "not_found", "resource not found")
+    found.enabled = enabled
+    this.emit("routine.updated", undefined, found, `human:${this.me.id}`)
+    return ok(structuredClone(found))
+  }
+
+  runRoutine(handle: string): Result<{ status: string }> {
+    const found = this.routines.find((item) => item.handle === handle)
+    if (!found) return err(404, "not_found", "resource not found")
+    found.last = { at: iso(this.clock.now()), status: "ok", detail: "Started from the mock." }
+    this.emit("routine.updated", undefined, found, `human:${this.me.id}`)
+    return ok({ status: "started" }, 202)
   }
 
   getMessages(channelId: ID, before?: ID, limit = 50): Result<Message[]> {

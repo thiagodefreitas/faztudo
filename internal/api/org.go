@@ -115,6 +115,24 @@ func (a *API) unassign(w http.ResponseWriter, r *http.Request) {
 
 func containsFold(list []string, s string) bool { return org.ContainsFold(list, s) }
 
+// chiefOfStaff finds the Chief of Staff for a channel that opted in. A direct
+// channel never does: a message there is for the agent in it.
+func (a *API) chiefOfStaff(c domain.Channel, members []domain.Member) (domain.Member, bool) {
+	if a.Chief == nil || c.Kind == domain.ChannelDirect || c.Visibility == domain.VisibilityDirect {
+		return domain.Member{}, false
+	}
+	handle, ok := a.Chief(c.Name)
+	if !ok {
+		return domain.Member{}, false
+	}
+	for _, m := range members {
+		if m.Kind == domain.MemberAgent && strings.EqualFold(m.Handle, handle) {
+			return m, true
+		}
+	}
+	return domain.Member{}, false
+}
+
 // groupLeads turns @<department> into that department's lead and @<project>
 // into the project lead. A group with no lead is reported in problems.
 func groupLeads(body string, departments []domain.Department, projects []domain.Project, members []domain.Member) (leads []domain.Member, problems []string) {

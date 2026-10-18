@@ -12,6 +12,7 @@ import { ChannelPage } from "./components/channel"
 import { InboxPage } from "./components/inbox"
 import { LanesPage } from "./components/lanes"
 import { OrganizationPage } from "./components/organization"
+import { RoutinesPage } from "./components/routines/routines"
 import { Shell } from "./components/shell"
 import { qk } from "./state/keys"
 import { queryClient } from "./state/query-client"
@@ -158,6 +159,20 @@ const organizationRoute = createRoute({
   component: OrganizationPage,
 })
 
+const routinesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/routines",
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.routines, queryFn: () => api.routines() }),
+      ]),
+    ),
+  component: RoutinesPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -167,6 +182,7 @@ const routeTree = rootRoute.addChildren([
   lanesRoute,
   officeRoute,
   organizationRoute,
+  routinesRoute,
 ])
 
 export const router = createRouter({

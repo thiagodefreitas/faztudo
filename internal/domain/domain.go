@@ -30,6 +30,9 @@ type AgentInfo struct {
 	// Description says what the specialist is for, shown on the Organization page.
 	Description string  `json:"description,omitempty"`
 	Mode        RunMode `json:"mode,omitempty"`
+	// ChiefOfStaff marks the persona that receives unaddressed messages in
+	// channels that opt in, and routes them to the owner.
+	ChiefOfStaff bool `json:"chief_of_staff,omitempty"`
 }
 
 type Member struct {
@@ -111,6 +114,8 @@ type Message struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	EditedAt   *time.Time `json:"edited_at,omitempty"`
 	ReplyCount int        `json:"reply_count,omitempty"`
+	Handoff    *Handoff   `json:"handoff,omitempty"` // set when an agent posted it with the delegate tool
+	Routine    string     `json:"routine,omitempty"` // handle of the routine that posted it
 }
 
 type RunMode string
@@ -286,4 +291,41 @@ type Lane struct {
 	CostTodayUSD   *float64   `json:"cost_today_usd,omitempty"`
 	Alerted        bool       `json:"alerted,omitempty"`
 	LastError      *LaneError `json:"last_error,omitempty"`
+}
+
+// Handoff says that an agent handed work to another agent. RequestID is the id
+// of the human message that started the chain, Depth how many handoffs deep
+// this one is (1 for the first), and From and To are agent handles.
+type Handoff struct {
+	RequestID ID     `json:"request_id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Depth     int    `json:"depth"`
+}
+
+// RoutineResult is how the last run of a routine ended. Status is "ok",
+// "failed" or "skipped" (lane health, a budget or a missing piece).
+type RoutineResult struct {
+	At     time.Time `json:"at"`
+	Status string    `json:"status"`
+	Detail string    `json:"detail,omitempty"`
+	RunID  ID        `json:"run_id,omitempty"`
+}
+
+// Routine is a prompt that runs by itself: on a schedule (Schedule, a cron
+// expression) or when a human posts in the channel (Trigger "message"). It
+// runs as Persona in Channel, which is a channel name. Template names a
+// built-in that adds facts to the prompt, such as "debrief".
+type Routine struct {
+	Handle   string         `json:"handle"`
+	Name     string         `json:"name"`
+	Prompt   string         `json:"prompt"`
+	Persona  string         `json:"persona"`
+	Channel  string         `json:"channel"`
+	Schedule string         `json:"schedule,omitempty"`
+	Trigger  string         `json:"trigger,omitempty"`
+	Template string         `json:"template,omitempty"`
+	Enabled  bool           `json:"enabled"`
+	NextRun  *time.Time     `json:"next_run,omitempty"`
+	Last     *RoutineResult `json:"last,omitempty"`
 }

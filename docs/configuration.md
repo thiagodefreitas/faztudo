@@ -36,6 +36,12 @@ context_limit_tokens = 128000 # model context estimate used for rollover
 sandbox = "off"             # off (default for now), auto or required for write runs
 sandbox_memory_max = "4G"  # systemd user scope, when available
 sandbox_tasks_max = 512    # systemd user scope, when available
+request_max_runs = 6          # runs one request may start by delegation
+request_max_premium_runs = 2  # of those, runs on a premium lane
+
+[routines]
+timezone = ""     # IANA name such as "Europe/Berlin"; empty uses this machine's zone
+max_per_day = 20  # routine runs started per local day, all routines together
 ```
 
 `allowed_hosts` (under `[server]`) lists extra host names accepted from a
@@ -166,6 +172,104 @@ specialists = ["claude"]        # single agents assigned at first start
 - `@<department>` and `@<project>` start that group's lead. A project with no
   `lead` answers with a notice instead.
 
+### Chief of Staff and delegation
+
+One persona can be the Chief of Staff:
+
+```toml
+[[persona]]
+handle = "chief"
+display_name = "Chief of Staff"
+description = "Reads requests nobody is addressed in and hands them to the owner."
+lanes = ["claude/opus", "codex/default"]
+mode = "read"
+chief_of_staff = true
+channels = ["general"]          # channel names that opt in
+```
+
+- In a channel listed under `channels`, a message from a person that names no
+  one (no `@mention`, no `/` command, not a thread reply) goes to the Chief
+  of Staff. Direct channels never do. In a project's channel the Chief of
+  Staff must be assigned to the project like any agent.
+- Only one persona can have `chief_of_staff = true`, and `channels` only
+  applies to it.
+- The Chief of Staff and every department lead get a short guide in their
+  prompt, with the agents they can hand work to and what each is for (the
+  persona's `role` and `description`), and the `delegate` tool of faztudo's MCP
+  server. They need a lane on a CLI with MCP support (`claude` or `codex`).
+- `delegate` is checked on the server. The Chief of Staff can hand work to any
+  other agent; a department lead only to the members of its departments; nobody
+  else can delegate. Delegation is two levels deep at most: the Chief of Staff
+  to a lead, and the lead to its specialists. Every handoff is a message in a
+  thread under the request, plus a `handoff.created` event.
+- One request can start `runs.request_max_runs` delegated runs. Of those,
+  `runs.request_max_premium_runs` may go to agents whose first lane has
+  `cost_class = "premium"`. Over a limit, faztudo asks the Director
+  with a choice card in the channel and refuses further handoffs until they
+  answer. "A" allows another round of the same size, anything else stops the
+  request. Counts are kept in memory and start again after a restart.
+- A delegated agent posts its result in the same thread. The agent that handed
+  the work over does not wait for it.
+
+### Routines
+
+A routine is a prompt that runs by itself, as a persona in a channel.
+
+```toml
+[[routine]]
+handle = "daily-debrief"
+name = "Daily debrief"
+persona = "chief"
+channel = "general"
+schedule = "0 18 * * 1-5"   # five-field cron, in [routines] timezone
+template = "debrief"        # adds the facts of the last day to the prompt
+enabled = false             # starts switched off; the default is on
+
+[[routine]]
+handle = "welcome"
+persona = "coder"
+channel = "general"
+trigger = "message"         # runs when a person posts in the channel
+prompt = "Say hello to anyone new."
+```
+
+- Set exactly one of `schedule` and `trigger`. A schedule has five fields
+  (minute, hour, day of month, month, day of week) with `*`, lists, ranges,
+  steps (`*/15`) and month and weekday names, or one of `@hourly`, `@daily`,
+  `@weekly`, `@monthly`. It runs in the `[routines]` time zone. A run missed
+  while faztudo was off is not made up.
+- A trigger routine starts once for each new message a person posts in the
+  channel as a top-level message. Messages from agents, routines and handoffs,
+  and thread replies, never trigger anything.
+- The routine posts its prompt in the channel as the Director, marked with the
+  routine's handle, and the persona answers as for any message.
+- `template = "debrief"` gives the agent facts that faztudo collects from its own
+  records: runs finished, merged, failed, approvals waiting and lane health in
+  the last 24 hours. The facts go into the prompt only. With a template the
+  `prompt` may be empty.
+- A routine does not run when its lane is exhausted, unavailable or in
+  conserve, when its agent is not assigned to the channel's project, when its
+  channel does not exist, or after `routines.max_per_day` runs that day. The
+  reason is kept as its last result with the status "skipped".
+- `enabled` in the file is the starting state. Afterwards the Director switches
+  routines on and off in the app, and a restart keeps that. The prompt, schedule
+  and persona follow the file. A routine removed from the file stays listed.
+
+### Templates
+
+`faztudo init --template solo|team|empty` writes `lanes.toml` for you when it
+holds nothing but comments, and refuses to touch it otherwise. The templates
+are plain TOML files in `internal/templates/`:
+
+| template | personas |
+| :--- | :--- |
+| `solo` | Chief of Staff (for `#general`), coder, reviewer |
+| `team` | an Engineering department led by the architect, with architect, coder, reviewer and tester, plus a writer |
+| `empty` | nothing, only comments |
+
+Both ship a switched-off daily debrief. They declare a `claude/default` and a
+`codex/default` lane; remove the ones you do not use.
+
 Supported `cli` values: `claude`, `codex`, `grok`, `kimi`, `agy`,
 `opencode`. Kimi and Antigravity have no read-only mode, so personas that
 use them must be `mode = "write"`. OpenCode's print mode produced no answer
@@ -224,8 +328,9 @@ Unset, a Claude write run may use `Bash(go test:*)`, `Bash(go vet:*)`,
 `Bash(gh issue view:*)`. Setting the field replaces that list, and
 `allowed_tools = []` allows none. Read runs have no default list. Whenever
 faztudo passes its MCP endpoint, every Claude run, read or write, also allows
-the five faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
-`request_approval`, `read_context`, `list_members`); that is not configurable.
+the six faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
+`request_approval`, `read_context`, `list_members`, `delegate`); that is not
+configurable.
 Other CLIs ignore the field.
 
 When `lanes.toml` configures any lane for a CLI, the detected-only

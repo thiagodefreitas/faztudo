@@ -37,6 +37,10 @@ export function useOrg() {
   return useQuery({ queryKey: qk.org, queryFn: () => api.org() })
 }
 
+export function useRoutines() {
+  return useQuery({ queryKey: qk.routines, queryFn: () => api.routines() })
+}
+
 export function useRuns() {
   const qc = useQueryClient()
   return useQuery({

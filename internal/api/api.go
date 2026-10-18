@@ -42,10 +42,15 @@ type API struct {
 	// tailscale serve. With LAN mode on, such requests need a session.
 	AllowedHosts []string
 	// LocalTokenPath is the persistent token file. Serve fails closed if unset.
-	LocalTokenPath    string
-	LocalLimiter      *auth.LoginRateLimiter
-	localAuthBypass   bool // used only by legacy in-package tests
-	Trigger           RunTrigger
+	LocalTokenPath  string
+	LocalLimiter    *auth.LoginRateLimiter
+	localAuthBypass bool // used only by legacy in-package tests
+	Trigger         RunTrigger
+	// Chief reports the handle of the Chief of Staff for a channel name, when
+	// that channel opted in. Nil means no channel has one.
+	Chief func(channel string) (handle string, ok bool)
+	// Routines runs and switches the routines. Nil means there are none.
+	Routines          RoutineControl
 	ResolveApproval   func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
 	ReadDiff          func(string) ([]byte, error)
 	CancelRun         func(context.Context, string) error
@@ -89,6 +94,7 @@ func New(s *store.Store, humanID, version string) *API {
 		HumanID:      humanID,
 		Version:      version,
 		Trigger:      noopTrigger{},
+		Routines:     noRoutines{},
 		Limiter:      auth.NewLoginRateLimiter(),
 		LocalLimiter: auth.NewLoginRateLimiter(),
 		Now:          time.Now,
@@ -132,6 +138,9 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/org", a.org)
 	m.HandleFunc("POST /api/v1/projects/{project}/assignments", a.assign)
 	m.HandleFunc("DELETE /api/v1/projects/{project}/assignments/{kind}/{handle}", a.unassign)
+	m.HandleFunc("GET /api/v1/routines", a.routines)
+	m.HandleFunc("PATCH /api/v1/routines/{handle}", a.patchRoutine)
+	m.HandleFunc("POST /api/v1/routines/{handle}/run", a.runRoutine)
 	m.HandleFunc("GET /api/v1/channels", a.channels)
 	m.HandleFunc("POST /api/v1/channels", a.createChannel)
 	m.HandleFunc("PATCH /api/v1/channels/{id}", a.patchChannel)
@@ -582,6 +591,13 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if isCommand(v.Body, "/lane") {
 		agents = nil // a channel command, even in a direct channel
+	}
+	// A request nobody is addressed in goes to the Chief of Staff, in the
+	// channels that opted in. Replies in a thread and commands do not.
+	if len(agents) == 0 && len(ids) == 0 && v.ThreadID == "" && current(r).Kind == domain.MemberHuman && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
+		if m, ok := a.chiefOfStaff(c, members); ok {
+			agents = []domain.Member{m}
+		}
 	}
 	if len(agents) == 0 && len(ids) == 0 && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
 		if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {

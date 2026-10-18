@@ -25,6 +25,7 @@ import type {
   ReadResult,
   ResolveBody,
   RetryBody,
+  Routine,
   Run,
   RunState,
   ThreadPage,
@@ -68,6 +69,9 @@ export interface Api {
   org: () => Promise<Org>
   assign: (project: string, body: AssignBody) => Promise<Project>
   unassign: (project: string, kind: AssignKind, handle: string) => Promise<Project>
+  routines: () => Promise<Routine[]>
+  setRoutineEnabled: (handle: string, enabled: boolean) => Promise<Routine>
+  runRoutine: (handle: string) => Promise<{ status: string }>
   lanes: () => Promise<Lane[]>
   patchLane: (id: string, body: LanePatch) => Promise<Lane>
   probeLane: (id: string) => Promise<Lane>
@@ -140,6 +144,9 @@ export function createApi(options: ApiOptions = {}): Api {
     assign: (project, body) => request("POST", `/projects/${encodeURIComponent(project)}/assignments`, body),
     unassign: (project, kind, handle) =>
       request("DELETE", `/projects/${encodeURIComponent(project)}/assignments/${kind}/${encodeURIComponent(handle)}`),
+    routines: () => request("GET", "/routines"),
+    setRoutineEnabled: (handle, enabled) => request("PATCH", `/routines/${encodeURIComponent(handle)}`, { enabled }),
+    runRoutine: (handle) => request("POST", `/routines/${encodeURIComponent(handle)}/run`),
     lanes: () => request("GET", "/lanes"),
     patchLane: (id, body) => request("PATCH", `/lanes/${encodeURIComponent(id)}`, body),
     probeLane: (id) => request("POST", `/lanes/${encodeURIComponent(id)}/probe`),

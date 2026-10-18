@@ -136,7 +136,8 @@ is told. A run that already started is never moved silently.
 
 Agents that support MCP get a small set of faztudo tools: post a message,
 ask a human a question, request an approval, read recent channel context,
-list members. This is how agents work together in a channel instead of only
+list members, and hand work to another agent (`delegate`, for the Chief of
+Staff and department leads only, checked on the server). This is how agents work together in a channel instead of only
 answering once. The approval tool can only create requests; resolving one
 requires a human connection.
 

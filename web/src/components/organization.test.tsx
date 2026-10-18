@@ -41,10 +41,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function setup() {
+async function setup(members: Member[] = [ada, coder, reviewer, writer]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.me, ada)
-  client.setQueryData(qk.members, [ada, coder, reviewer, writer])
+  client.setQueryData(qk.members, members)
   client.setQueryData(qk.org, org)
   client.setQueryData(qk.lanes, [])
   client.setQueryData(qk.runs, [])
@@ -75,6 +75,22 @@ describe("OrganizationPage", () => {
     expect(within(card).getByText("#faztudo-dev")).toBeInTheDocument()
     expect(within(card).getByText("2 agents")).toBeInTheDocument()
     expect(within(card).getByText("Writer")).toBeInTheDocument()
+  })
+
+  it("shows the Chief of Staff apart from the departments, and links to the routines", async () => {
+    const chief: Member = { ...agent("chief", "Chief", "Routes requests"), agent: { lanes: ["claude/opus"], role: "Routes requests", chief_of_staff: true } }
+    await setup([ada, chief, coder, reviewer, writer])
+    const section = await screen.findByTestId("chief-of-staff")
+    expect(within(section).getByText("Chief")).toBeInTheDocument()
+    expect(within(section).getByText("Chief of Staff", { selector: "span" })).toBeInTheDocument()
+    expect(within(section).getByText(/not addressed to anyone/)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Routines" })).toHaveAttribute("href", "/routines")
+  })
+
+  it("has no Chief of Staff section when nobody is one", async () => {
+    await setup()
+    await screen.findByTestId("director")
+    expect(screen.queryByTestId("chief-of-staff")).not.toBeInTheDocument()
   })
 
   it("assigns from the menu and removes with the button", async () => {

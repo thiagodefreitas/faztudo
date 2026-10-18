@@ -24,6 +24,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/lanes"
 	"github.com/thiagodefreitas/faztudo/internal/mcp"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/runner"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/usage"
@@ -44,11 +45,15 @@ type App struct {
 	// MCP is the in-process server. MCPBase is its loopback origin with no
 	// token in it, for example http://127.0.0.1:7457. An empty MCPBase leaves
 	// agent commands unchanged.
-	MCP          *mcp.Handler
-	MCPBase      string
-	mu           sync.Mutex
-	activeMu     sync.Mutex
-	active       map[string]context.CancelFunc
+	MCP      *mcp.Handler
+	MCPBase  string
+	mu       sync.Mutex
+	activeMu sync.Mutex
+	active   map[string]context.CancelFunc
+	routines *routineEngine
+	// extra holds facts that go into one message's prompt, by message id.
+	extraMu      sync.Mutex
+	extra        map[string]string
 	summaryLocks sync.Map
 }
 
@@ -180,11 +185,44 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		return ids, nil
 	})
 	a.MCP = mcp.New(s, a)
+	a.MCP.Policy = mcp.Policy{ChiefOfStaff: a.chiefHandle(), Limits: a.requestLimits()}
+	a.routines = newRoutineEngine(a)
 	return a, nil
+}
+
+// chiefHandle is the handle of the Chief of Staff persona, empty when none is set.
+func (a *App) chiefHandle() string {
+	for _, p := range a.Config.Lanes.Persona {
+		if p.ChiefOfStaff {
+			return p.Handle
+		}
+	}
+	return ""
+}
+
+// chiefFor reports the Chief of Staff for a channel that opted in.
+func (a *App) chiefFor(channel string) (string, bool) {
+	for _, p := range a.Config.Lanes.Persona {
+		if p.ChiefOfStaff && org.ContainsFold(p.Channels, channel) {
+			return p.Handle, true
+		}
+	}
+	return "", false
+}
+
+// requestLimits are the delegation budgets of one request.
+func (a *App) requestLimits() org.Limits {
+	r := a.Config.Runs
+	if r.RequestMaxRuns < 1 {
+		return org.Limits{MaxRuns: 6, MaxPremium: 2}
+	}
+	return org.Limits{MaxRuns: r.RequestMaxRuns, MaxPremium: r.RequestMaxPremium}
 }
 
 func (a *App) Bind(h *api.API) {
 	h.Trigger = a
+	h.Chief = a.chiefFor
+	h.Routines = a.routines
 	h.ResolveApproval = a.ResolveApproval
 	h.ReadDiff = func(id string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(a.Paths.RunsDir, id, "diff.patch"))
@@ -206,6 +244,7 @@ func (a *App) Start(ctx context.Context) error {
 	if err := a.RefreshUsage(ctx); err != nil {
 		return err
 	}
+	go a.routines.loop(ctx)
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -532,11 +571,17 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		return err
 	}
 	prompt = withInstructions(a.instructions(agent.Handle), prompt)
+	if extra := a.extraContext(m.ID); extra != "" {
+		prompt += "\n\nFacts for this request:\n" + extra
+	}
 	if mode == domain.RunWrite {
 		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
 	}
 	if mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
 		prompt += "\n\n" + mcpPromptNote
+		if note := a.delegationNote(ctx, agent, m); note != "" {
+			prompt += "\n\n" + note
+		}
 	}
 	timeout, err := time.ParseDuration(a.Config.Runs.DefaultTimeout)
 	if err != nil {

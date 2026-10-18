@@ -1,0 +1,60 @@
+# Starting point for one person: you, a Chief of Staff, a coder and a reviewer.
+# Written by 'faztudo init --template solo'. Edit it freely, then run
+# 'faztudo serve'. The lanes name the agent CLIs on your machine; remove the
+# ones you do not use and fix the persona lists to match.
+
+[[lane]]
+id = "claude/default"
+cli = "claude"
+cost_class = "premium"
+capacity = 1
+
+[[lane]]
+id = "codex/default"
+cli = "codex"
+cost_class = "standard"
+capacity = 1
+
+# The Chief of Staff gets every message in #general that is not addressed to
+# anyone, picks the owner by what each agent is for, and hands the work over in
+# a thread. It needs a lane on a CLI that supports MCP tools (claude or codex).
+[[persona]]
+handle = "chief"
+display_name = "Chief of Staff"
+role = "Routes requests"
+description = "Reads requests that are not addressed to anyone, decides who should own them and hands them over. Does not do the work itself."
+instructions = "Hand each request to one owner with the delegate tool and say who you chose and why, in one short line."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+chief_of_staff = true
+channels = ["general"]
+
+[[persona]]
+handle = "coder"
+display_name = "Coder"
+role = "Implements changes"
+description = "Writes and fixes code in the repository, keeps changes small and runs the tests."
+instructions = "Keep diffs small. Run the tests before you finish."
+mode = "write"
+lanes = ["codex/default", "claude/default"]
+
+[[persona]]
+handle = "reviewer"
+display_name = "Reviewer"
+role = "Reviews diffs and plans"
+description = "Reads a diff or a plan and reports real problems with file and line. Does not rewrite the change."
+instructions = "Review for correctness first, then tests, then clarity."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+
+# A summary of the last day, written by the Chief of Staff on weekdays at 18:00
+# in your time zone (set it with [routines] timezone in config.toml). It is off
+# until you switch it on in the app.
+[[routine]]
+handle = "daily-debrief"
+name = "Daily debrief"
+persona = "chief"
+channel = "general"
+schedule = "0 18 * * 1-5"
+template = "debrief"
+enabled = false

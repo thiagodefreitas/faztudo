@@ -74,6 +74,7 @@ interface Member {
     role?: string;          // short description shown in the UI
     description?: string;   // longer description, shown on the Organization page
     mode?: "read" | "write"; // default mode for runs this agent starts
+    chief_of_staff?: boolean; // gets messages nobody is addressed in, in channels that opted in
   };
   presence: "online" | "idle" | "busy" | "offline";
 }
@@ -110,9 +111,32 @@ interface Message {
   mentions: ID[];
   options?: string[];       // 2 to 5 short answers an agent offers with ask_human
   run_id?: ID;              // set when the message is an agent run's output
+  handoff?: Handoff;        // set when an agent handed work over with the delegate tool
+  routine?: string;         // handle of the routine that posted this message
   created_at: string;
   edited_at?: string;
   reply_count?: number;     // on thread roots
+}
+
+interface Handoff {
+  request_id: ID;           // the message that started the chain
+  from: string;             // agent handles
+  to: string;
+  depth: number;            // 1 for the first handoff, 2 for a lead splitting it
+}
+
+interface Routine {
+  handle: string;
+  name: string;
+  prompt: string;
+  persona: string;          // handle of the agent that runs it
+  channel: string;          // channel name
+  schedule?: string;        // five-field cron, in the configured time zone
+  trigger?: "message";      // runs when a person posts in the channel
+  template?: "debrief";
+  enabled: boolean;
+  next_run?: string;        // scheduled routines that are on
+  last?: { at: string; status: "ok" | "failed" | "skipped"; detail?: string; run_id?: ID };
 }
 
 type RunState = "queued" | "running" | "waiting_approval" | "verifying"
@@ -233,12 +257,15 @@ interface NoticeAction {
 | GET | `/api/v1/org` | `Org`: the Director's member id, the departments and the projects with their assignments |
 | POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
+| GET | `/api/v1/routines` | `Routine[]` with the time of the next run |
+| PATCH | `/api/v1/routines/{handle}` | switch `{enabled}` on or off; humans only (403 for an agent), 404 for an unknown routine; returns the `Routine` |
+| POST | `/api/v1/routines/{handle}/run` | start the routine now, on or off; humans only; 202 `{status: "started"}`, or 409 with the reason in `message` when it cannot run now (lane health, no assignment, daily limit, already running) |
 | GET | `/api/v1/channels` | channels the caller can see |
 | POST | `/api/v1/channels` | create `{name, kind?, visibility?, topic?, repo_path?, member_ids?}`; kind defaults to `team`, visibility to `public` |
 | PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, default_agent_id, lane_overrides, members; a non-empty `repo_path` must be a git work tree, a non-empty `default_agent_id` must be an agent member of the channel, and every `lane_overrides` entry must name an agent and one of its lanes (400 otherwise); `lane_overrides` replaces the whole map |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of top-level messages (thread replies excluded), newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
-| POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; `@<department>` triggers that department's lead and `@<project>` the project's lead; in a channel that belongs to a project only agents assigned to it run, and each other mentioned agent gets a `notice` with an `assign` action; a reply to a reply attaches to the thread root |
+| POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; `@<department>` triggers that department's lead and `@<project>` the project's lead; in a channel that belongs to a project only agents assigned to it run, and each other mentioned agent gets a `notice` with an `assign` action; a reply to a reply attaches to the thread root; a top-level message from a person that names no one goes to the Chief of Staff in channels that opted in |
 | POST | `/api/v1/channels/{id}/read` | mark read up to `{seq}` (the channel's `last_seq`); `{event_id}` is also accepted |
 | GET | `/api/v1/runs?channel_id=&state=` | runs |
 | GET | `/api/v1/runs/{id}` | one run |
@@ -305,6 +332,8 @@ Event types in version 1:
 | `lane.switched` | `{run_id, from, to, reason}` |
 | `department.updated` | `Department` |
 | `project.updated` | `Project` (sent when the Director changes an assignment) |
+| `routine.updated` | `Routine` (sent when it is switched or has run) |
+| `handoff.created` | `Handoff` plus `message_id` |
 | `notice` | `{level: "info" or "warn" or "error", text, action?: NoticeAction}` |
 
 Clients keep the `seq` of the last event they saw and pass it on reconnect,

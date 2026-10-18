@@ -49,6 +49,10 @@ export function applyEvent(qc: QueryClient, event: StreamEvent): void {
   if (event.type === "project.updated" || event.type === "department.updated") {
     void qc.invalidateQueries({ queryKey: qk.org })
   }
+  // Routines are not part of the snapshot either.
+  if (event.type === "routine.updated") {
+    void qc.invalidateQueries({ queryKey: qk.routines })
+  }
   const prev = readSnapshot(qc)
   const next = reduce(prev, event)
   if (next === prev) return

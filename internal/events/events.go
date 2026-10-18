@@ -30,6 +30,8 @@ const (
 	ChannelSummarized Type = "channel.summarized"
 	LaneSwitched      Type = "lane.switched"
 	Notice            Type = "notice"
+	HandoffCreated    Type = "handoff.created"
+	RoutineUpdated    Type = "routine.updated"
 )
 
 // Actor identifies who caused an event: "human:<id>", "agent:<id>",

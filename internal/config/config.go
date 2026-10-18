@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/thiagodefreitas/faztudo/internal/cron"
 )
 
 type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir, TLSDir string }
@@ -62,6 +63,19 @@ type Runs struct {
 	SummaryLane        string `toml:"summary_lane"`
 	SummaryEvery       int    `toml:"summary_every"`
 	ContextLimitTokens int    `toml:"context_limit_tokens"`
+	// RequestMaxRuns and RequestMaxPremium cap the runs one request may start
+	// by delegation, in total and on premium lanes. Going over asks the Director.
+	RequestMaxRuns    int `toml:"request_max_runs"`
+	RequestMaxPremium int `toml:"request_max_premium_runs"`
+}
+
+// Routines holds the settings that apply to every routine.
+type Routines struct {
+	// Timezone is an IANA name such as "Europe/Berlin". Empty means the
+	// machine's local zone.
+	Timezone string `toml:"timezone"`
+	// MaxPerDay caps the runs routines start in one local day.
+	MaxPerDay int `toml:"max_per_day"`
 }
 type Lane struct {
 	ID                  string  `toml:"id"`
@@ -89,6 +103,25 @@ type Persona struct {
 	Lanes       []string `toml:"lanes"`
 	// Instructions are standing instructions added to every run prompt.
 	Instructions string `toml:"instructions"`
+	// ChiefOfStaff makes this persona the one that receives messages nobody
+	// is addressed in, in the channels named in Channels.
+	ChiefOfStaff bool     `toml:"chief_of_staff"`
+	Channels     []string `toml:"channels"`
+}
+
+// Routine is a prompt that runs on a schedule or when a human posts in the
+// channel. Exactly one of Schedule (a cron expression) and Trigger ("message")
+// is set. Template "debrief" adds facts about the last day to the prompt.
+type Routine struct {
+	Handle   string `toml:"handle"`
+	Name     string `toml:"name"`
+	Prompt   string `toml:"prompt"`
+	Persona  string `toml:"persona"`
+	Channel  string `toml:"channel"`
+	Schedule string `toml:"schedule"`
+	Trigger  string `toml:"trigger"`
+	Template string `toml:"template"`
+	Enabled  *bool  `toml:"enabled"`
 }
 
 // Department is a team of personas with a lead. Lead and Members are persona
@@ -117,19 +150,22 @@ type LaneConfig struct {
 	Persona    []Persona    `toml:"persona"`
 	Department []Department `toml:"department"`
 	Project    []Project    `toml:"project"`
+	Routine    []Routine    `toml:"routine"`
 }
 type Config struct {
-	Server Server     `toml:"server"`
-	LAN    LAN        `toml:"lan"`
-	Runs   Runs       `toml:"runs"`
-	Lanes  LaneConfig `toml:"-"`
+	Server   Server     `toml:"server"`
+	LAN      LAN        `toml:"lan"`
+	Runs     Runs       `toml:"runs"`
+	Routines Routines   `toml:"routines"`
+	Lanes    LaneConfig `toml:"-"`
 }
 
 func Defaults() Config {
 	return Config{
-		Server: Server{Listen: "127.0.0.1:7457", OpenBrowser: true},
-		LAN:    LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
-		Runs:   Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "off", SandboxMemoryMax: "4G", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000},
+		Server:   Server{Listen: "127.0.0.1:7457", OpenBrowser: true},
+		LAN:      LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
+		Runs:     Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "off", SandboxMemoryMax: "4G", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
+		Routines: Routines{MaxPerDay: 20},
 	}
 }
 func Load(p Paths) (Config, error) {
@@ -176,6 +212,20 @@ func (c Config) Validate() error {
 	}
 	if c.Runs.SandboxTasksMax < 1 {
 		return errors.New("runs.sandbox_tasks_max: must be positive")
+	}
+	if c.Runs.RequestMaxRuns < 1 {
+		return errors.New("runs.request_max_runs: must be positive")
+	}
+	if c.Runs.RequestMaxPremium < 0 {
+		return errors.New("runs.request_max_premium_runs: must not be negative")
+	}
+	if c.Routines.MaxPerDay < 1 {
+		return errors.New("routines.max_per_day: must be positive")
+	}
+	if c.Routines.Timezone != "" {
+		if _, err := time.LoadLocation(c.Routines.Timezone); err != nil {
+			return fmt.Errorf("routines.timezone: %w", err)
+		}
 	}
 	seen := map[string]bool{}
 	for i, l := range c.Lanes.Lane {
@@ -275,6 +325,64 @@ func (c Config) Validate() error {
 				return fmt.Errorf("project[%d]: channel %s is already listed under project %s and project %s; a channel belongs to one project", i, ch, other, p.Handle)
 			}
 			channelOwner[key] = p.Handle
+		}
+	}
+	return c.validateRoutines(agents)
+}
+
+// validateRoutines checks the Chief of Staff and the routines. agents are the
+// handles a routine may run as.
+func (c Config) validateRoutines(agents map[string]bool) error {
+	chiefs := 0
+	for i, p := range c.Lanes.Persona {
+		if !p.ChiefOfStaff {
+			if len(p.Channels) > 0 {
+				return fmt.Errorf("persona[%d].channels: only the chief_of_staff persona takes channels", i)
+			}
+			continue
+		}
+		if chiefs++; chiefs > 1 {
+			return fmt.Errorf("persona[%d].chief_of_staff: only one persona can be the chief of staff", i)
+		}
+		for j, ch := range p.Channels {
+			if strings.TrimSpace(ch) == "" {
+				return fmt.Errorf("persona[%d].channels[%d]: must not be empty", i, j)
+			}
+		}
+	}
+	routines := map[string]bool{}
+	for i, r := range c.Lanes.Routine {
+		if !handleName.MatchString(r.Handle) {
+			return fmt.Errorf("routine[%d].handle: use letters, digits, - and _", i)
+		}
+		if routines[strings.ToLower(r.Handle)] {
+			return fmt.Errorf("routine[%d].handle: duplicate", i)
+		}
+		routines[strings.ToLower(r.Handle)] = true
+		if !agents[r.Persona] {
+			return fmt.Errorf("routine[%d].persona: unknown agent %q", i, r.Persona)
+		}
+		if strings.TrimSpace(r.Channel) == "" {
+			return fmt.Errorf("routine[%d].channel: required", i)
+		}
+		if strings.TrimSpace(r.Prompt) == "" && r.Template == "" {
+			return fmt.Errorf("routine[%d].prompt: required unless a template is set", i)
+		}
+		if r.Template != "" && r.Template != "debrief" {
+			return fmt.Errorf("routine[%d].template: unknown template %q (use debrief)", i, r.Template)
+		}
+		switch {
+		case r.Schedule != "" && r.Trigger != "":
+			return fmt.Errorf("routine[%d]: set schedule or trigger, not both", i)
+		case r.Schedule != "":
+			if _, err := cron.Parse(r.Schedule); err != nil {
+				return fmt.Errorf("routine[%d].schedule: %w", i, err)
+			}
+		case r.Trigger == "message":
+		case r.Trigger != "":
+			return fmt.Errorf("routine[%d].trigger: unknown trigger %q (use message)", i, r.Trigger)
+		default:
+			return fmt.Errorf("routine[%d]: set a schedule or a trigger", i)
 		}
 	}
 	return nil

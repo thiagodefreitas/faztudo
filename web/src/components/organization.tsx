@@ -82,6 +82,7 @@ export function OrganizationPage() {
   const all = members.data ?? []
   const director = all.find((member) => member.id === (org.data?.director_id ?? me.data?.id))
   const agents = all.filter((member) => member.kind === "agent")
+  const chiefs = agents.filter((member) => member.agent?.chief_of_staff)
   const byHandle = (handle: string) => agents.find((member) => sameHandle(member.handle, handle))
   const deskOf = (member: Member | undefined) =>
     member ? deriveMemberDesk({ member, runs: runs.data ?? [], approvals: approvals.data ?? [], lanes: lanes.data ?? [], now }) : undefined
@@ -109,6 +110,9 @@ export function OrganizationPage() {
         <p className="font-mono text-[12px] text-muted">
           {departments.length} departments, {projects.length} projects
         </p>
+        <Link to="/routines" className="ml-auto min-h-10 py-2 text-[13px] text-accent hover:underline md:min-h-0 md:py-0">
+          Routines
+        </Link>
       </header>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3">
         {error && (
@@ -127,6 +131,20 @@ export function OrganizationPage() {
                   <p className="text-[14px] font-medium">{director.display_name}</p>
                   <p className="text-[12px] text-muted">Director. Assigns teams to projects and answers judgment calls.</p>
                 </div>
+              </div>
+            )}
+
+            {chiefs.length > 0 && (
+              <div data-testid="chief-of-staff">
+                <h2 className="pb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Chief of Staff</h2>
+                <p className="pb-1 text-[12px] text-muted">
+                  Gets messages that are not addressed to anyone, in channels that opted in, and hands them to the right agent in a thread.
+                </p>
+                <ul className="divide-y divide-line">
+                  {chiefs.map((chief) => (
+                    <AgentRow key={chief.id} handle={chief.handle} member={chief} desk={deskOf(chief)} badge="Chief of Staff" />
+                  ))}
+                </ul>
               </div>
             )}
 

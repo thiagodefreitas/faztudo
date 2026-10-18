@@ -1,0 +1,17 @@
+# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.
+# See docs/configuration.md for lanes, personas, departments, projects and
+# routines, or start from 'faztudo init --template solo' or '--template team'.
+#
+# [[lane]]
+# id = "codex/default"
+# cli = "codex"
+# cost_class = "standard"
+# capacity = 1
+# conserve_at = 80
+# sandbox_network = true
+#
+# [[persona]]
+# handle = "coder"
+# display_name = "Coder"
+# lanes = ["codex/default"]
+# mode = "write"
