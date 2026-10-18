@@ -325,6 +325,21 @@ export interface CharacterFrameSample {
   leftHandOffsetY: number
   rightHandOffsetY: number
   dozing: boolean
+  breath: number
+}
+
+// One short look to the side per 12s cycle, outside the doze window (8.5-11.2).
+function idleLookYaw(phase: number): number {
+  const cycle = ((phase % 12) + 12) % 12
+  if (cycle < 3 || cycle > 4.4) return 0
+  const t = (cycle - 3) / 1.4
+  const envelope = Math.sin(Math.PI * t)
+  const dir = Math.floor(phase / 12) % 2 === 0 ? 1 : -1
+  return dir * envelope * 0.4
+}
+
+function idleBreath(phase: number): number {
+  return Math.sin(phase * 1.6) * 0.02
 }
 
 export function sampleCharacterFrame(pose: CharacterPose, elapsedSec: number, seed = 0): CharacterFrameSample {
@@ -336,6 +351,7 @@ export function sampleCharacterFrame(pose: CharacterPose, elapsedSec: number, se
       leftHandOffsetY: 0,
       rightHandOffsetY: 0,
       dozing: false,
+      breath: 0,
     }
   }
 
@@ -348,6 +364,7 @@ export function sampleCharacterFrame(pose: CharacterPose, elapsedSec: number, se
       leftHandOffsetY: Math.sin(phase * 11) * 0.025,
       rightHandOffsetY: Math.cos(phase * 11) * 0.025,
       dozing: false,
+      breath: 0,
     }
   }
 
@@ -359,6 +376,7 @@ export function sampleCharacterFrame(pose: CharacterPose, elapsedSec: number, se
       leftHandOffsetY: 0,
       rightHandOffsetY: Math.sin(phase * 3.2) * 0.02,
       dozing: false,
+      breath: 0,
     }
   }
 
@@ -370,6 +388,7 @@ export function sampleCharacterFrame(pose: CharacterPose, elapsedSec: number, se
       leftHandOffsetY: Math.sin(phase * 1.8) * 0.02,
       rightHandOffsetY: Math.sin(phase * 1.8) * 0.02,
       dozing: false,
+      breath: 0,
     }
   }
 
@@ -384,16 +403,18 @@ export function sampleCharacterFrame(pose: CharacterPose, elapsedSec: number, se
       leftHandOffsetY: 0,
       rightHandOffsetY: 0,
       dozing: true,
+      breath: idleBreath(phase),
     }
   }
 
   return {
     torsoLean: pose.torsoLean,
     headPitch: pose.headPitch,
-    headYaw: Math.sin(phase * 0.9) * 0.22,
+    headYaw: idleLookYaw(phase),
     leftHandOffsetY: 0,
     rightHandOffsetY: 0,
     dozing: false,
+    breath: idleBreath(phase),
   }
 }
 

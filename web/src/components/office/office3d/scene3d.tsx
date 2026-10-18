@@ -1,9 +1,8 @@
 import * as Dialog from "@radix-ui/react-dialog"
-import { Billboard, Edges, Html, OrbitControls } from "@react-three/drei"
+import { Billboard, Edges, Html } from "@react-three/drei"
 import { Canvas } from "@react-three/fiber"
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
-import type { OrbitControls as OrbitControlsImpl } from "three-stdlib"
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { api } from "../../../api/client"
 import type { ThemeChoice } from "../../../lib/theme"
 import { onStreamEvent } from "../../../state/bus"
@@ -29,9 +28,21 @@ import {
   CharacterSeatGroup,
   InstancedDeskFurniture,
   LaneMeterStrip3D,
+  seatWorldCoords,
   TaskBoard3D,
   WalkingHandoffActor3D,
 } from "./character-mesh"
+import { CodeScreenDriver } from "./code-screen"
+import { SCALE_3D, toWorld } from "./coords"
+import { cycleDeskIndex, isTypingTarget, mapOfficeKey } from "./input"
+import {
+  activeMentionIds,
+  MENTION_PULSE_MS,
+  mentionRecordsFromEvent,
+  mentionRecordsFromEvents,
+  type MentionRecord,
+} from "./life"
+import { floorLabelAnchor, type NameLabelPlacement } from "./labels"
 import {
   deriveCharacterIdentity,
   deriveCharacterPose,
@@ -42,12 +53,20 @@ import {
   type TaskBoardNote,
   type TimeOfDayLighting,
 } from "./poses"
+import { CameraRig, NameLabelDriver } from "./view-rig"
+import {
+  defaultCameraPose,
+  deskCameraPose,
+  openingCameraPose,
+  type CameraPose,
+  type OrbitDelta,
+} from "./camera"
 
 export * from "./animations"
 export * from "./poses"
-
-// Convert 2D SVG layout units (1200 wide) into compact 3D world meters.
-export const SCALE_3D = 0.02
+export { SCALE_3D, toWorld } from "./coords"
+export { defaultCameraPose } from "./camera"
+export type { CameraPose } from "./camera"
 
 export interface ScenePalette {
   canvas: string
@@ -107,24 +126,6 @@ export const SCENE_PALETTES: Record<ThemeChoice, ScenePalette> = {
   },
 }
 
-export interface CameraPose {
-  position: [number, number, number]
-  target: [number, number, number]
-}
-
-// Computes a smooth starting camera position that frames the entire room.
-export function defaultCameraPose(roomWidth: number, roomHeight: number): CameraPose {
-  const floorW = roomWidth * SCALE_3D
-  const floorD = roomHeight * SCALE_3D
-  const span = Math.max(floorW * 0.68, floorD * 1.05, 10)
-  const y = Math.round((span * 0.62 + 1.8) * 100) / 100
-  const z = Math.round((span * 0.78 + 2.4) * 100) / 100
-  return {
-    position: [0, y, z],
-    target: [0, 0.2, 0.3],
-  }
-}
-
 export function isWebGLAvailable(): boolean {
   if (typeof window === "undefined" || typeof document === "undefined") return false
   if (typeof window.WebGLRenderingContext === "undefined") return false
@@ -137,12 +138,14 @@ export function isWebGLAvailable(): boolean {
   }
 }
 
-export function toWorld(rect: Rect, roomWidth: number, roomHeight: number): { x: number; z: number; w: number; d: number } {
-  const w = rect.w * SCALE_3D
-  const d = rect.h * SCALE_3D
-  const x = (rect.x + rect.w / 2 - roomWidth / 2) * SCALE_3D
-  const z = (rect.y + rect.h / 2 - roomHeight / 2) * SCALE_3D
-  return { x, z, w, d }
+function useDocumentVisible(): boolean {
+  const [visible, setVisible] = useState(() => typeof document === "undefined" || !document.hidden)
+  useEffect(() => {
+    const onChange = () => setVisible(!document.hidden)
+    document.addEventListener("visibilitychange", onChange)
+    return () => document.removeEventListener("visibilitychange", onChange)
+  }, [])
+  return visible
 }
 
 function RoomWorld({
@@ -160,9 +163,15 @@ function RoomWorld({
   mergesByMember,
   now,
   selectedId,
+  focusedId,
+  mentionIds,
   reducedMotion,
-  cameraPose,
-  resetSignal,
+  overviewPose,
+  destinationPose,
+  moveToken,
+  orbitNonce,
+  orbitDeltaRef,
+  onCameraMovingChange,
   onSelect,
   onOpenApproval,
 }: {
@@ -180,9 +189,15 @@ function RoomWorld({
   mergesByMember: ReadonlyMap<string, MergeAnimation>
   now: number
   selectedId: string | null
+  focusedId: string | null
+  mentionIds: ReadonlySet<string>
   reducedMotion: boolean
-  cameraPose: CameraPose
-  resetSignal: number
+  overviewPose: CameraPose
+  destinationPose: CameraPose
+  moveToken: number
+  orbitNonce: number
+  orbitDeltaRef: RefObject<OrbitDelta>
+  onCameraMovingChange: (moving: boolean) => void
   onSelect: (desk: DeskInfo) => void
   onOpenApproval?: ((desk: DeskInfo) => void) | undefined
 }) {
@@ -192,7 +207,7 @@ function RoomWorld({
   const wallT = 0.22
   const gridSize = Math.ceil(Math.max(floorW, floorD))
   const gridDivisions = Math.max(12, Math.round(gridSize / 0.8))
-  const controlsRef = useRef<OrbitControlsImpl | null>(null)
+  const placementsRef = useRef(new Map<string, NameLabelPlacement>())
 
   const seatsByMember = useMemo(() => {
     const map = new Map<string, Seat>()
@@ -210,14 +225,19 @@ function RoomWorld({
     return ids
   }, [handoffs])
 
-  useEffect(() => {
-    if (resetSignal === 0) return
-    const controls = controlsRef.current
-    if (!controls) return
-    controls.object.position.set(...cameraPose.position)
-    controls.target.set(...cameraPose.target)
-    controls.update()
-  }, [resetSignal, cameraPose])
+  const labelAnchors = useMemo(
+    () =>
+      seats.map((seat) => {
+        const coords = seatWorldCoords(seat, width, height)
+        return {
+          id: seat.desk.member.id,
+          x: coords.x,
+          y: 1.38 * coords.scale,
+          z: coords.z + coords.chairOffsetZ,
+        }
+      }),
+    [seats, width, height],
+  )
 
   return (
     <group>
@@ -274,9 +294,10 @@ function RoomWorld({
       {/* Side wall lane meter strip with one bar per lane in its health color */}
       <LaneMeterStrip3D bars={laneBars} floorW={floorW} wallT={wallT} palette={palette} />
 
-      {/* Zone mats, pod mats, and faint department/pod floor labels */}
+      {/* Zone mats, pod mats, and department/pod labels lifted above the desks */}
       {zones.map((zone) => {
         const zWorld = toWorld(zone, width, height)
+        const zoneLabel = floorLabelAnchor(zWorld, "zone")
         return (
           <group key={zone.id}>
             <mesh position={[zWorld.x, 0.005, zWorld.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -285,23 +306,30 @@ function RoomWorld({
             </mesh>
             {zone.pods.map((pod) => {
               const pWorld = toWorld(pod, width, height)
+              const podLabel = floorLabelAnchor(pWorld, "pod")
               return (
-                <mesh
-                  key={`${pod.x}-${pod.y}`}
-                  position={[pWorld.x, 0.009, pWorld.z]}
-                  rotation={[-Math.PI / 2, 0, 0]}
-                  receiveShadow
-                >
-                  <planeGeometry args={[pWorld.w, pWorld.d]} />
-                  <meshStandardMaterial color={palette.sidebar} roughness={0.9} />
-                </mesh>
+                <group key={`${pod.x}-${pod.y}`}>
+                  <mesh
+                    position={[pWorld.x, 0.009, pWorld.z]}
+                    rotation={[-Math.PI / 2, 0, 0]}
+                    receiveShadow
+                  >
+                    <planeGeometry args={[pWorld.w, pWorld.d]} />
+                    <meshStandardMaterial color={palette.sidebar} roughness={0.9} />
+                  </mesh>
+                  {/* Pod marker sits above the desk line so the mat stays readable from the overview. */}
+                  <mesh position={[podLabel.x, podLabel.y, podLabel.z]}>
+                    <sphereGeometry args={[0.045, 10, 10]} />
+                    <meshBasicMaterial color={palette.accent} transparent opacity={0.85} />
+                  </mesh>
+                </group>
               )
             })}
-            <Billboard position={[zWorld.x - zWorld.w / 2 + 1.1, 0.06, zWorld.z - zWorld.d / 2 + 0.32]}>
+            <Billboard position={[zoneLabel.x, zoneLabel.y, zoneLabel.z]}>
               <Html center transform={false} zIndexRange={[5, 0]}>
                 <span
                   data-testid={`zone3d-label-${zone.id}`}
-                  className="pointer-events-none select-none whitespace-nowrap rounded px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-faint/85"
+                  className="pointer-events-none select-none whitespace-nowrap rounded bg-canvas/80 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-faint/85"
                 >
                   {zone.label}
                 </span>
@@ -314,15 +342,16 @@ function RoomWorld({
       {/* Director rug */}
       {rug && (() => {
         const rWorld = toWorld(rug, width, height)
+        const rugLabel = floorLabelAnchor(rWorld, "director")
         return (
           <group>
             <mesh position={[rWorld.x, 0.008, rWorld.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
               <planeGeometry args={[rWorld.w, rWorld.d]} />
               <meshStandardMaterial color={palette.accentSoft} roughness={0.88} />
             </mesh>
-            <Billboard position={[rWorld.x - rWorld.w / 2 + 0.9, 0.06, rWorld.z - rWorld.d / 2 + 0.28]}>
+            <Billboard position={[rugLabel.x, rugLabel.y, rugLabel.z]}>
               <Html center transform={false} zIndexRange={[5, 0]}>
-                <span className="pointer-events-none select-none whitespace-nowrap font-sans text-[10px] font-semibold uppercase tracking-wider text-accent/85">
+                <span className="pointer-events-none select-none whitespace-nowrap rounded bg-canvas/80 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-accent/85">
                   Director
                 </span>
               </Html>
@@ -344,6 +373,9 @@ function RoomWorld({
           palette={palette}
           theme={theme}
           selected={selectedId === seat.desk.member.id}
+          focused={focusedId === seat.desk.member.id}
+          mentioned={mentionIds.has(seat.desk.member.id)}
+          placementsRef={placementsRef}
           reducedMotion={reducedMotion}
           walkingOut={walkingIds.has(seat.desk.member.id)}
           mergeAnim={mergesByMember.get(seat.desk.member.id) ?? null}
@@ -373,17 +405,15 @@ function RoomWorld({
         )
       })}
 
-      <OrbitControls
-        ref={controlsRef}
-        target={cameraPose.target}
-        enablePan
-        enableZoom
-        enableRotate
-        enableDamping={!reducedMotion}
-        minPolarAngle={Math.PI / 7}
-        maxPolarAngle={Math.PI / 2.25}
-        minDistance={5}
-        maxDistance={28}
+      <NameLabelDriver anchors={labelAnchors} placementsRef={placementsRef} />
+      <CameraRig
+        overview={overviewPose}
+        destination={destinationPose}
+        moveToken={moveToken}
+        orbitNonce={orbitNonce}
+        reducedMotion={reducedMotion}
+        orbitDeltaRef={orbitDeltaRef}
+        onMovingChange={onCameraMovingChange}
       />
     </group>
   )
@@ -423,8 +453,15 @@ export function Office3DScene({
   onMessage,
 }: Office3DSceneProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
-  const [resetSignal, setResetSignal] = useState(0)
+  const [focusedId, setFocusedId] = useState<string | null>(initialSelectedId ?? null)
+  const [cameraTargetId, setCameraTargetId] = useState<string | null>(initialSelectedId ?? null)
+  const [moveToken, setMoveToken] = useState(0)
+  const [cameraMoving, setCameraMoving] = useState(!reducedMotion)
+  const [orbitNonce, setOrbitNonce] = useState(0)
   const [streamQueue, setStreamQueue] = useState<OfficeAnimationQueue>(() => createAnimationQueue())
+  const [liveMentions, setLiveMentions] = useState<MentionRecord[]>([])
+  const orbitDeltaRef = useRef<OrbitDelta>({ yaw: 0, pitch: 0, radiusDelta: 0 })
+  const pageVisible = useDocumentVisible()
 
   const members = useMemo(() => desks.map((d) => d.member), [desks])
   const runs = useMemo(
@@ -456,7 +493,13 @@ export function Office3DScene({
   useEffect(() => {
     return onStreamEvent((event) => {
       const ctx = latestContextRef.current
+      const stamped = mentionRecordsFromEvent(event, ctx.members, Date.now())
       setStreamQueue((prev) => enqueueOfficeEvent(prev, event, { ...ctx, now: Date.now() }))
+      if (stamped.length === 0) return
+      setLiveMentions((prev) => {
+        const cutoff = Date.now() - MENTION_PULSE_MS
+        return [...prev.filter((item) => item.at > cutoff), ...stamped].slice(-80)
+      })
     })
   }, [])
 
@@ -487,39 +530,111 @@ export function Office3DScene({
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
   const webglAvailable = useMemo(() => webglProp ?? isWebGLAvailable(), [webglProp])
   const room = useMemo(() => layoutRoom(desks, { departments }), [desks, departments])
-  const cameraPose = useMemo(() => defaultCameraPose(room.width, room.height), [room.width, room.height])
+  const overviewPose = useMemo(() => defaultCameraPose(room.width, room.height), [room.width, room.height])
+  const destinationPose = useMemo(() => {
+    if (!cameraTargetId) return overviewPose
+    const seat = room.seats.find((item) => item.desk.member.id === cameraTargetId)
+    if (!seat) return overviewPose
+    const coords = seatWorldCoords(seat, room.width, room.height)
+    return deskCameraPose({ x: coords.x, z: coords.z, facing: seat.facing, scale: coords.scale })
+  }, [cameraTargetId, overviewPose, room])
+  const openingPose = useMemo(
+    () => openingCameraPose(overviewPose, reducedMotion),
+    [overviewPose, reducedMotion],
+  )
   const palette = SCENE_PALETTES[theme]
   const lighting = useMemo(() => deriveTimeOfDayLighting(now, theme), [now, theme])
   const taskNotes = useMemo(() => deriveTaskBoardNotes(desks), [desks])
   const laneBars = useMemo(() => deriveLaneMeterBars(lanes, theme), [lanes, theme])
+  const propMentions = useMemo(
+    () => (eventsProp ? mentionRecordsFromEvents(eventsProp, members) : []),
+    [eventsProp, members],
+  )
+  const mentionIds = useMemo(() => {
+    const ids = new Set(activeMentionIds(propMentions, now))
+    for (const id of activeMentionIds(liveMentions, now)) ids.add(id)
+    return ids
+  }, [propMentions, liveMentions, now])
 
   const hasAnimatedCharacters = desks.some((desk) => deriveCharacterPose(desk, { reducedMotion }).animated)
-  const frameloop =
-    reducedMotion || (!hasAnimatedCharacters && activeQueue.items.length === 0) ? "demand" : "always"
+  const hasWorkingScreens = desks.some((desk) => deriveCharacterPose(desk, { reducedMotion }).monitorMode === "glow")
+  const hasLife =
+    !reducedMotion &&
+    (hasAnimatedCharacters || activeQueue.items.length > 0 || mentionIds.size > 0 || cameraMoving || hasWorkingScreens)
+  const frameloop = !pageVisible ? "never" : hasLife ? "always" : "demand"
+
+  const focusDesk = (memberId: string) => {
+    setFocusedId(memberId)
+    setCameraTargetId(memberId)
+    setMoveToken((token) => token + 1)
+  }
+
+  const showOverview = () => {
+    setFocusedId(null)
+    setCameraTargetId(null)
+    setMoveToken((token) => token + 1)
+  }
 
   useEffect(() => {
-    if (!selectedDesk) return
+    if (!webglAvailable || desks.length === 0) {
+      if (!selectedDesk) return
+      function onEscape(event: KeyboardEvent) {
+        if (event.key !== "Escape") return
+        if (isTypingTarget(event.target)) return
+        setSelectedId(null)
+      }
+      window.addEventListener("keydown", onEscape)
+      return () => window.removeEventListener("keydown", onEscape)
+    }
+
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return
-      const target = event.target
-      if (target instanceof HTMLElement && target.closest("input, textarea, select")) return
-      setSelectedId(null)
+      if (isTypingTarget(event.target)) return
+      const inPanel = event.target instanceof HTMLElement && Boolean(event.target.closest("aside"))
+      if (inPanel && event.key !== "Escape") return
+      const action = mapOfficeKey(event)
+      if (!action) return
+      if (action.type === "reset") {
+        setSelectedId(null)
+        showOverview()
+        return
+      }
+      if (inPanel) return
+      if (action.type === "orbit") {
+        event.preventDefault()
+        orbitDeltaRef.current.yaw += action.yaw
+        orbitDeltaRef.current.pitch += action.pitch
+        setOrbitNonce((nonce) => nonce + 1)
+        return
+      }
+      if (action.type === "zoom") {
+        event.preventDefault()
+        orbitDeltaRef.current.radiusDelta += action.radiusDelta
+        setOrbitNonce((nonce) => nonce + 1)
+        return
+      }
+      event.preventDefault()
+      const index = room.seats.findIndex((seat) => seat.desk.member.id === focusedId)
+      const next = cycleDeskIndex(room.seats.length, index, action.delta)
+      const seat = room.seats[next]
+      if (seat) focusDesk(seat.desk.member.id)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [selectedDesk])
+  }, [webglAvailable, desks.length, selectedDesk, room.seats, focusedId])
 
   function handleSelect(desk: DeskInfo) {
-    setSelectedId((prev) => (prev === desk.member.id ? prev : desk.member.id))
+    setSelectedId(desk.member.id)
+    focusDesk(desk.member.id)
   }
 
   function handleApproval(desk: DeskInfo) {
     setSelectedId(desk.member.id)
+    focusDesk(desk.member.id)
     onOpenApproval?.(desk)
   }
 
   function handleResetView() {
-    setResetSignal((count) => count + 1)
+    showOverview()
   }
 
   return (
@@ -539,7 +654,7 @@ export function Office3DScene({
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted">Drag to orbit, scroll to zoom, click a desk for details</span>
+            <span className="text-[11px] text-muted">Arrows orbit, +/- zoom, Tab cycles desks, click a desk for details</span>
             <button
               type="button"
               data-testid="office3d-reset-view"
@@ -697,33 +812,44 @@ export function Office3DScene({
           >
             <Canvas
               shadows="soft"
-              dpr={[1, 1.5]}
+              dpr={[1, 2]}
               frameloop={frameloop}
-              camera={{ position: cameraPose.position, fov: 38, near: 0.5, far: 80 }}
-              gl={{ antialias: true, powerPreference: "low-power" }}
+              camera={{ position: openingPose.position, fov: 38, near: 0.5, far: 120 }}
+              gl={{ antialias: true, powerPreference: "low-power", stencil: false }}
+              onCreated={({ gl }) => {
+                gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+              }}
             >
               <color attach="background" args={[palette.canvas]} />
-              <RoomWorld
-                width={room.width}
-                height={room.height}
-                zones={room.zones}
-                rug={room.rug}
-                seats={room.seats}
-                palette={palette}
-                theme={theme}
-                lighting={lighting}
-                taskNotes={taskNotes}
-                laneBars={laneBars}
-                handoffs={handoffs}
-                mergesByMember={mergesByMember}
-                now={now}
-                selectedId={selectedDesk?.member.id ?? null}
-                reducedMotion={reducedMotion}
-                cameraPose={cameraPose}
-                resetSignal={resetSignal}
-                onSelect={handleSelect}
-                onOpenApproval={handleApproval}
-              />
+              <CodeScreenDriver scrolling={hasWorkingScreens && !reducedMotion && pageVisible}>
+                <RoomWorld
+                  width={room.width}
+                  height={room.height}
+                  zones={room.zones}
+                  rug={room.rug}
+                  seats={room.seats}
+                  palette={palette}
+                  theme={theme}
+                  lighting={lighting}
+                  taskNotes={taskNotes}
+                  laneBars={laneBars}
+                  handoffs={handoffs}
+                  mergesByMember={mergesByMember}
+                  now={now}
+                  selectedId={selectedDesk?.member.id ?? null}
+                  focusedId={focusedId}
+                  mentionIds={mentionIds}
+                  reducedMotion={reducedMotion}
+                  overviewPose={overviewPose}
+                  destinationPose={destinationPose}
+                  moveToken={moveToken}
+                  orbitNonce={orbitNonce}
+                  orbitDeltaRef={orbitDeltaRef}
+                  onCameraMovingChange={setCameraMoving}
+                  onSelect={handleSelect}
+                  onOpenApproval={handleApproval}
+                />
+              </CodeScreenDriver>
             </Canvas>
             <Legend />
           </div>

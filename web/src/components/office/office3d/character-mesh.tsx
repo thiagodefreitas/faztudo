@@ -1,9 +1,8 @@
 import { Billboard, Edges, Html } from "@react-three/drei"
 import { useFrame } from "@react-three/fiber"
-import { useLayoutEffect, useMemo, useRef } from "react"
-import { type Group, type InstancedMesh, type MeshStandardMaterial, Object3D } from "three"
+import { useContext, useLayoutEffect, useMemo, useRef, type RefObject } from "react"
+import { type Group, type InstancedMesh, type Mesh, type MeshBasicMaterial, type MeshStandardMaterial, Object3D } from "three"
 import type { Seat } from "../layout"
-import { DESK_H, DESK_W } from "../layout"
 import type { DeskInfo } from "../state"
 import {
   type HandoffAnimation,
@@ -11,6 +10,10 @@ import {
   sampleHandoffWalk,
   sampleMergePop,
 } from "./animations"
+import { CodeScreenContext } from "./code-screen"
+import { monitorScreenYaw, seatWorldCoords } from "./coords"
+import { approvalCardOffsetY } from "./life"
+import type { NameLabelPlacement } from "./labels"
 import {
   type CharacterIdentity,
   type CharacterPose,
@@ -22,7 +25,8 @@ import {
   type TaskBoardNote,
 } from "./poses"
 import type { ScenePalette } from "./scene3d"
-import { toWorld } from "./scene3d"
+
+export { seatWorldCoords } from "./coords"
 
 function seedFromId(id: string): number {
   let hash = 0
@@ -30,26 +34,6 @@ function seedFromId(id: string): number {
     hash = (hash * 31 + id.charCodeAt(i)) >>> 0
   }
   return hash
-}
-
-export function seatWorldCoords(seat: Seat, roomWidth: number, roomHeight: number) {
-  const { scale, facing = "down" } = seat
-  const world = toWorld(
-    { x: seat.x, y: seat.y, w: DESK_W * scale, h: DESK_H * scale },
-    roomWidth,
-    roomHeight,
-  )
-  const zSign = facing === "up" ? -1 : 1
-  const deskOffsetZ = 0.16 * scale * zSign
-  const chairOffsetZ = -0.44 * scale * zSign
-  return {
-    x: world.x,
-    z: world.z,
-    scale,
-    zSign,
-    deskOffsetZ,
-    chairOffsetZ,
-  }
 }
 
 // Instanced static geometry for all desks, monitors, and office chairs so 15+
@@ -549,6 +533,32 @@ function ArmMesh({
   )
 }
 
+function FocusRing({ scale, color }: { scale: number; color: string }) {
+  return (
+    <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.86 * scale, 1.02 * scale, 40]} />
+      <meshBasicMaterial color={color} transparent opacity={0.92} depthWrite={false} />
+    </mesh>
+  )
+}
+
+function MentionPulseRing({ color }: { color: string }) {
+  const meshRef = useRef<Mesh>(null)
+  const matRef = useRef<MeshBasicMaterial>(null)
+  useFrame(({ clock }) => {
+    const t = (clock.elapsedTime % 1.8) / 1.8
+    const spread = 1 + t * 0.5
+    if (meshRef.current) meshRef.current.scale.setScalar(spread)
+    if (matRef.current) matRef.current.opacity = 0.38 * (1 - t)
+  })
+  return (
+    <mesh ref={meshRef} position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[0.7, 0.84, 32]} />
+      <meshBasicMaterial ref={matRef} color={color} transparent opacity={0.38} depthWrite={false} />
+    </mesh>
+  )
+}
+
 export function CharacterSeatGroup({
   seat,
   roomWidth,
@@ -556,6 +566,9 @@ export function CharacterSeatGroup({
   palette,
   theme,
   selected,
+  focused,
+  mentioned,
+  placementsRef,
   reducedMotion,
   walkingOut,
   mergeAnim,
@@ -569,6 +582,9 @@ export function CharacterSeatGroup({
   palette: ScenePalette
   theme: "light" | "dark"
   selected: boolean
+  focused: boolean
+  mentioned: boolean
+  placementsRef: RefObject<Map<string, NameLabelPlacement>>
   reducedMotion: boolean
   walkingOut: boolean
   mergeAnim: MergeAnimation | null
@@ -576,33 +592,51 @@ export function CharacterSeatGroup({
   onSelect: (desk: DeskInfo) => void
   onOpenApproval?: ((desk: DeskInfo) => void) | undefined
 }) {
-  const { desk, scale } = seat
+  const { desk, scale, facing } = seat
   const { member, palette: hue } = desk
   const identity = useMemo(() => deriveCharacterIdentity(desk, theme), [desk, theme])
   const pose = useMemo(() => deriveCharacterPose(desk, { reducedMotion }), [desk, reducedMotion])
   const seed = useMemo(() => seedFromId(member.id), [member.id])
   const label = member.display_name.trim() || member.handle
+  const codeTexture = useContext(CodeScreenContext)
 
-  const { x, z, zSign, deskOffsetZ, chairOffsetZ } = seatWorldCoords(seat, roomWidth, roomHeight)
+  const { x, z, zSign, deskOffsetZ, chairOffsetZ, facingYaw } = seatWorldCoords(seat, roomWidth, roomHeight)
   const deskW = 1.68 * scale
   const deskD = 0.9 * scale
   const deskH = 0.42 * scale
+  const cardBaseY = deskH + 0.72 * scale
 
   const torsoGroupRef = useRef<Group>(null)
   const headGroupRef = useRef<Group>(null)
   const leftArmRef = useRef<Group>(null)
   const rightArmRef = useRef<Group>(null)
   const screenMatRef = useRef<MeshStandardMaterial>(null)
+  const cardRef = useRef<Group>(null)
+  const labelRef = useRef<HTMLButtonElement>(null)
 
   useFrame(({ clock }) => {
-    if (!pose.animated || reducedMotion || !pose.seated || walkingOut) return
+    const labelEl = labelRef.current
+    const place = placementsRef.current?.get(member.id)
+    if (labelEl && place) {
+      labelEl.style.opacity = place.opacity.toFixed(3)
+      labelEl.style.transform =
+        place.offsetX === 0 && place.offsetY === 0 ? "" : `translate(${place.offsetX}px, ${place.offsetY}px)`
+    }
+    if (cardRef.current) {
+      cardRef.current.position.y = cardBaseY + approvalCardOffsetY(clock.elapsedTime, reducedMotion, seed)
+    }
+    if (!pose.animated || reducedMotion || !pose.seated || walkingOut) {
+      if (torsoGroupRef.current) torsoGroupRef.current.scale.y = 1
+      return
+    }
     const t = clock.getElapsedTime()
     const sample = sampleCharacterFrame(pose, t, seed)
     if (torsoGroupRef.current) {
-      torsoGroupRef.current.rotation.x = sample.torsoLean * zSign
+      torsoGroupRef.current.rotation.x = sample.torsoLean
+      torsoGroupRef.current.scale.y = 1 + sample.breath
     }
     if (headGroupRef.current) {
-      headGroupRef.current.rotation.x = sample.headPitch * zSign
+      headGroupRef.current.rotation.x = sample.headPitch
       headGroupRef.current.rotation.y = sample.headYaw
     }
     if (leftArmRef.current && pose.leftArm === "typing") {
@@ -611,7 +645,7 @@ export function CharacterSeatGroup({
     if (rightArmRef.current && (pose.rightArm === "typing" || pose.rightArm === "raised")) {
       rightArmRef.current.position.y = sample.rightHandOffsetY
     }
-    if (screenMatRef.current && pose.monitorMode === "glow") {
+    if (screenMatRef.current && pose.monitorMode === "glow" && !codeTexture) {
       screenMatRef.current.emissiveIntensity = 1.05 + Math.sin(t * 3.2) * 0.32
     }
   })
@@ -665,21 +699,31 @@ export function CharacterSeatGroup({
         </mesh>
       )}
 
-      {/* Hue accent strip along the desk top edge */}
-      <mesh position={[0, deskH + 0.008, deskOffsetZ - 0.34 * scale * zSign]}>
-        <boxGeometry args={[deskW * 0.82, 0.024, 0.065]} />
+      {/* Keyboard focus ring, kept visible under reduced motion */}
+      {focused && <FocusRing scale={scale} color={palette.accent} />}
+
+      {/* Soft pulse on a desk mentioned in the last minute. Off under reduced motion. */}
+      {mentioned && !reducedMotion && <MentionPulseRing color={palette.accent} />}
+
+      {/* Hue lip on the edge the sitter faces, so the desk front reads into the room for the Director */}
+      <mesh position={[0, deskH + 0.02, deskOffsetZ + 0.38 * scale * zSign]}>
+        <boxGeometry args={[deskW * 0.86, 0.03, 0.05]} />
         <meshBasicMaterial color={identity.mainColor} />
       </mesh>
 
-      {/* Monitor screen face */}
-      <mesh position={[0, deskH + 0.25 * scale, deskOffsetZ - 0.034 * scale * zSign]}>
+      {/* Monitor screen face, turned toward the sitter. Working screens share one scrolling code texture. */}
+      <mesh
+        position={[0, deskH + 0.25 * scale, deskOffsetZ - 0.034 * scale * zSign]}
+        rotation={[0, monitorScreenYaw(facing), 0]}
+      >
         <planeGeometry args={[0.58 * scale, 0.3 * scale]} />
         <meshStandardMaterial
           ref={screenMatRef}
-          color={monitorColor}
+          color={pose.monitorMode === "glow" && codeTexture ? "#d7e4ea" : monitorColor}
+          map={pose.monitorMode === "glow" ? (codeTexture ?? undefined) : undefined}
           emissive={monitorEmissive}
-          emissiveIntensity={monitorIntensity}
-          roughness={0.25}
+          emissiveIntensity={pose.monitorMode === "glow" && codeTexture ? 0.28 : monitorIntensity}
+          roughness={0.4}
         />
       </mesh>
 
@@ -750,7 +794,7 @@ export function CharacterSeatGroup({
 
       {/* Waiting for approval: floating clickable card above the desk */}
       {pose.showApprovalCard && (
-        <Billboard position={[0.42 * scale, deskH + 0.72 * scale, deskOffsetZ]}>
+        <Billboard ref={cardRef} position={[0.42 * scale, cardBaseY, deskOffsetZ]}>
           <Html center transform={false} zIndexRange={[15, 0]}>
             <button
               type="button"
@@ -804,19 +848,19 @@ export function CharacterSeatGroup({
 
       {/* Seated 3D character figure (hidden when out of quota or currently walking a handoff) */}
       {pose.seated && !walkingOut && (
-        <group position={[0, 0.34 * scale, chairOffsetZ]} scale={[scale, scale, scale]}>
-          {/* Seated thighs/legs */}
-          <mesh position={[-0.08, 0, 0.1 * zSign]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <group position={[0, 0.34 * scale, chairOffsetZ]} rotation={[0, facingYaw, 0]} scale={[scale, scale, scale]}>
+          {/* Seated thighs/legs. Local +z is the face; facingYaw turns the Director into the room. */}
+          <mesh position={[-0.08, 0, 0.1]} rotation={[Math.PI / 2, 0, 0]} castShadow>
             <capsuleGeometry args={[0.042, 0.14, 5, 8]} />
             <meshStandardMaterial color={identity.fgColor} roughness={0.65} />
           </mesh>
-          <mesh position={[0.08, 0, 0.1 * zSign]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+          <mesh position={[0.08, 0, 0.1]} rotation={[Math.PI / 2, 0, 0]} castShadow>
             <capsuleGeometry args={[0.042, 0.14, 5, 8]} />
             <meshStandardMaterial color={identity.fgColor} roughness={0.65} />
           </mesh>
 
           {/* Torso + arms + head */}
-          <group ref={torsoGroupRef} position={[0, 0.18, 0]} rotation={[pose.torsoLean * zSign, 0, 0]}>
+          <group ref={torsoGroupRef} position={[0, 0.18, 0]} rotation={[pose.torsoLean, 0, 0]}>
             <mesh castShadow receiveShadow>
               <boxGeometry args={[0.32, 0.34, 0.24]} />
               <meshStandardMaterial color={identity.mainColor} roughness={0.46} />
@@ -828,7 +872,7 @@ export function CharacterSeatGroup({
                 motif={identity.pinMotif}
                 mainColor={identity.mainColor}
                 softColor={identity.softColor}
-                zSign={zSign}
+                zSign={1}
               />
             )}
 
@@ -836,23 +880,23 @@ export function CharacterSeatGroup({
               side="left"
               armPose={pose.leftArm}
               color={identity.mainColor}
-              zSign={zSign}
+              zSign={1}
               handRef={leftArmRef}
             />
             <ArmMesh
               side="right"
               armPose={pose.rightArm}
               color={identity.mainColor}
-              zSign={zSign}
+              zSign={1}
               handRef={rightArmRef}
             />
 
             <group
               ref={headGroupRef}
               position={[0, 0.36, 0]}
-              rotation={[pose.headPitch * zSign, pose.headYaw, 0]}
+              rotation={[pose.headPitch, pose.headYaw, 0]}
             >
-              <CharacterHeadMesh identity={identity} zSign={zSign} dozing={false} />
+              <CharacterHeadMesh identity={identity} zSign={1} dozing={false} />
             </group>
           </group>
         </group>
@@ -862,11 +906,13 @@ export function CharacterSeatGroup({
       <Billboard position={[0, 1.38 * scale, chairOffsetZ]}>
         <Html center transform={false} zIndexRange={[10, 0]}>
           <button
+            ref={labelRef}
             type="button"
             data-testid={`desk3d-${member.id}`}
             data-pose={pose.pose}
             data-cli={identity.cli}
             data-role-pin={identity.rolePin ?? undefined}
+            data-focused={focused ? "true" : "false"}
             aria-label={`${label}, ${desk.stateLabel}`}
             onClick={(event) => {
               event.stopPropagation()
