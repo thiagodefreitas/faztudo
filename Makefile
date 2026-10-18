@@ -3,7 +3,7 @@ SHELL := /bin/bash
 GO ?= go
 GORELEASER ?= goreleaser
 
-.PHONY: help setup check lint lint-prose authorship secrets test licenses site build release-check web dev
+.PHONY: help setup check lint lint-prose authorship secrets test licenses site build release-check web dev desktop
 
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null)
@@ -53,6 +53,12 @@ dev: ## run the daemon and the web dev server (proxying /api) together
 build: web ## build bin/faztudo with the web app and version information
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/faztudo ./cmd/faztudo
 	@bin/faztudo version
+
+desktop: build ## build the desktop app (.deb) with bin/faztudo as the AppImage sidecar
+	mkdir -p desktop/src-tauri/binaries
+	cp bin/faztudo desktop/src-tauri/binaries/faztudo-$$(rustc -vV | sed -n 's/^host: //p')
+	npm --prefix desktop ci
+	npm --prefix desktop run build
 
 release-check: ## validate the release configuration and build a local snapshot
 	$(GORELEASER) check

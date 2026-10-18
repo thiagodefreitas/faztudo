@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The desktop app for Linux: faztudo in its own window with a tray icon,
+  as a `.deb` that needs the faztudo package and as an AppImage that carries
+  faztudo, for amd64 and arm64. Closing hides to the tray, Quit asks whether
+  to leave faztudo running, Start at login, desktop notifications, and a
+  daily update notice that never updates by itself.
+- `faztudo stop` cancels the agent runs in progress and stops the systemd
+  user unit.
+
 ## [0.1.3] - 2026-10-18
 
 ### Added

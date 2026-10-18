@@ -11,6 +11,8 @@
 #
 #   scripts/install-test.sh             build the snapshot, then test it
 #   DEB=path/to/faztudo.deb scripts/install-test.sh   test an existing package
+#   DESKTOP_DEB=path/to/faztudo-desktop.deb   also install the desktop app and
+#                                       check its files and libraries
 #   IMAGE=debian:12-slim                base image (default)
 #   GORELEASER=goreleaser               goreleaser binary
 set -euo pipefail
@@ -55,6 +57,9 @@ cleanup() {
 trap cleanup EXIT
 
 cp "$DEB" "$work/faztudo.deb"
+if [ -n "${DESKTOP_DEB:-}" ]; then
+	cp "$DESKTOP_DEB" "$work/faztudo-desktop.deb"
+fi
 cat >"$work/inside.sh" <<'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -65,6 +70,19 @@ apt-get install -y -qq --no-install-recommends ca-certificates curl /work/faztud
 test -x /usr/bin/faztudo
 test -f /usr/lib/systemd/user/faztudo.service
 grep -q '^ExecStart=/usr/bin/faztudo serve' /usr/lib/systemd/user/faztudo.service
+
+if [ -f /work/faztudo-desktop.deb ]; then
+	apt-get install -y -qq --no-install-recommends /work/faztudo-desktop.deb >/dev/null
+	test -x /usr/bin/faztudo-desktop
+	test -f /usr/share/applications/faztudo-desktop.desktop
+	grep -q '^Name=faztudo$' /usr/share/applications/faztudo-desktop.desktop
+	test -f /usr/share/icons/hicolor/128x128/apps/faztudo-desktop.png
+	if ldd /usr/bin/faztudo-desktop | grep 'not found'; then
+		echo "faztudo-desktop is missing libraries"
+		exit 1
+	fi
+	echo "desktop: installed with all libraries"
+fi
 
 useradd -m -s /bin/bash tester
 su tester -c '
@@ -86,6 +104,10 @@ code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:7457/api/v1/chann
 token=$(cat "$HOME/.local/share/faztudo/local-token")
 code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $token" http://127.0.0.1:7457/api/v1/channels)
 [ "$code" = 200 ] || { echo "expected 200 with token, got $code"; cat serve.log; exit 1; }
+faztudo connect --json | grep -q "\"code\""
+stop=$(faztudo stop --json)
+echo "$stop"
+echo "$stop" | grep -q "\"daemon\":\"left_running\"" || { echo "unexpected stop result"; exit 1; }
 kill "$pid"
 echo "install-test: all checks passed"
 '

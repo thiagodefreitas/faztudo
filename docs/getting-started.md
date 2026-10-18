@@ -101,10 +101,15 @@ faztudo serve     # starts the server and opens an authenticated local browser
 faztudo open      # opens the browser again after a restart or token rotation
 ```
 
-`faztudo connect --json` is for other programs, such as the desktop shell. It
+`faztudo connect --json` is for other programs, such as the desktop app. It
 prints `{"url","code","version"}`: the loopback address, a single-use sign-in
 code and the daemon version. The local token is never printed. Without
 `--json` it prints a one-time sign-in link for you.
+
+`faztudo stop` cancels every agent run in progress and then stops the
+systemd user unit, if that unit is the faztudo answering at the configured
+address. A faztudo you started by hand keeps running; stop it where you
+started it.
 
 ## First steps
 
@@ -138,6 +143,51 @@ journalctl --user -u faztudo -f     # logs
 Restarting the service does not kill agent runs in progress; the daemon
 reattaches to them when it starts again. Adjust `PATH` in the unit if your
 agent CLIs live elsewhere.
+
+## The desktop app (optional)
+
+The desktop app is faztudo in a window of its own, with a tray icon and a
+launcher entry. It is the same web app the browser shows, signed in with a
+one-time code, so nothing changes in how faztudo works or what it can reach.
+
+Releases from 0.1.4 have two desktop downloads per architecture:
+
+- `faztudo-desktop_X.Y.Z_linux_amd64.deb` needs the faztudo package. Install
+  both:
+
+  ```bash
+  sudo apt install ./faztudo_X.Y.Z_linux_amd64.deb ./faztudo-desktop_X.Y.Z_linux_amd64.deb
+  ```
+
+- `faztudo-desktop_X.Y.Z_linux_amd64.AppImage` runs on its own and carries a
+  copy of faztudo. Make it executable and open it. On Ubuntu 24.04 and later
+  the system only lets packaged programs create the sandbox that write runs
+  use, so with the AppImage alone agents can read and answer but write runs
+  do not start. The app says so when it opens. Install the faztudo `.deb` to
+  lift that; the AppImage then uses the installed faztudo.
+
+The checksums are in `checksums-desktop.txt`.
+
+What the app does:
+
+- It finds faztudo (the package, `~/.local/bin` or your PATH), starts it if it
+  is not running (through the systemd user unit when there is one) and signs
+  in.
+- Closing the window hides it; faztudo and its agents keep working. Open it
+  again from the tray menu or by starting the app again.
+- **Quit** in the tray menu asks whether to leave faztudo running or to stop
+  it and cancel its agent runs.
+- **Start at login** in the tray menu adds the app to your session's
+  autostart, opening in the tray.
+- Notifications for mentions, approvals and failed runs appear as desktop
+  notifications, as they do in a browser.
+- Once a day at most it asks GitHub whether a newer release exists, and if so
+  the tray menu offers the download page. It never updates itself. Set
+  `FAZTUDO_NO_UPDATE_CHECK=1` to turn the check off.
+- Links to other sites open in your browser, never in the app window.
+
+On GNOME the tray icon needs the AppIndicator extension, which Ubuntu
+includes. Without a tray, start the app again to bring its window back.
 
 ## Use faztudo from your phone
 
