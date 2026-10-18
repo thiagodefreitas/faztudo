@@ -187,7 +187,7 @@ function InboxRow({
         {direct && peer ? (
           <AgentAvatar member={peer} size={36} decorative />
         ) : (
-          <TeamIcon channel={channel} members={members} excludeId={meId} size={28} className="w-9 justify-start" />
+          <TeamIcon channel={channel} members={members} excludeId={meId} size={36} layout="cluster" />
         )}
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
