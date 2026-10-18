@@ -2,8 +2,12 @@ import { motion } from "motion/react"
 import type { KeyboardEvent, MouseEvent } from "react"
 import { identityOf } from "../../lib/avatar"
 import { cx } from "../../lib/cx"
-import { AgentAvatar } from "../agent-avatar"
-import { avatarState } from "./avatar"
+import {
+  type Character2DView,
+  derive2DCharacterView,
+  type HeadSilhouette,
+  type PinMotif,
+} from "./avatar"
 import { DESK_H, DESK_W } from "./layout"
 import type { DeskInfo, DeskState } from "./state"
 
@@ -133,9 +137,378 @@ function seedFromId(id: string): number {
   return hash
 }
 
-// One compact desk of the room, drawn in a 120x108 box at (x, y). The avatar
-// sits above the desk edge (or below when facing up, as the Director does) and
-// the name sits under the desk.
+function MotifGlyph({
+  motif,
+  cx: x,
+  cy: y,
+  color,
+  scale = 1,
+}: {
+  motif: PinMotif
+  cx: number
+  cy: number
+  color: string
+  scale?: number
+}) {
+  return (
+    <g
+      transform={`translate(${x} ${y}) scale(${scale})`}
+      stroke={color}
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    >
+      {motif === "</>" && (
+        <path d="M-2.2 -1.6 -3.8 0 -2.2 1.6M2.2 -1.6 3.8 0 2.2 1.6M0.9 -2.2 -0.9 2.2" />
+      )}
+      {motif === "magnifier" && (
+        <>
+          <circle cx="-0.7" cy="-0.7" r="2" />
+          <path d="M0.8 0.8 2.6 2.6" />
+        </>
+      )}
+      {motif === "compass" && (
+        <>
+          <path d="M0 -2.4 -2 2.4M0 -2.4 2 2.4M-1.3 1H1.3" />
+          <circle cx="0" cy="-2.5" r="0.4" fill={color} />
+        </>
+      )}
+      {motif === "quill" && (
+        <path d="M2.4 -2.4C-1.2 -2.4 -2.4 0 -2.4 2.4 0.4 2.2 2.4 0.6 2.4 -2.4ZM-2.4 2.4 -0.4 0.4" />
+      )}
+      {motif === "dot" && <circle cx="0" cy="0" r="1.3" fill={color} stroke="none" />}
+    </g>
+  )
+}
+
+function HeadEyes({
+  x1 = -3.2,
+  x2 = 3.2,
+  y = 0,
+  color,
+  closed,
+}: {
+  x1?: number
+  x2?: number
+  y?: number
+  color: string
+  closed: boolean
+}) {
+  if (closed) {
+    return (
+      <g stroke={color} strokeWidth="1.4" strokeLinecap="round">
+        <path d={`M${x1 - 1.4} ${y}H${x1 + 1.4}`} />
+        <path d={`M${x2 - 1.4} ${y}H${x2 + 1.4}`} />
+      </g>
+    )
+  }
+  return (
+    <g fill={color}>
+      <circle cx={x1} cy={y} r="1.7" />
+      <circle cx={x2} cy={y} r="1.7" />
+    </g>
+  )
+}
+
+function CharacterHead2D({
+  silhouette,
+  accent,
+  soft,
+  closed,
+}: {
+  silhouette: HeadSilhouette
+  accent: string
+  soft: string
+  closed: boolean
+}) {
+  switch (silhouette) {
+    case "round_one_antenna":
+      return (
+        <>
+          <path d="M0 -9.5V-13" stroke={accent} strokeWidth="1.8" strokeLinecap="round" />
+          <circle cx="0" cy="-14" r="2" fill={accent} />
+          <circle cx="0" cy="0" r="9.5" fill={accent} />
+          <HeadEyes y={0.5} color={soft} closed={closed} />
+        </>
+      )
+    case "square_visor":
+      return (
+        <>
+          <rect x="-10" y="-9" width="20" height="18" rx="4.5" fill={accent} />
+          <rect x="-7" y="-3" width="14" height="6.8" rx="3" fill={soft} />
+          <HeadEyes x1={-3} x2={3} y={0.4} color={accent} closed={closed} />
+        </>
+      )
+    case "round_pointed_ears":
+      return (
+        <>
+          <path
+            d="M-8.5 -3 -8 -12.5 -2.5 -7.5ZM8.5 -3 8 -12.5 2.5 -7.5Z"
+            fill={accent}
+            stroke={accent}
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <circle cx="0" cy="0.5" r="9.5" fill={accent} />
+          <HeadEyes y={0.8} color={soft} closed={closed} />
+        </>
+      )
+    case "one_big_eye":
+      return (
+        <>
+          <circle cx="0" cy="-0.5" r="9.8" fill={accent} />
+          <circle cx="0" cy="-0.5" r="4.6" fill={soft} />
+          {closed ? (
+            <path d="M-2.4 -0.5H2.4" stroke={accent} strokeWidth="1.5" strokeLinecap="round" />
+          ) : (
+            <circle cx="0" cy="-0.5" r="2.1" fill={accent} />
+          )}
+          <path d="M-2.8 6.2H2.8" stroke={soft} strokeWidth="1.4" strokeLinecap="round" />
+        </>
+      )
+    case "square_side_bolts":
+      return (
+        <>
+          <path d="M-12 -3V3M12 -3V3" stroke={accent} strokeWidth="2" strokeLinecap="round" />
+          <rect x="-9.5" y="-9" width="19" height="18" rx="2.5" fill={accent} />
+          <HeadEyes y={-1.5} color={soft} closed={closed} />
+          <path d="M-3.5 4.2H3.5" stroke={soft} strokeWidth="1.5" strokeLinecap="round" />
+        </>
+      )
+    case "wide_two_antennae":
+      return (
+        <>
+          <path d="M-5 -6.5 -7 -12M5 -6.5 7 -12" stroke={accent} strokeWidth="1.8" strokeLinecap="round" />
+          <circle cx="-7.2" cy="-12.5" r="1.8" fill={accent} />
+          <circle cx="7.2" cy="-12.5" r="1.8" fill={accent} />
+          <rect x="-11" y="-6.5" width="22" height="14" rx="6.5" fill={accent} />
+          <HeadEyes x1={-3.6} x2={3.6} y={0.5} color={soft} closed={closed} />
+        </>
+      )
+    case "human":
+      return (
+        <>
+          <circle cx="0" cy="0" r="9.2" fill={soft} stroke={accent} strokeWidth="1.6" />
+          <path d="M-9 -1C-8.5 -7 8.5 -7 9 -1C5 -4 -5 -4 -9 -1Z" fill={accent} />
+          <HeadEyes x1={-3} x2={3} y={1} color={accent} closed={closed} />
+        </>
+      )
+    case "neutral":
+    default:
+      return (
+        <>
+          <rect x="-9.5" y="-9" width="19" height="18" rx="9" fill={accent} />
+          <HeadEyes y={-1} color={soft} closed={closed} />
+          <path d="M-2.5 3.6Q0 5.2 2.5 3.6" stroke={soft} strokeWidth="1.4" strokeLinecap="round" fill="none" />
+        </>
+      )
+  }
+}
+
+function DeskChair2D({
+  faceUp,
+  empty,
+  memberId,
+  quotaNote,
+}: {
+  faceUp: boolean
+  empty: boolean
+  memberId: string
+  quotaNote: string | null
+}) {
+  const backY = faceUp ? 54 : 3
+  const seatY = faceUp ? 45 : 20
+  return (
+    <g data-testid={empty ? `empty-chair-${memberId}` : `chair-${memberId}`}>
+      {/* Chair stem & base */}
+      <rect x="57" y={faceUp ? "68" : "26"} width="6" height="6" rx="1.5" fill="var(--color-line)" />
+      {/* Chair backrest */}
+      <rect
+        x="42"
+        y={backY}
+        width="36"
+        height="18"
+        rx="6"
+        fill="var(--color-sidebar)"
+        stroke="var(--color-line)"
+        strokeWidth="1.3"
+      />
+      {/* Chair seat cushion & armrests */}
+      <rect
+        x="39"
+        y={seatY}
+        width="42"
+        height="9"
+        rx="4"
+        fill="var(--color-surface)"
+        stroke="var(--color-line)"
+        strokeWidth="1.2"
+      />
+      {empty && quotaNote && (
+        <g data-testid={`quota-note-${memberId}`}>
+          <rect
+            x="24"
+            y={faceUp ? "52" : "8"}
+            width="72"
+            height="14"
+            rx="5"
+            fill="var(--color-surface)"
+            stroke="var(--color-danger)"
+            strokeWidth="1.1"
+          />
+          <text
+            x="60"
+            y={faceUp ? "61.5" : "17.5"}
+            textAnchor="middle"
+            fontSize="7.5"
+            fontFamily="monospace"
+            fontWeight="600"
+            fill="var(--color-danger)"
+          >
+            {quotaNote}
+          </text>
+        </g>
+      )}
+    </g>
+  )
+}
+
+function SeatedCharacter2D({
+  view,
+  memberId,
+  hue,
+  busyForHandle,
+  glanceDelay,
+}: {
+  view: Character2DView
+  memberId: string
+  hue: { accent: string; soft: string }
+  busyForHandle: string | undefined
+  glanceDelay: number
+}) {
+  const { identity, pose, headCenter, torsoRect, leftShoulder, rightShoulder, leftHand, rightHand, eyesClosed, idleGlance } =
+    view
+  const animate = pose.animated
+
+  return (
+    <g data-testid={`character-${memberId}`} data-pose={pose.pose}>
+      {busyForHandle && (
+        <rect
+          data-testid={`busy-ring-${memberId}`}
+          x="39"
+          y={view.facing === "up" ? "38" : "1"}
+          width="42"
+          height="39"
+          rx="19"
+          fill="none"
+          stroke={hue.accent}
+          strokeOpacity="0.38"
+          strokeWidth="1.5"
+        />
+      )}
+
+      {/* Seated torso */}
+      <rect
+        x={torsoRect.x}
+        y={torsoRect.y}
+        width={torsoRect.w}
+        height={torsoRect.h}
+        rx="6"
+        fill={hue.accent}
+      />
+      <path
+        d={`M${torsoRect.x + 8} ${torsoRect.y + 1.5}H${torsoRect.x + torsoRect.w - 8}`}
+        stroke={hue.soft}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+
+      {/* Persona role chest pin */}
+      {identity.pinMotif && (
+        <g
+          data-testid={`role-pin-${memberId}`}
+          data-motif={identity.pinMotif}
+          transform={`translate(${torsoRect.x + torsoRect.w - 6} ${torsoRect.y + 7.5})`}
+        >
+          <circle r="4.6" fill={hue.soft} stroke={hue.accent} strokeWidth="1" />
+          <MotifGlyph motif={identity.pinMotif} cx={0} cy={0} color={hue.accent} scale={0.78} />
+        </g>
+      )}
+
+      {/* Non-typing arm poses (rest, raised, stretch, slumped) */}
+      {pose.pose !== "working" && (
+        <g
+          data-testid={
+            pose.pose === "done_recently"
+              ? `stretch-pose-${memberId}`
+              : pose.pose === "failed"
+                ? `slumped-pose-${memberId}`
+                : `arms-${memberId}`
+          }
+        >
+          <path
+            d={`M${leftShoulder.x} ${leftShoulder.y}L${leftHand.x} ${leftHand.y}`}
+            stroke={hue.accent}
+            strokeWidth="3.8"
+            strokeLinecap="round"
+          />
+          <circle cx={leftHand.x} cy={leftHand.y} r="2.8" fill={hue.accent} stroke={hue.soft} strokeWidth="0.9" />
+
+          <motion.g
+            data-testid={pose.rightArm === "raised" ? `raised-arm-${memberId}` : undefined}
+            animate={pose.rightArm === "raised" && animate ? { y: [0, -2, 0] } : undefined}
+            transition={
+              pose.rightArm === "raised" && animate
+                ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" }
+                : undefined
+            }
+          >
+            <path
+              d={`M${rightShoulder.x} ${rightShoulder.y}L${rightHand.x} ${rightHand.y}`}
+              stroke={hue.accent}
+              strokeWidth="3.8"
+              strokeLinecap="round"
+            />
+            <circle cx={rightHand.x} cy={rightHand.y} r="2.8" fill={hue.accent} stroke={hue.soft} strokeWidth="0.9" />
+          </motion.g>
+        </g>
+      )}
+
+      {/* Character head derived from AgentAvatar silhouettes */}
+      <g transform={`translate(${headCenter.x} ${headCenter.y})`}>
+        <motion.g
+          data-testid={`desk-avatar-${memberId}`}
+          data-glance={idleGlance ? "true" : "false"}
+          data-silhouette={identity.headSilhouette}
+          animate={idleGlance ? { x: [0, 0, -2, 2, 0, 0] } : undefined}
+          transition={
+            idleGlance
+              ? {
+                  duration: 5.2,
+                  delay: glanceDelay,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  times: [0, 0.68, 0.76, 0.86, 0.94, 1],
+                }
+              : undefined
+          }
+        >
+          <CharacterHead2D
+            silhouette={identity.headSilhouette}
+            accent={hue.accent}
+            soft={hue.soft}
+            closed={eyesClosed}
+          />
+        </motion.g>
+      </g>
+    </g>
+  )
+}
+
+// One compact desk of the room, drawn in a 120x108 box at (x, y). Each agent
+// is drawn as a 2D flat character sitting at its desk (or an empty chair with
+// a reset note when out of quota), matching the 3D office poses.
 export function RoomDesk({
   desk,
   x,
@@ -149,12 +522,21 @@ export function RoomDesk({
 }: OfficeDeskProps & { x: number; y: number; scale: number; facing?: "up" | "down" }) {
   const { member, state, stateLabel, outOfQuota, elapsedText, runTitle } = desk
   const hue = hueVars(desk)
+  const view = derive2DCharacterView(desk, { reducedMotion, facing })
+  const { identity, pose } = view
   const dimmed = state === "out_of_quota" || outOfQuota
-  const animate = state === "working" && !reducedMotion
-  const idleGlance = state === "idle" && !dimmed && !reducedMotion
-  const screenStroke = state === "working" ? hue.accent : (SCREEN_STROKE[state] ?? "var(--color-line)")
-  const lineStroke = state === "working" ? hue.accent : (SCREEN_STROKE[state] ?? "var(--color-faint)")
-  const lit = state === "working" || state === "waiting_approval" || state === "failed"
+  const animate = pose.animated
+  const screenStroke =
+    pose.monitorMode === "glow" || pose.monitorMode === "persona_badge"
+      ? hue.accent
+      : (SCREEN_STROKE[state] ?? "var(--color-line)")
+  const lineStroke =
+    pose.monitorMode === "glow" ? hue.accent : (SCREEN_STROKE[state] ?? "var(--color-faint)")
+  const lit =
+    pose.monitorMode === "glow" ||
+    pose.monitorMode === "approval" ||
+    pose.monitorMode === "error" ||
+    pose.monitorMode === "persona_badge"
   const faceUp = facing === "up"
   const glanceDelay = (seedFromId(member.id) % 7) * 0.45
 
@@ -181,6 +563,127 @@ export function RoomDesk({
     onSelect(desk)
   }
 
+  const deskElement = (
+    <g opacity={dimmed ? 0.65 : 1}>
+      {/* A front lip gives the slight 3/4 view; when facing up (Director), the desk sits near the top and faces into the room. */}
+      <rect x="10" y={faceUp ? "14" : "36"} width="104" height="36" rx="8" fill="var(--color-ink)" fillOpacity="0.07" />
+      <rect x="8" y={faceUp ? "16" : "38"} width="104" height="34" rx="8" fill="var(--color-sidebar)" stroke="var(--color-line)" />
+      <rect x="8" y={faceUp ? "10" : "32"} width="104" height="34" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
+      <path d={faceUp ? "M22 41.5H98" : "M22 34.5H98"} stroke={hue.accent} strokeWidth="2.5" strokeLinecap="round" />
+      <rect x="16" y={faceUp ? "18" : "42"} width="14" height="16" rx="2.5" fill="var(--color-canvas)" stroke="var(--color-line)" />
+      <circle cx="98" cy={faceUp ? "26" : "50"} r="5" fill={hue.soft} stroke={hue.accent} strokeWidth="1.2" />
+
+      {pose.monitorMode === "glow" && (
+        <motion.ellipse
+          data-testid={`monitor-glow-${member.id}`}
+          cx="60"
+          cy={faceUp ? 26 : 50}
+          rx="36"
+          ry="16"
+          fill={hue.accent}
+          fillOpacity={0.18}
+          animate={animate ? { fillOpacity: [0.1, 0.26, 0.1] } : undefined}
+          transition={animate ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" } : undefined}
+        />
+      )}
+
+      {/* Failed state: red desk lamp with soft red pool on the desk corner */}
+      {pose.showRedLamp && (
+        <g data-testid={`red-lamp-${member.id}`}>
+          <ellipse
+            cx="94"
+            cy={faceUp ? "26" : "49"}
+            rx="14"
+            ry="8"
+            fill="var(--color-danger)"
+            fillOpacity="0.22"
+          />
+          <rect x="93" y={faceUp ? "27" : "50"} width="8" height="2.5" rx="1" fill="var(--color-line)" />
+          <path
+            d={faceUp ? "M97 27L99 17L92 15" : "M97 50L99 40L92 38"}
+            stroke="var(--color-faint)"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+          <path
+            d={faceUp ? "M88 18L94 12L96 19Z" : "M88 41L94 35L96 42Z"}
+            fill="var(--color-danger)"
+          />
+        </g>
+      )}
+
+      <rect x="56" y={faceUp ? "32" : "54"} width="8" height="3" fill="var(--color-line)" />
+      <rect
+        x="44"
+        y={faceUp ? "17" : "39"}
+        width="32"
+        height="16"
+        rx="3.5"
+        fill={pose.monitorMode === "persona_badge" ? hue.soft : "var(--color-code)"}
+        stroke={screenStroke}
+        strokeWidth={lit ? 1.6 : 1.2}
+      />
+
+      {pose.monitorMode === "glow" ? (
+        <g data-testid={`monitor-lines-${member.id}`}>
+          <motion.path
+            d={faceUp ? "M49 22H66" : "M49 44H66"}
+            stroke={lineStroke}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            animate={animate ? { opacity: [0.4, 1, 0.4] } : undefined}
+            transition={animate ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : undefined}
+          />
+          <path d={faceUp ? "M49 27H60" : "M49 49H60"} stroke="var(--color-muted)" strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+      ) : pose.monitorMode === "persona_badge" && pose.personaBadgeMotif ? (
+        <g
+          data-testid={`monitor-persona-badge-${member.id}`}
+          data-motif={pose.personaBadgeMotif}
+          data-persona-role={pose.personaBadgeRole ?? undefined}
+        >
+          <MotifGlyph
+            motif={pose.personaBadgeMotif}
+            cx={60}
+            cy={faceUp ? 25 : 47}
+            color={hue.accent}
+            scale={1.25}
+          />
+        </g>
+      ) : pose.monitorMode === "clock" ? (
+        <g data-testid={`monitor-clock-${member.id}`} transform={`translate(60 ${faceUp ? 25 : 47})`}>
+          <circle r="4.5" fill="none" stroke="var(--color-muted)" strokeWidth="1.2" />
+          <path d="M0 -2.5V0L1.8 1.2" stroke="var(--color-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+        </g>
+      ) : (
+        <g strokeLinecap="round" strokeWidth="1.5" stroke={lineStroke} strokeOpacity={pose.monitorMode === "off" ? 0.25 : 0.6}>
+          <path d={faceUp ? "M49 22H68" : "M49 44H68"} />
+          <path d={faceUp ? "M49 27H60" : "M49 49H60"} />
+        </g>
+      )}
+      <rect x="47" y={faceUp ? "35" : "59"} width="26" height="5" rx="2" fill="var(--color-canvas)" stroke="var(--color-line)" />
+
+      {/* Small progress pulse on the desk front while running. */}
+      {state === "working" && (
+        <g data-testid={`progress-pulse-${member.id}`} data-animated={animate ? "true" : "false"}>
+          <rect x="34" y={faceUp ? "12" : "66"} width="52" height="3" rx="1.5" fill={hue.soft} />
+          <motion.rect
+            x="34"
+            y={faceUp ? "12" : "66"}
+            width="22"
+            height="3"
+            rx="1.5"
+            fill={hue.accent}
+            animate={animate ? { x: [34, 64, 34], opacity: [0.65, 1, 0.65] } : undefined}
+            transition={animate ? { duration: 1.5, repeat: Infinity, ease: "easeInOut" } : undefined}
+          />
+        </g>
+      )}
+    </g>
+  )
+
   return (
     <g transform={`translate(${x} ${y}) scale(${scale})`}>
       <g
@@ -190,6 +693,12 @@ export function RoomDesk({
         aria-pressed={selected}
         data-testid={`desk-${member.id}`}
         data-state={state}
+        data-pose={pose.pose}
+        data-cli={identity.cli}
+        data-head={identity.headSilhouette}
+        data-role-pin={identity.rolePin ?? undefined}
+        data-seated={view.seated ? "true" : "false"}
+        data-monitor-mode={pose.monitorMode}
         data-busy-for={busyFor?.handle}
         data-director={desk.isDirector ? "true" : "false"}
         data-facing={facing}
@@ -226,123 +735,73 @@ export function RoomDesk({
         )}
 
         <g className="transition-transform duration-150 ease-out group-hover:-translate-y-[3px] motion-reduce:transition-none">
-          <g opacity={dimmed ? 0.5 : 1}>
-            {/* A front lip gives the slight 3/4 view; when facing up (Director), the desk sits near the top and faces into the room. */}
-            <rect x="10" y={faceUp ? "14" : "36"} width="104" height="36" rx="8" fill="var(--color-ink)" fillOpacity="0.07" />
-            <rect x="8" y={faceUp ? "16" : "38"} width="104" height="34" rx="8" fill="var(--color-sidebar)" stroke="var(--color-line)" />
-            <rect x="8" y={faceUp ? "10" : "32"} width="104" height="34" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
-            <path d={faceUp ? "M22 41.5H98" : "M22 34.5H98"} stroke={hue.accent} strokeWidth="2.5" strokeLinecap="round" />
-            <rect x="16" y={faceUp ? "18" : "42"} width="14" height="16" rx="2.5" fill="var(--color-canvas)" stroke="var(--color-line)" />
-            <circle cx="98" cy={faceUp ? "26" : "50"} r="5" fill={hue.soft} stroke={hue.accent} strokeWidth="1.2" />
-
-            {state === "working" && (
-              <motion.ellipse
-                data-testid={`monitor-glow-${member.id}`}
-                cx="60"
-                cy={faceUp ? 26 : 50}
-                rx="36"
-                ry="16"
-                fill={hue.accent}
-                fillOpacity={0.18}
-                animate={animate ? { fillOpacity: [0.1, 0.26, 0.1] } : undefined}
-                transition={animate ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" } : undefined}
+          {faceUp ? (
+            <>
+              {deskElement}
+              <DeskChair2D
+                faceUp={faceUp}
+                empty={!view.seated}
+                memberId={member.id}
+                quotaNote={pose.quotaNote}
               />
-            )}
-
-            <rect x="56" y={faceUp ? "32" : "54"} width="8" height="3" fill="var(--color-line)" />
-            <rect
-              x="44"
-              y={faceUp ? "17" : "39"}
-              width="32"
-              height="16"
-              rx="3.5"
-              fill="var(--color-code)"
-              stroke={screenStroke}
-              strokeWidth={lit ? 1.6 : 1.2}
-            />
-            {state === "working" ? (
-              <g data-testid={`monitor-lines-${member.id}`}>
-                <motion.path
-                  d={faceUp ? "M49 22H66" : "M49 44H66"}
-                  stroke={lineStroke}
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  animate={animate ? { opacity: [0.4, 1, 0.4] } : undefined}
-                  transition={animate ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : undefined}
+              {view.seated && (
+                <SeatedCharacter2D
+                  view={view}
+                  memberId={member.id}
+                  hue={hue}
+                  busyForHandle={busyFor?.handle}
+                  glanceDelay={glanceDelay}
                 />
-                <path d={faceUp ? "M49 27H60" : "M49 49H60"} stroke="var(--color-muted)" strokeWidth="1.5" strokeLinecap="round" />
-              </g>
-            ) : (
-              <g strokeLinecap="round" strokeWidth="1.5" stroke={lineStroke} strokeOpacity="0.6">
-                <path d={faceUp ? "M49 22H68" : "M49 44H68"} />
-                <path d={faceUp ? "M49 27H60" : "M49 49H60"} />
-              </g>
-            )}
-            <rect x="47" y={faceUp ? "35" : "59"} width="26" height="5" rx="2" fill="var(--color-canvas)" stroke="var(--color-line)" />
-
-            {/* Small progress pulse on the desk front while running. */}
-            {state === "working" && (
-              <g data-testid={`progress-pulse-${member.id}`} data-animated={animate ? "true" : "false"}>
-                <rect x="34" y={faceUp ? "12" : "66"} width="52" height="3" rx="1.5" fill={hue.soft} />
-                <motion.rect
-                  x="34"
-                  y={faceUp ? "12" : "66"}
-                  width="22"
-                  height="3"
-                  rx="1.5"
-                  fill={hue.accent}
-                  animate={animate ? { x: [34, 64, 34], opacity: [0.65, 1, 0.65] } : undefined}
-                  transition={animate ? { duration: 1.5, repeat: Infinity, ease: "easeInOut" } : undefined}
+              )}
+            </>
+          ) : (
+            <>
+              <DeskChair2D
+                faceUp={faceUp}
+                empty={!view.seated}
+                memberId={member.id}
+                quotaNote={pose.quotaNote}
+              />
+              {view.seated && (
+                <SeatedCharacter2D
+                  view={view}
+                  memberId={member.id}
+                  hue={hue}
+                  busyForHandle={busyFor?.handle}
+                  glanceDelay={glanceDelay}
                 />
-              </g>
-            )}
-          </g>
-
-          <foreignObject x="42" y={faceUp ? "38" : "2"} width="36" height="36">
-            <motion.div
-              data-testid={`desk-avatar-${member.id}`}
-              data-glance={idleGlance ? "true" : "false"}
-              style={{ width: 36, height: 36 }}
-              className="flex items-center justify-center"
-              animate={idleGlance ? { x: [0, 0, -1.5, 1.5, 0, 0] } : undefined}
-              transition={
-                idleGlance
-                  ? { duration: 5.2, delay: glanceDelay, repeat: Infinity, ease: "easeInOut", times: [0, 0.68, 0.76, 0.86, 0.94, 1] }
-                  : undefined
-              }
-            >
-              <AgentAvatar member={member} size={36} state={avatarState(state)} decorative className="h-full w-full" />
-            </motion.div>
-          </foreignObject>
-
-          {busyFor && (
-            <rect
-              data-testid={`busy-ring-${member.id}`}
-              x="41"
-              y="1"
-              width="38"
-              height="38"
-              rx="19"
-              fill="none"
-              stroke={hue.accent}
-              strokeOpacity="0.35"
-              strokeWidth="1.5"
-            />
+              )}
+              {deskElement}
+            </>
           )}
 
           {state === "working" && (
             <g data-testid={`typing-hands-${member.id}`} data-animated={animate ? "true" : "false"}>
+              <path
+                d={`M${view.leftShoulder.x} ${view.leftShoulder.y}L${view.leftHand.x} ${view.leftHand.y}`}
+                stroke={hue.accent}
+                strokeWidth="3.4"
+                strokeLinecap="round"
+                strokeOpacity="0.85"
+              />
+              <path
+                d={`M${view.rightShoulder.x} ${view.rightShoulder.y}L${view.rightHand.x} ${view.rightHand.y}`}
+                stroke={hue.accent}
+                strokeWidth="3.4"
+                strokeLinecap="round"
+                strokeOpacity="0.85"
+              />
               <motion.circle
-                cx="52"
-                cy={faceUp ? 36 : 58}
+                cx={view.leftHand.x}
+                cy={view.leftHand.y}
                 r="3"
                 fill={hue.accent}
                 animate={animate ? { y: [0, -2.5, 0] } : undefined}
                 transition={animate ? { duration: 0.34, repeat: Infinity, ease: "easeInOut" } : undefined}
               />
               <motion.circle
-                cx="68"
-                cy={faceUp ? 36 : 58}
+                cx={view.rightHand.x}
+                cy={view.rightHand.y}
                 r="3"
                 fill={hue.accent}
                 animate={animate ? { y: [-2.5, 0, -2.5] } : undefined}
@@ -368,21 +827,41 @@ export function RoomDesk({
             </g>
           )}
 
-          {state === "waiting_approval" && (
+          {/* Waiting for approval: raised hand + small floating card above the desk */}
+          {pose.showApprovalCard && (
             <g
-              data-testid={`raised-hand-badge-${member.id}`}
-              transform="translate(90 12)"
+              data-testid={`approval-card-${member.id}`}
               onClick={handleApprovalClick}
               className="cursor-pointer"
             >
-              <circle r="10" fill="var(--color-warn-soft)" stroke="var(--color-warn)" strokeWidth="1.5" />
-              <path
-                d="M-2.8 2.4V-2.2M-0.9 2.4V-3.2M1 2.4V-2.7M2.9 2.4V-1.4M-2.8 2.4C-2.8 4.2 2.9 4.2 2.9 2.4"
-                stroke="var(--color-warn)"
-                strokeWidth="1.2"
-                strokeLinecap="round"
-                fill="none"
-              />
+              <g data-testid={`raised-hand-badge-${member.id}`}>
+                <rect
+                  x="76"
+                  y="2"
+                  width="42"
+                  height="16"
+                  rx="5"
+                  fill="var(--color-warn-soft)"
+                  stroke="var(--color-warn)"
+                  strokeWidth="1.3"
+                />
+                <path
+                  d="M82 12V8.5M83.5 12V7.8M85 12V8.2M86.5 12V9"
+                  stroke="var(--color-warn)"
+                  strokeWidth="1.1"
+                  strokeLinecap="round"
+                />
+                <text
+                  x="101"
+                  y="12.5"
+                  textAnchor="middle"
+                  fontSize="7.5"
+                  fontWeight="600"
+                  fill="var(--color-warn)"
+                >
+                  Approve
+                </text>
+              </g>
             </g>
           )}
 
@@ -419,9 +898,9 @@ export function RoomDesk({
         </text>
         {dimmed && (
           <g data-testid={`quota-tag-${member.id}`} className={runTitle ? "group-hover:opacity-0" : undefined}>
-            <rect x="32" y="91" width="56" height="13" rx="6.5" fill="var(--color-danger-soft)" stroke="var(--color-danger)" strokeOpacity="0.5" />
+            <rect x="24" y="91" width="72" height="13" rx="6.5" fill="var(--color-danger-soft)" stroke="var(--color-danger)" strokeOpacity="0.5" />
             <text x="60" y="100.5" textAnchor="middle" fontSize="8" fontWeight="600" fill="var(--color-danger)">
-              out of quota
+              {pose.quotaNote ?? "out of quota"}
             </text>
           </g>
         )}

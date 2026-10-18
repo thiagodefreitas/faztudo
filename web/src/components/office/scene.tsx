@@ -7,15 +7,16 @@ import { api } from "../../api/client"
 import { cx } from "../../lib/cx"
 import { displayPct } from "../../lib/lane-format"
 import { primaryWindow } from "../../lib/lanes"
+import type { ThemeChoice } from "../../lib/theme"
 import { formatAge, formatElapsed } from "../../lib/time"
 import { useOpenDirect } from "../../state/direct"
 import { qk } from "../../state/keys"
 import { replaceById } from "../../state/merge"
-import type { Approval, Channel, Department, Member, RunState } from "../../types"
+import type { Approval, Channel, Department, Lane, Member, RunState } from "../../types"
 import { AgentAvatar } from "../agent-avatar"
 import { HealthBadge } from "../lanes"
 import { WorkspaceNav } from "../sidebar"
-import { avatarState } from "./avatar"
+import { avatarState, deriveLaneMeterBars, deriveTaskBoardNotes } from "./avatar"
 import { DeskStateBadge, RoomDesk } from "./desk"
 import { layoutRoom } from "./layout"
 import { RoomBackdrop } from "./room"
@@ -82,9 +83,11 @@ export function Legend() {
 export interface OfficeSceneProps {
   desks: DeskInfo[]
   channels: Channel[]
+  lanes?: readonly Lane[] | undefined
   departments?: readonly Department[]
   compact?: boolean
   now: number
+  theme?: ThemeChoice
   reducedMotion?: boolean
   initialSelectedId?: string
   onOpenApproval?: (desk: DeskInfo) => void
@@ -95,9 +98,11 @@ export interface OfficeSceneProps {
 export function OfficeScene({
   desks,
   channels,
+  lanes: lanesProp,
   departments,
   compact: compactProp,
   now,
+  theme = "light",
   reducedMotion = false,
   initialSelectedId,
   onOpenApproval,
@@ -121,7 +126,22 @@ export function OfficeScene({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [selectedDesk])
 
+  const lanes = useMemo(() => {
+    if (lanesProp && lanesProp.length > 0) return [...lanesProp]
+    const seen = new Set<string>()
+    const list: Lane[] = []
+    for (const desk of desks) {
+      if (desk.lane && !seen.has(desk.lane.id)) {
+        seen.add(desk.lane.id)
+        list.push(desk.lane)
+      }
+    }
+    return list
+  }, [lanesProp, desks])
+
   const room = useMemo(() => layoutRoom(desks, { departments, compact }), [desks, departments, compact])
+  const taskNotes = useMemo(() => deriveTaskBoardNotes(desks), [desks])
+  const laneBars = useMemo(() => deriveLaneMeterBars(lanes, theme), [lanes, theme])
 
   const counts = {
     working: desks.filter((desk) => desk.state === "working").length,
@@ -193,7 +213,14 @@ export function OfficeScene({
                 aria-label="Office floor plan"
                 className={cx("mx-auto block w-full select-none", compact ? "h-auto" : "h-full")}
               >
-                <RoomBackdrop width={room.width} height={room.height} zones={room.zones} rug={room.rug} />
+                <RoomBackdrop
+                  width={room.width}
+                  height={room.height}
+                  zones={room.zones}
+                  rug={room.rug}
+                  taskNotes={taskNotes}
+                  laneBars={laneBars}
+                />
                 {room.seats.map((seat) => (
                   <RoomDesk
                     key={seat.desk.member.id}
@@ -522,7 +549,7 @@ export function OfficeViewToggle({ mode }: { mode: "2d" | "3d" }) {
 }
 
 export function OfficePage() {
-  const { desks, channels, departments, isPending, now } = useOfficeDesks()
+  const { desks, channels, lanes, departments, isPending, now, theme } = useOfficeDesks()
   const reducedMotion = useReducedMotion()
   const openDirect = useOpenDirect()
   const qc = useQueryClient()
@@ -563,8 +590,10 @@ export function OfficePage() {
         <OfficeScene
           desks={desks}
           channels={channels}
+          lanes={lanes}
           departments={departments}
           now={now}
+          theme={theme}
           reducedMotion={reducedMotion}
           onResolveApproval={handleResolveApproval}
           onMessage={handleMessage}

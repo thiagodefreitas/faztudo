@@ -1,8 +1,14 @@
-import type { PlacedZone, Rect } from "./layout"
-import { ROOM_W, WALL_H } from "./layout"
+import type { LaneMeterBar, TaskBoardNote } from "./avatar"
+import type { PlacedLaneStrip, PlacedTaskBoard, PlacedZone, Rect } from "./layout"
+import { layoutWallFixtures, ROOM_W, WALL_H } from "./layout"
 
-// The room around the desks: floor, wall, rug and a few plants. Everything
-// uses the brand CSS variables, so light and dark both work.
+// The room around the desks: floor, wall, task board, lane meter strip, rug
+// and a few plants. Everything uses the brand CSS variables, so light and dark
+// both work.
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 2)}..` : text
+}
 
 function Plant({ x, y, size = 1 }: { x: number; y: number; size?: number }) {
   return (
@@ -37,20 +43,147 @@ function Shelf({ x }: { x: number }) {
   )
 }
 
+function WallTaskBoard({ board }: { board: PlacedTaskBoard }) {
+  return (
+    <g data-testid="office-task-board" aria-label="Task board">
+      <rect
+        x={board.x}
+        y={board.y}
+        width={board.w}
+        height={board.h}
+        rx="6"
+        fill="var(--color-surface)"
+        stroke="var(--color-line)"
+      />
+      <text
+        x={board.x + 10}
+        y={board.y + 25}
+        fontSize="8.5"
+        fontWeight="600"
+        letterSpacing="0.8"
+        fill="var(--color-faint)"
+      >
+        TASKS
+      </text>
+      {board.notes.map(({ note, x, y, w, h }) => (
+        <g
+          key={note.id}
+          data-testid={`task-note-${note.id}`}
+          data-hue={note.hue}
+        >
+          <title>{`@${note.handle}: ${note.title}`}</title>
+          <rect
+            x={x}
+            y={y}
+            width={w}
+            height={h}
+            rx="3.5"
+            fill={note.bg}
+            stroke={note.accent}
+            strokeWidth="1"
+          />
+          <rect x={x} y={y} width={w} height="5" rx="2" fill={note.accent} />
+          <text
+            x={x + 5}
+            y={y + 15}
+            fontSize="8"
+            fontFamily="monospace"
+            fontWeight="600"
+            fill="var(--color-ink)"
+          >
+            {clipText(`@${note.handle}`, 12)}
+          </text>
+          <text x={x + 5} y={y + 26} fontSize="7.5" fill="var(--color-muted)">
+            {clipText(note.title, 14)}
+          </text>
+        </g>
+      ))}
+    </g>
+  )
+}
+
+function WallLaneStrip({ strip }: { strip: PlacedLaneStrip }) {
+  return (
+    <g data-testid="office-lane-strip" aria-label="Lane meter strip">
+      <rect
+        x={strip.x}
+        y={strip.y}
+        width={strip.w}
+        height={strip.h}
+        rx="6"
+        fill="var(--color-surface)"
+        stroke="var(--color-line)"
+      />
+      <text
+        x={strip.x + 10}
+        y={strip.y + 25}
+        fontSize="8.5"
+        fontWeight="600"
+        letterSpacing="0.8"
+        fill="var(--color-faint)"
+      >
+        LANES
+      </text>
+      {strip.bars.map(({ bar, x, y, w, h, fillH }) => {
+        const shortLabel = bar.id.split("/")[0] ?? bar.id
+        return (
+          <g
+            key={bar.id}
+            data-testid={`lane-bar-${bar.id}`}
+            data-health={bar.health}
+          >
+            <title>{`${bar.id} (${bar.health})`}</title>
+            <rect
+              x={x + 10}
+              y={y}
+              width={w - 20}
+              height={h - 6}
+              rx="3"
+              fill="var(--color-sidebar)"
+              stroke="var(--color-line)"
+            />
+            <rect
+              x={x + 11}
+              y={y + (h - 6) - Math.min(h - 8, fillH) - 1}
+              width={w - 22}
+              height={Math.min(h - 8, fillH)}
+              rx="2"
+              fill={bar.color}
+            />
+            <text
+              x={x + w / 2}
+              y={y + h + 4}
+              textAnchor="middle"
+              fontSize="7"
+              fontFamily="monospace"
+              fill="var(--color-muted)"
+            >
+              {clipText(shortLabel, 6)}
+            </text>
+          </g>
+        )
+      })}
+    </g>
+  )
+}
+
 export function RoomBackdrop({
   width = ROOM_W,
   height,
   zones,
   rug,
+  taskNotes = [],
+  laneBars = [],
 }: {
   width?: number
   height: number
   zones: PlacedZone[]
   rug: Rect | null
+  taskNotes?: readonly TaskBoardNote[]
+  laneBars?: readonly LaneMeterBar[]
 }) {
   const compact = width < 640
-  const windows = compact ? [64, 240] : [70, 230, 390, 740, 900]
-  const shelves = compact ? [154] : [560, 1060]
+  const fixtures = layoutWallFixtures(width, taskNotes, laneBars)
   return (
     <g>
       <defs>
@@ -63,12 +196,14 @@ export function RoomBackdrop({
 
       <rect width={width} height={WALL_H} fill="var(--color-sidebar)" />
       <rect y={WALL_H - 3} width={width} height="3" fill="var(--color-line)" />
-      {windows.map((x) => (
+      {fixtures.windows.map((x) => (
         <Window key={x} x={x} />
       ))}
-      {shelves.map((x) => (
+      {fixtures.shelves.map((x) => (
         <Shelf key={x} x={x} />
       ))}
+      {fixtures.taskBoard && <WallTaskBoard board={fixtures.taskBoard} />}
+      {fixtures.laneStrip && <WallLaneStrip strip={fixtures.laneStrip} />}
       <Plant x={compact ? 26 : 36} y={WALL_H - 6} size={1.1} />
 
       {zones.map((zone) => (

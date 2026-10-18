@@ -265,10 +265,13 @@ describe("OfficeScene", () => {
 
     const grok = screen.getByTestId("desk-m-grok")
     expect(grok).toHaveAttribute("data-state", "idle")
+    expect(grok).toHaveAttribute("data-pose", "busy_for_persona")
     expect(grok).toHaveAttribute("data-busy-for", "coder")
     expect(grok).toHaveAccessibleName(expect.stringContaining("busy for @coder"))
     expect(within(grok).getByText("Grok - busy for @coder")).toBeInTheDocument()
     expect(screen.getByTestId("busy-ring-m-grok")).toBeInTheDocument()
+    expect(screen.getByTestId("monitor-persona-badge-m-grok")).toHaveAttribute("data-motif", "</>")
+    expect(screen.getByTestId("monitor-persona-badge-m-grok")).toHaveAttribute("data-persona-role", "coder")
     // The persona's own desk and desks nobody borrows get no ring.
     expect(screen.queryByTestId("busy-ring-m-coder")).not.toBeInTheDocument()
     expect(screen.queryByTestId("busy-ring-m-claude")).not.toBeInTheDocument()
@@ -315,5 +318,95 @@ describe("OfficeScene", () => {
     fireEvent.keyDown(codex, { key: "Enter" })
     expect(codex).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("complementary", { name: "Codex details" })).toBeInTheDocument()
+  })
+
+  it("renders 2D flat character silhouettes, role pins, failed red lamp + slumped pose, done stretch, empty chair with reset time, task board, and lane strip", async () => {
+    const customLanes: Lane[] = lanes.map((l) =>
+      l.id === "grok/default"
+        ? { ...l, windows: [{ name: "5h", used_pct: 100, source: "error", resets_at: "2026-10-18T17:45:00.000Z" }] }
+        : l,
+    )
+    const customRuns: Run[] = [
+      ...runs,
+      {
+        id: "run-coder-done",
+        channel_id: "ch-build",
+        trigger_message_id: "msg-done",
+        agent_id: "m-coder",
+        lane_id: "codex/default",
+        mode: "write",
+        state: "done",
+        started_at: new Date(now - 120_000).toISOString(),
+        ended_at: new Date(now - 45_000).toISOString(),
+      },
+      {
+        id: "run-reviewer-fail",
+        channel_id: "ch-build",
+        trigger_message_id: "msg-fail",
+        agent_id: "m-reviewer",
+        lane_id: "claude/opus",
+        mode: "read",
+        state: "failed",
+        started_at: new Date(now - 90_000).toISOString(),
+        ended_at: new Date(now - 30_000).toISOString(),
+      },
+    ]
+    const customMembers: Member[] = [
+      ...members,
+      {
+        id: "m-reviewer",
+        kind: "agent",
+        handle: "reviewer",
+        display_name: "Reviewer",
+        presence: "online",
+        agent: { lanes: ["claude/opus"], role: "reviewer", mode: "read" },
+      },
+    ]
+    const desks = deriveOfficeDesks({
+      members: customMembers,
+      runs: customRuns,
+      approvals,
+      lanes: customLanes,
+      triggerMessages,
+      now,
+    })
+    await renderScene({ desks, lanes: customLanes })
+
+    // Silhouettes and role pins match 3D
+    expect(screen.getByTestId("desk-m-claude")).toHaveAttribute("data-head", "round_one_antenna")
+    expect(screen.getByTestId("desk-m-codex")).toHaveAttribute("data-head", "square_visor")
+    expect(screen.getByTestId("desk-m-grok")).toHaveAttribute("data-head", "wide_two_antennae")
+    expect(screen.getByTestId("desk-m-director")).toHaveAttribute("data-head", "human")
+    expect(screen.getByTestId("role-pin-m-coder")).toHaveAttribute("data-motif", "</>")
+    expect(screen.getByTestId("role-pin-m-reviewer")).toHaveAttribute("data-motif", "magnifier")
+
+    // Done recently -> stretch pose
+    expect(screen.getByTestId("desk-m-coder")).toHaveAttribute("data-pose", "done_recently")
+    expect(screen.getByTestId("stretch-pose-m-coder")).toBeInTheDocument()
+
+    // Failed -> slumped pose + red desk lamp
+    expect(screen.getByTestId("desk-m-reviewer")).toHaveAttribute("data-pose", "failed")
+    expect(screen.getByTestId("slumped-pose-m-reviewer")).toBeInTheDocument()
+    expect(screen.getByTestId("red-lamp-m-reviewer")).toBeInTheDocument()
+
+    // Out of quota -> empty chair with "back at 17:45" note
+    expect(screen.getByTestId("desk-m-grok")).toHaveAttribute("data-seated", "false")
+    expect(screen.getByTestId("empty-chair-m-grok")).toBeInTheDocument()
+    expect(screen.getByTestId("quota-note-m-grok")).toHaveTextContent("back at 17:45")
+    expect(screen.getByTestId("quota-tag-m-grok")).toHaveTextContent("back at 17:45")
+
+    // Waiting for approval -> raised arm + floating approval card
+    expect(screen.getByTestId("raised-arm-m-codex")).toBeInTheDocument()
+    expect(screen.getByTestId("approval-card-m-codex")).toBeInTheDocument()
+
+    // Task board and lane meter strip on the back wall above the room
+    const taskBoard = screen.getByTestId("office-task-board")
+    expect(taskBoard).toBeInTheDocument()
+    expect(screen.getByTestId("task-note-run-working")).toHaveAttribute("data-hue", "claude")
+
+    const laneStrip = screen.getByTestId("office-lane-strip")
+    expect(laneStrip).toBeInTheDocument()
+    expect(screen.getByTestId("lane-bar-claude/opus")).toHaveAttribute("data-health", "available")
+    expect(screen.getByTestId("lane-bar-grok/default")).toHaveAttribute("data-health", "exhausted")
   })
 })

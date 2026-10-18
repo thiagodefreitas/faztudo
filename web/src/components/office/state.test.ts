@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Approval, Department, Lane, Member, Run } from "../../types"
-import { layoutRoom } from "./layout"
+import { derive2DCharacterView, deriveLaneMeterBars, deriveTaskBoardNotes } from "./avatar"
+import { layoutRoom, layoutWallFixtures } from "./layout"
 import {
   deriveMemberDesk,
   deriveOfficeDesks,
@@ -344,5 +345,147 @@ describe("layoutRoom", () => {
     expect(quotaDesk.state).toBe("out_of_quota")
     expect(quotaDesk.resetTimeText).toBe("14:30")
     expect(formatResetTime("16:45")).toBe("16:45")
+  })
+})
+
+describe("derive2DCharacterView and layoutWallFixtures", () => {
+  it("maps every desk state to its 2D flat character pose, arms, monitor mode, and quota note", () => {
+    const coder: Member = {
+      id: "mem-coder",
+      kind: "agent",
+      handle: "coder",
+      display_name: "Coder",
+      presence: "online",
+      agent: { lanes: ["claude/opus"], role: "coder", mode: "write" },
+    }
+
+    // Working -> typing hands on keyboard, glowing monitor
+    const workingDesk = deriveMemberDesk({
+      member: coder,
+      runs: [makeRun({ agent_id: coder.id, state: "running" })],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+    })
+    const workingView = derive2DCharacterView(workingDesk, { reducedMotion: false })
+    expect(workingView.identity.headSilhouette).toBe("round_one_antenna")
+    expect(workingView.identity.pinMotif).toBe("</>")
+    expect(workingView.pose.pose).toBe("working")
+    expect(workingView.pose.monitorMode).toBe("glow")
+    expect(workingView.leftHand.y).toBeGreaterThan(workingView.leftShoulder.y)
+    expect(workingView.rightHand.y).toBeGreaterThan(workingView.rightShoulder.y)
+
+    // Waiting for approval -> raised right hand, approval card
+    const waitingRun = makeRun({ id: "run-wait", agent_id: coder.id, state: "waiting_approval" })
+    const waitingDesk = deriveMemberDesk({
+      member: coder,
+      runs: [waitingRun],
+      approvals: [makeApproval({ run_id: waitingRun.id, requested_by: coder.id })],
+      lanes: [healthyLane],
+      now,
+    })
+    const waitingView = derive2DCharacterView(waitingDesk)
+    expect(waitingView.pose.pose).toBe("waiting_approval")
+    expect(waitingView.pose.showApprovalCard).toBe(true)
+    expect(waitingView.rightHand.y).toBeLessThan(waitingView.rightShoulder.y)
+
+    // Failed -> slumped pose, closed eyes, red desk lamp
+    const failedDesk = deriveMemberDesk({
+      member: coder,
+      runs: [makeRun({ agent_id: coder.id, state: "failed", ended_at: new Date(now - 30_000).toISOString() })],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+    })
+    const failedView = derive2DCharacterView(failedDesk)
+    expect(failedView.pose.pose).toBe("failed")
+    expect(failedView.pose.showRedLamp).toBe(true)
+    expect(failedView.eyesClosed).toBe(true)
+    expect(failedView.headCenter.y).toBeGreaterThan(15)
+
+    // Done recently -> stretch pose with both hands raised high
+    const doneDesk = deriveMemberDesk({
+      member: coder,
+      runs: [makeRun({ agent_id: coder.id, state: "done", ended_at: new Date(now - 30_000).toISOString() })],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+    })
+    const doneView = derive2DCharacterView(doneDesk)
+    expect(doneView.pose.pose).toBe("done_recently")
+    expect(doneView.leftHand.y).toBeLessThan(doneView.leftShoulder.y)
+    expect(doneView.rightHand.y).toBeLessThan(doneView.rightShoulder.y)
+
+    // Out of quota -> empty chair (seated: false) + back at <time>
+    const resetLane: Lane = {
+      ...exhaustedLane,
+      windows: [{ name: "5h", used_pct: 100, source: "error", resets_at: "2026-10-18T16:20:00.000Z" }],
+    }
+    const quotaDesk = deriveMemberDesk({
+      member: codexAgent,
+      runs: [],
+      approvals: [],
+      lanes: [resetLane],
+      now,
+    })
+    const quotaView = derive2DCharacterView(quotaDesk)
+    expect(quotaView.seated).toBe(false)
+    expect(quotaView.pose.quotaNote).toBe("back at 16:20")
+
+    // Busy for persona -> monitor shows persona badge motif
+    const busyCliDesk = deriveMemberDesk({
+      member: claudeAgent,
+      runs: [makeRun({ agent_id: coder.id, lane_id: "claude/opus", state: "running" })],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+      members: [director, claudeAgent, coder],
+    })
+    const busyView = derive2DCharacterView(busyCliDesk)
+    expect(busyView.pose.pose).toBe("busy_for_persona")
+    expect(busyView.pose.monitorMode).toBe("persona_badge")
+    expect(busyView.pose.personaBadgeMotif).toBe("</>")
+
+    // Idle respects reducedMotion for looking around
+    const idleDesk = deriveMemberDesk({
+      member: claudeAgent,
+      runs: [],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+    })
+    expect(derive2DCharacterView(idleDesk, { reducedMotion: false }).idleGlance).toBe(true)
+    expect(derive2DCharacterView(idleDesk, { reducedMotion: true }).idleGlance).toBe(false)
+  })
+
+  it("places the task board and lane strip on the back wall when they fit and omits them when too narrow", () => {
+    const running = makeRun({ state: "running", trigger_message_id: "msg-t" })
+    const desks = deriveOfficeDesks({
+      members: [director, claudeAgent, codexAgent],
+      runs: [running],
+      approvals: [],
+      lanes: [healthyLane, exhaustedLane],
+      triggerMessages: new Map([["msg-t", "@claude Ship 2D office characters"]]),
+      now,
+    })
+    const notes = deriveTaskBoardNotes(desks)
+    const bars = deriveLaneMeterBars([healthyLane, exhaustedLane], "light")
+
+    const desktopWall = layoutWallFixtures(1200, notes, bars)
+    expect(desktopWall.taskBoard).not.toBeNull()
+    expect(desktopWall.taskBoard?.notes).toHaveLength(1)
+    expect(desktopWall.laneStrip).not.toBeNull()
+    expect(desktopWall.laneStrip?.bars).toHaveLength(2)
+
+    const compactWall = layoutWallFixtures(390, notes, bars)
+    expect(compactWall.taskBoard).not.toBeNull()
+    expect(compactWall.laneStrip).not.toBeNull()
+    expect(
+      (compactWall.taskBoard?.w ?? 0) + (compactWall.laneStrip?.w ?? 0),
+    ).toBeLessThanOrEqual(390)
+
+    const tinyWall = layoutWallFixtures(180, notes, bars)
+    expect(tinyWall.taskBoard).toBeNull()
+    expect(tinyWall.laneStrip).toBeNull()
   })
 })

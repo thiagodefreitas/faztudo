@@ -1,5 +1,6 @@
 import { identityOf } from "../../lib/avatar"
 import type { Department } from "../../types"
+import type { LaneMeterBar, TaskBoardNote } from "./office3d/poses"
 import type { DeskInfo } from "./state"
 
 // The room is one SVG. Everything here is in its user units, so the picture
@@ -234,4 +235,160 @@ export function layoutRoom(desks: DeskInfo[], options?: LayoutRoomOptions): Room
   }
 
   return { width: roomWidth, height: y + BOTTOM, zones, seats, rug }
+}
+
+export interface PlacedTaskNote extends Rect {
+  note: TaskBoardNote
+}
+
+export interface PlacedTaskBoard extends Rect {
+  notes: PlacedTaskNote[]
+}
+
+export interface PlacedLaneBar extends Rect {
+  bar: LaneMeterBar
+  fillH: number
+}
+
+export interface PlacedLaneStrip extends Rect {
+  bars: PlacedLaneBar[]
+}
+
+export interface WallFixtures {
+  taskBoard: PlacedTaskBoard | null
+  laneStrip: PlacedLaneStrip | null
+  windows: number[]
+  shelves: number[]
+}
+
+const BOARD_Y = 9
+const BOARD_H = 44
+const BOARD_LABEL_W = 44
+const BOARD_PAD = 8
+const NOTE_W = 84
+const NOTE_H = 32
+const NOTE_GAP = 6
+const BAR_W = 38
+const BAR_H = 26
+const BAR_GAP = 6
+const BOARD_GAP = 14
+
+function boardWidthForNotes(count: number): number {
+  if (count <= 0) return 0
+  return BOARD_LABEL_W + BOARD_PAD * 2 + count * NOTE_W + (count - 1) * NOTE_GAP
+}
+
+function stripWidthForBars(count: number): number {
+  if (count <= 0) return 0
+  return BOARD_LABEL_W + BOARD_PAD * 2 + count * BAR_W + (count - 1) * BAR_GAP
+}
+
+function overlapsRange(aStart: number, aEnd: number, bStart: number, bEnd: number, pad = 8): boolean {
+  return aStart < bEnd + pad && aEnd > bStart - pad
+}
+
+// Places the task board and lane meter strip along the back wall above the room
+// when they fit the available wall width, trimming non-essential windows/shelves
+// that would overlap.
+export function layoutWallFixtures(
+  width: number,
+  notes: readonly TaskBoardNote[],
+  bars: readonly LaneMeterBar[],
+): WallFixtures {
+  const compact = width < 640
+  const baseWindows = compact ? [64, 240] : [70, 210, 390, 740, 900]
+  const baseShelves = compact ? [154] : [560, 1040]
+
+  const minWallX = compact ? 52 : 200
+  const maxWallX = width - (compact ? 16 : 48)
+  const availW = maxWallX - minWallX
+
+  const minOneNote = boardWidthForNotes(1)
+  const minOneBar = stripWidthForBars(1)
+  if (availW < Math.min(minOneNote, minOneBar)) {
+    return { taskBoard: null, laneStrip: null, windows: [], shelves: [] }
+  }
+
+  const maxNoteCap = compact ? 2 : 5
+  const maxBarCap = compact ? 3 : 8
+
+  let noteCount = Math.min(notes.length, maxNoteCap)
+  let barCount = Math.min(bars.length, maxBarCap)
+
+  // Shrink counts until the combined width fits inside availW.
+  while (noteCount > 0 || barCount > 0) {
+    const nw = boardWidthForNotes(noteCount)
+    const bw = stripWidthForBars(barCount)
+    const gap = noteCount > 0 && barCount > 0 ? BOARD_GAP : 0
+    if (nw + gap + bw <= availW) break
+    if (barCount > noteCount && barCount > 1) {
+      barCount -= 1
+    } else if (noteCount > 1) {
+      noteCount -= 1
+    } else if (barCount > 0) {
+      barCount -= 1
+    } else {
+      noteCount -= 1
+    }
+  }
+
+  const nw = boardWidthForNotes(noteCount)
+  const bw = stripWidthForBars(barCount)
+  const gap = noteCount > 0 && barCount > 0 ? BOARD_GAP : 0
+  const totalW = nw + gap + bw
+  const startX = compact
+    ? Math.max(minWallX, Math.round((width - totalW) / 2))
+    : Math.max(minWallX, Math.round((minWallX + maxWallX - totalW) / 2))
+
+  let cursorX = startX
+  let taskBoard: PlacedTaskBoard | null = null
+  if (noteCount > 0) {
+    const placedNotes: PlacedTaskNote[] = notes.slice(0, noteCount).map((note, i) => ({
+      note,
+      x: cursorX + BOARD_LABEL_W + BOARD_PAD + i * (NOTE_W + NOTE_GAP),
+      y: BOARD_Y + 6,
+      w: NOTE_W,
+      h: NOTE_H,
+    }))
+    taskBoard = {
+      x: cursorX,
+      y: BOARD_Y,
+      w: nw,
+      h: BOARD_H,
+      notes: placedNotes,
+    }
+    cursorX += nw + gap
+  }
+
+  let laneStrip: PlacedLaneStrip | null = null
+  if (barCount > 0) {
+    const placedBars: PlacedLaneBar[] = bars.slice(0, barCount).map((bar, i) => ({
+      bar,
+      x: cursorX + BOARD_LABEL_W + BOARD_PAD + i * (BAR_W + BAR_GAP),
+      y: BOARD_Y + 7,
+      w: BAR_W,
+      h: BAR_H,
+      fillH: Math.max(4, Math.round(BAR_H * bar.fillRatio)),
+    }))
+    laneStrip = {
+      x: cursorX,
+      y: BOARD_Y,
+      w: bw,
+      h: BOARD_H,
+      bars: placedBars,
+    }
+  }
+
+  const occupied: Array<[number, number]> = []
+  if (taskBoard) occupied.push([taskBoard.x, taskBoard.x + taskBoard.w])
+  if (laneStrip) occupied.push([laneStrip.x, laneStrip.x + laneStrip.w])
+
+  const windows = baseWindows.filter(
+    (wx) => wx + 86 <= width - 16 && !occupied.some(([s, e]) => overlapsRange(wx, wx + 86, s, e)),
+  )
+  const shelves = baseShelves.filter(
+    (sx) => sx + 84 <= width - 16 && !occupied.some(([s, e]) => overlapsRange(sx, sx + 84, s, e)),
+  )
+
+  return { taskBoard, laneStrip, windows, shelves }
 }
