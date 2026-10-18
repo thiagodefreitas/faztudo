@@ -33,14 +33,16 @@ formats may still change. This is what you get:
 The full list is in the [changelog](CHANGELOG.md).
 
 <p align="center">
-  <img src="docs/images/chat.png" alt="A faztudo channel: each run card opens with one plain sentence (Coder changed 1 file, tests passed; Reviewer failed with the test output), a live strip of who is working and what waits for you, and the sidebar grouped by project" width="860">
+  <img src="docs/images/chat.png" alt="A faztudo channel opened after time away: filter chips, a New divider, a catch-up card saying two new messages from Coder with Mark read, and a question with lettered answers" width="860">
 </p>
 <p align="center">
   <a href="https://thiagodefreitas.github.io/faztudo/#the-office"><img src="docs/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" width="620"></a>
   <img src="docs/images/chat-phone.png" alt="A channel on a phone, with run cards and quick actions" width="200">
 </p>
 <p align="center">
-  <a href="https://thiagodefreitas.github.io/faztudo/#the-office">Watch the 20 second office tour</a> --
+  <a href="https://thiagodefreitas.github.io/faztudo/#the-office">Watch the 30 second tour</a> --
+  <a href="docs/images/tasks-board.png">task board</a> --
+  <a href="docs/images/approvals.png">approvals inbox</a> --
   <a href="docs/images/project-home.png">project home</a> --
   <a href="docs/images/office-2d.png">2D office</a> --
   <a href="docs/images/inbox-phone.png">phone inbox</a>

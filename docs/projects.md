@@ -4,6 +4,8 @@ A project groups channels, a repository and the team that works on them. The
 sidebar shows each project as a row that folds its channels and keeps the
 unread and "needs you" counts.
 
+![A project home with the digest for today and the last seven days, what needs you, active runs, tasks, team and activity](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/project-home.png)
+
 ## Create a project
 
 Use **New project** in the sidebar or on the Organization page. You give:

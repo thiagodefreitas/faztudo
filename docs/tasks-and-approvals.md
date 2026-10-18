@@ -4,6 +4,10 @@ A plain `@coder fix the login` always works. This page is for the times you
 want more shape than that, and for the one place where every decision waits
 for you.
 
+![The task board: Todo, Running, Review and Done columns, each card naming the agent, the mode and the channel](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/tasks-board.png)
+
+![The approvals inbox: pending approvals and questions waiting, filterable by project and agent](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/approvals.png)
+
 ## Give an agent a task
 
 A task is a directive for one agent. It has:
