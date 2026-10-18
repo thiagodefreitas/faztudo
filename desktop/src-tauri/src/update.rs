@@ -75,9 +75,33 @@ pub fn parse(v: &str) -> Option<Version> {
     Some(Version { core: (a, b, c), pre })
 }
 
+/// Orders prerelease tags as semantic versioning does: dot-separated parts
+/// left to right, numbers by value and below words, and a shorter tag first
+/// when it is a prefix of the other. So rc.2 comes before rc.10.
+fn pre_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut left = a.split('.');
+    let mut right = b.split('.');
+    loop {
+        let order = match (left.next(), right.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => match (x.parse::<u64>(), y.parse::<u64>()) {
+                (Ok(m), Ok(n)) => m.cmp(&n),
+                (Ok(_), Err(_)) => Ordering::Less,
+                (Err(_), Ok(_)) => Ordering::Greater,
+                (Err(_), Err(_)) => x.cmp(y),
+            },
+        };
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+}
+
 /// True when latest is a newer release than current. A final release is
-/// newer than its own prereleases; prereleases of one version compare as
-/// text, which orders rc.1 before rc.2.
+/// newer than its own prereleases.
 pub fn newer(latest: &str, current: &str) -> bool {
     let (Some(l), Some(c)) = (parse(latest), parse(current)) else {
         return false;
@@ -85,7 +109,7 @@ pub fn newer(latest: &str, current: &str) -> bool {
     match l.core.cmp(&c.core) {
         std::cmp::Ordering::Equal => match (&l.pre, &c.pre) {
             (None, Some(_)) => true,
-            (Some(lp), Some(cp)) => lp > cp,
+            (Some(lp), Some(cp)) => pre_cmp(lp, cp).is_gt(),
             _ => false,
         },
         order => order.is_gt(),
@@ -106,6 +130,9 @@ mod tests {
         assert!(newer("v1.2.3", "1.2.3-rc1"));
         assert!(!newer("v1.2.3-rc1", "1.2.3"));
         assert!(newer("v1.2.3-rc.2", "1.2.3-rc.1"));
+        assert!(newer("v1.2.3-rc.10", "1.2.3-rc.2"));
+        assert!(newer("v1.2.3-rc", "1.2.3-beta.9"));
+        assert!(newer("v1.2.3-rc.1", "1.2.3-rc"));
         assert!(parse("1.2.3.4").is_none());
         assert!(parse("1.2").is_none());
         assert_eq!(parse("v1.2.3+build5").unwrap().core, (1, 2, 3));

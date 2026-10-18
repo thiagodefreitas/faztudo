@@ -42,6 +42,12 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Hand the daemon archives to the desktop build, which has no token
+      # that could read the draft release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: daemon-archives
+          path: dist/*.tar.gz
 
   # The desktop app, built after GoReleaser so the AppImage carries the same
   # faztudo binary as the release tarball. Ubuntu 22.04 keeps the glibc and
@@ -60,10 +66,10 @@ jobs:
             arch: arm64
             triple: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
+    # Builds only; publishing is the desktop-publish job.
     permissions:
-      contents: write
+      contents: read
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # linuxdeploy is itself an AppImage; runners have no FUSE.
       APPIMAGE_EXTRACT_AND_RUN: 1
     steps:
@@ -92,13 +98,17 @@ jobs:
         if: github.event_name != 'push'
         with:
           go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: daemon-archives
+          path: ${{ runner.temp }}/archives
       - name: faztudo sidecar
         run: |
           mkdir -p desktop/src-tauri/binaries
           out="desktop/src-tauri/binaries/faztudo-${{ matrix.triple }}"
           if [ "${{ github.event_name }}" = push ]; then
-            gh release download "$GITHUB_REF_NAME" -p "faztudo_${{ steps.v.outputs.version }}_linux_${{ matrix.arch }}.tar.gz" -D "$RUNNER_TEMP"
-            tar -xzf "$RUNNER_TEMP"/faztudo_*.tar.gz -C "$RUNNER_TEMP" faztudo
+            tar -xzf "$RUNNER_TEMP/archives/faztudo_${{ steps.v.outputs.version }}_linux_${{ matrix.arch }}.tar.gz" -C "$RUNNER_TEMP" faztudo
             cp "$RUNNER_TEMP/faztudo" "$out"
           else
             # Dry run: the daemon without the embedded web app is enough to
@@ -131,11 +141,8 @@ jobs:
         with:
           name: desktop-${{ matrix.arch }}
           path: ${{ runner.temp }}/out/*
-      - name: upload to the draft release
-        if: github.event_name == 'push'
-        run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/out/* --clobber
 
-  desktop-checksums:
+  desktop-publish:
     needs: desktop
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -151,4 +158,4 @@ jobs:
           path: out
       - run: |
           cd out && sha256sum faztudo-desktop_* > checksums-desktop.txt && cat checksums-desktop.txt
-          gh release upload "$GITHUB_REF_NAME" checksums-desktop.txt --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$GITHUB_REF_NAME" faztudo-desktop_* checksums-desktop.txt --clobber --repo "$GITHUB_REPOSITORY"

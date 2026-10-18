@@ -1,6 +1,6 @@
 # 0005: The desktop app is a thin Tauri client
 
-Status: proposed, 2026-10-18
+Status: accepted, 2026-10-19
 
 ## Context
 
@@ -80,3 +80,23 @@ still to be measured on a real desktop.
   load (`after_seq` 0), which also stalls a fresh Chromium. The client is
   changed to start the stream at the current head.
 - Not measured yet: the tray on GNOME and KDE, and web notifications.
+
+## Build results (2026-10-19)
+
+- The app is `desktop/` in this repository. Release builds run on Ubuntu
+  22.04 runners for amd64 and arm64 (a dry run of the release job built all
+  four packages).
+- Sizes from that run: the `.deb` is about 2.6 MB and depends on the faztudo
+  package and the system WebKitGTK; the AppImage is about 85 MB, because it
+  carries WebKitGTK and an 18 MB faztudo.
+- Both desktop `.deb` packages install with every library resolved in clean
+  Debian 12 and Ubuntu 24.04 containers (`scripts/install-test.sh` with
+  `DESKTOP_DEB`).
+- On an Ubuntu 22.04 desktop the AppImage, with no faztudo installed, copies
+  its faztudo out of the mount, starts it, signs in and loads the app.
+- `faztudo stop` was added so Quit can cancel runs without the shell holding
+  the token. It stops the systemd user unit only when the unit's process is
+  the one listening on the configured address.
+- An independent review found eight issues before the first release, the
+  worst being that the `.deb` layout was mistaken for an AppImage; all were
+  fixed before merging.

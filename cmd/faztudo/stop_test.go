@@ -162,10 +162,13 @@ func TestListensOnMatchesTheProcessSocket(t *testing.T) {
 
 func TestProcAddresses(t *testing.T) {
 	got := procAddresses("127.0.0.1:7457")
-	for _, want := range []string{"0100007F:1D21", "00000000:1D21", "00000000000000000000000000000000:1D21"} {
+	for _, want := range []string{"0100007F:1D21", "00000000:1D21"} {
 		if !got[want] {
 			t.Errorf("missing %s in %v", want, got)
 		}
+	}
+	if got["00000000000000000000000000000000:1D21"] {
+		t.Error("an IPv6 wildcard must not count for an IPv4 address")
 	}
 	if got := procAddresses("[::1]:7457"); !got["00000000000000000000000001000000:1D21"] {
 		t.Errorf("::1 form missing: %v", got)

@@ -201,7 +201,7 @@ fn stable_copy(bin: &Binary) -> Result<PathBuf, String> {
     let dest = dir.join(format!("faztudo-{}", env!("CARGO_PKG_VERSION")));
     let bundled = std::fs::read(&bin.path).map_err(|e| format!("read the bundled faztudo: {e}"))?;
     // A rebuilt AppImage can carry a different binary under the same version.
-    if std::fs::read(&dest).is_ok_and(|have| have == bundled) {
+    if is_executable(&dest) && std::fs::read(&dest).is_ok_and(|have| have == bundled) {
         return Ok(dest);
     }
     let tmp = dir.join(format!(".faztudo-{}.tmp", std::process::id()));

@@ -131,8 +131,8 @@ func procAddresses(listen string) map[string]bool {
 		if v4 := ip.To4(); v4 != nil {
 			out[procHex(v4)+fmt.Sprintf(":%04X", port)] = true
 			out[procHex(net.IPv4zero.To4())+fmt.Sprintf(":%04X", port)] = true
-			// A dual-stack wildcard socket in tcp6 also serves IPv4.
-			out[procHex(net.IPv6zero)+fmt.Sprintf(":%04X", port)] = true
+			// An IPv6 wildcard socket may or may not serve IPv4 (IPV6_V6ONLY);
+			// proc does not say, so it never counts for an IPv4 address.
 		} else {
 			out[procHex(ip.To16())+fmt.Sprintf(":%04X", port)] = true
 			out[procHex(net.IPv6zero)+fmt.Sprintf(":%04X", port)] = true
