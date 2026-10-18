@@ -98,12 +98,15 @@ HTTPS.
    **Revoke** next to the device. Its session and any open WebSocket stream
    are closed right away.
 
-## Or use Tailscale
+## Or use a private network you already have (optional)
 
-Without LAN mode, Tailscale gives you an HTTPS address that only your own
-devices can open, from anywhere. With LAN mode on, these requests also need
-a login (faztudo recognizes them by the forwarding headers `tailscale serve`
-adds, even when they arrive from 127.0.0.1):
+LAN mode is the built-in way and needs nothing else. To reach faztudo away
+from home, put it behind any VPN or reverse proxy on this machine that only
+lets your own devices in. faztudo does not depend on any of them. With LAN
+mode on, proxied requests also need a login (faztudo recognizes them by the
+forwarding headers a proxy adds, even when they arrive from 127.0.0.1).
+
+Tailscale is one example:
 
 1. Log in to Tailscale on this machine and on the phone (same account).
 2. Enable Serve for your tailnet when Tailscale asks, and allow your user

@@ -9,6 +9,11 @@ requests against the current milestone.
 - **No secrets, ever.** Do not commit tokens, keys, `.env` files, databases or
   logs. A gitleaks hook runs before each commit and CI scans the whole
   history. If you leak something, rotate it first, then tell us.
+- **No access information either.** Real hostnames, VPN machine names,
+  addresses and device names stay out of the repo; use placeholders such as
+  `mypc.tailnet-name.ts.net` or `192.0.2.10`. To have the hooks catch your
+  own, list them in `.git/info/private-patterns` (one regex per line). That
+  file lives inside `.git`, so it is never committed.
 - **Humans author commits.** Every commit is authored by a person under their
   own name. Commit messages carry no `Co-authored-by` or other attribution
   trailers for tools. AI tools are welcome as helpers; the person committing

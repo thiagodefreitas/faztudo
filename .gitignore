@@ -80,3 +80,7 @@ Thumbs.db
 # Built web app copied in by `make web`; only the placeholder is tracked
 internal/webui/dist/*
 !internal/webui/dist/.keep
+
+# Python bytecode (embeds local paths)
+__pycache__/
+*.py[cod]

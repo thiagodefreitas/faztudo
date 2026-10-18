@@ -4,12 +4,19 @@ pre-commit:
   commands:
     gitleaks:
       run: gitleaks protect --staged --redact --no-banner
+    private:
+      run: scripts/check_private.sh staged
     prose:
       glob: "*.{md,mdx}"
       run: python3 scripts/lint_prose.py {staged_files}
     gofmt:
       glob: "*.go"
       run: test -z "$(gofmt -l {staged_files})" || (gofmt -l {staged_files}; exit 1)
+
+pre-push:
+  commands:
+    private:
+      run: scripts/check_private.sh push
 
 commit-msg:
   commands:
