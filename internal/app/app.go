@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +162,14 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 	if err != nil {
 		return domain.Lane{}, err
 	}
+	// A probe is the human's "try again": an unavailable lane gets another
+	// chance, and the next failed run marks it again. This holds for CLIs
+	// without a usage reader too.
+	if lane.Health == domain.LaneUnavailable {
+		if err := a.Registry.Recover(ctx, id, "probe requested after an error"); err != nil {
+			return domain.Lane{}, err
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return domain.Lane{}, err
@@ -273,13 +282,56 @@ func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member, ov
 	}
 }
 
+// execute runs agent on m. When the lane fails because of its login or plan,
+// and the human did not choose the lane, the request runs once more on the
+// next lane in the persona's chain as a new run linked to the first.
 func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member, override string) error {
+	var failed string
+	err := a.attempt(ctx, m, agent, override, "", &failed)
+	if failed != "" {
+		err = a.attempt(ctx, m, agent, "", failed, new(string))
+	}
+	return err
+}
+
+// channelLane returns the lane the channel prefers for agent, or "" when it
+// has none or the lane cannot run now.
+func (a *App) channelLane(channel domain.Channel, agent domain.Member) string {
+	id := channel.LaneOverrides[strings.ToLower(agent.Handle)]
+	if id == "" || agent.Agent == nil || !slices.Contains(agent.Agent.Lanes, id) {
+		return ""
+	}
+	if l, ok := a.Registry.Snapshot(id); !ok || l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable {
+		return ""
+	}
+	return id
+}
+
+// laneFailed reports whether run failed because its lane lost its login or
+// plan, so another lane could still do the work.
+func (a *App) laneFailed(run domain.Run) bool {
+	if run.StartedAt == nil || run.FailureClass != domain.FailureSemantic {
+		return false
+	}
+	l, ok := a.Registry.Snapshot(run.LaneID)
+	return ok && l.LastError != nil && !l.LastError.At.Before(*run.StartedAt) &&
+		(l.Health == domain.LaneUnavailable || l.Health == domain.LaneExhausted)
+}
+
+// attempt is one run of agent on m. It sets *failed to the id of the failed
+// run when the caller should retry on the next lane; retryOf is the failed
+// run when this attempt is that retry.
+func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string) error {
+	explicit := override != "" // the human chose the lane for this message
 	if agent.Agent == nil {
 		return errors.New("agent has no lane chain")
 	}
 	channel, err := a.Store.Channel(ctx, m.ChannelID)
 	if err != nil {
 		return err
+	}
+	if override == "" && retryOf == "" {
+		override = a.channelLane(channel, agent)
 	}
 	mode := agent.Agent.Mode
 	if mode == "" {
@@ -297,11 +349,19 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		a.notice(ctx, channel.ID, "info", fmt.Sprintf("@%s is queued: %s busy; it starts when a lane frees up.", agent.Handle, strings.Join(ids, ", ")))
 	})
 	if err != nil {
+		if explicit && len(skipped) > 0 {
+			return fmt.Errorf("lane %s cannot run now: %s. A /lane override does not fall back to another lane.", override, skipped[0].Reason)
+		}
 		return err
+	}
+	if retryOf != "" {
+		if prior, perr := a.Store.Run(ctx, retryOf); perr == nil {
+			a.notice(ctx, channel.ID, "warn", fmt.Sprintf("Run on %s failed (%s). Retrying @%s on %s.", prior.LaneID, prior.FailureReason, agent.Handle, lane.ID))
+		}
 	}
 	if lane.Health == domain.LaneConserve {
 		a.notice(ctx, channel.ID, "warn", fmt.Sprintf("Using %s although it is in conserve (%s): no other lane in @%s's chain is usable.", lane.ID, lane.HealthReason, agent.Handle))
-	} else if len(skipped) > 0 {
+	} else if len(skipped) > 0 && retryOf == "" {
 		a.notice(ctx, channel.ID, "warn", fmt.Sprintf("Using %s; %s was skipped: %s", lane.ID, skipped[0].ID, skipped[0].Reason))
 	}
 	adapter := a.Adapters[lane.CLI]
@@ -323,7 +383,7 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	if err != nil {
 		return err
 	}
-	run := domain.Run{ID: store.NewID(), ChannelID: channel.ID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: lane.ID, Mode: mode, State: domain.RunQueued}
+	run := domain.Run{ID: store.NewID(), ChannelID: channel.ID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: lane.ID, Mode: mode, State: domain.RunQueued, RetryOf: retryOf}
 	runCtx, cancel := context.WithCancel(ctx)
 	a.activeMu.Lock()
 	if a.active == nil {
@@ -368,6 +428,20 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 		}
 		run.FailureReason = err.Error()
 		_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run})
+	}
+	if err != nil && a.laneFailed(run) {
+		if explicit {
+			a.notice(ctx, channel.ID, "warn", fmt.Sprintf("You chose lane %s for this message, so @%s was not moved to another lane.", lane.ID, agent.Handle))
+		} else if retryOf == "" {
+			// Retry once, if another lane in the chain can take the work.
+			if _, left, perr := a.Registry.Pick(agent.Handle, ""); perr == nil || lanes.Busy(left) {
+				*failed = run.ID
+				return nil
+			}
+		}
+	}
+	if err == nil {
+		_ = a.Registry.Recover(ctx, lane.ID, "last run succeeded")
 	}
 	var proposal string
 	if run.StartedAt != nil {

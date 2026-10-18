@@ -293,6 +293,23 @@ function SettingsForm({
           </select>
         )}
       </Field>
+      <div>
+        <p className="text-[13px] font-medium text-ink">Lane preferences</p>
+        {Object.keys(channel.lane_overrides ?? {}).length === 0 ? (
+          <p className="text-[12px] text-muted">None. Set one with /lane &lt;persona&gt; &lt;lane&gt; in this channel.</p>
+        ) : (
+          <>
+            <ul className="mt-1 space-y-0.5 font-mono text-[12px] text-ink">
+              {Object.entries(channel.lane_overrides ?? {}).map(([handle, lane]) => (
+                <li key={handle}>
+                  @{handle}: {lane}
+                </li>
+              ))}
+            </ul>
+            <p className="text-[12px] text-muted">Clear one with /lane &lt;persona&gt; default.</p>
+          </>
+        )}
+      </div>
     </Shell>
   )
 }

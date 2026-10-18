@@ -34,6 +34,8 @@ export interface Channel {
   repo_path?: string
   test_command?: string
   default_agent_id?: ID
+  /** Persona handle to preferred lane id, set with /lane <persona> <lane>. */
+  lane_overrides?: Record<string, string>
   member_ids: ID[]
   unread: number
   last_seq?: number
@@ -91,6 +93,8 @@ export interface Run {
   exit_code?: number
   failure_class?: FailureClass
   failure_reason?: string
+  /** The failed run this one retried on the next lane. */
+  retry_of?: ID
   verification?: Verification
   diff_stat?: DiffStat
 }

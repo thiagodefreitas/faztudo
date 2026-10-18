@@ -193,6 +193,33 @@ func validate(r Request) error {
 var resetPattern = regexp.MustCompile(`(?i)(?:retry|try again|reset|resets)\s+(?:in\s+)?(\d+)\s*(seconds?|minutes?|hours?|days?)`)
 var serverErrorPattern = regexp.MustCompile(`\b5\d\d\b`)
 
+// authPattern matches the CLIs' own login and plan failures. A bare 401 or
+// 403 does not count: agents often print HTTP status codes from the code they
+// are testing.
+var authPattern = regexp.MustCompile(`(?i)auth_error|authentication_error|unauthori[sz]ed|not logged in|please (?:log ?in|sign ?in)|upgrade your plan|subscription (?:does not|doesn't|has expired|expired|is inactive|required)|invalid api key|(?:api error|status|http)\W{0,3}40[13]\b`)
+
+// testFailure marks output from tests the agent ran. A CLI login failure
+// happens before any work, so a tail with test failures is the task failing.
+var testFailure = regexp.MustCompile(`(?m)^\s*(?:--- FAIL|FAIL\s|=== RUN)|_test\.go:\d+|\bAssertionError\b|\bTests?:\s+\d+ failed`)
+
+// authLine returns the first line of tail that reports a login, plan or
+// subscription failure, trimmed and capped so it reads as a lane reason.
+func authLine(tail string) string {
+	if testFailure.MatchString(tail) {
+		return ""
+	}
+	for _, l := range strings.Split(tail, "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" && authPattern.MatchString(l) {
+			if len(l) > 200 {
+				l = l[:200]
+			}
+			return l
+		}
+	}
+	return ""
+}
+
 func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	if code == 0 {
 		return "", LaneSignal{Kind: SignalNone}, ""
@@ -214,12 +241,17 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 		reset = time.Duration(n) * unit
 	}
 	switch {
-	case strings.Contains(s, "402"), strings.Contains(s, "quota"), strings.Contains(s, "usage limit"), strings.Contains(s, "403") && strings.Contains(s, "provider"), (strings.Contains(s, "429") || strings.Contains(s, "rate limit")) && reset >= 30*time.Minute:
+	case strings.Contains(s, "402"), strings.Contains(s, "quota"), strings.Contains(s, "usage limit"), strings.Contains(s, "monthly limit"), strings.Contains(s, "plan limit"), (strings.Contains(s, "429") || strings.Contains(s, "rate limit")) && reset >= 30*time.Minute:
 		signal.Kind = SignalExhausted
 		if reset > 0 {
 			signal.Until = time.Now().Add(reset)
 		}
 		return domain.FailureSemantic, signal, tail
+	case authLine(tail) != "":
+		// The login or plan is the problem, not the task: retrying the
+		// same lane cannot help until the person fixes it.
+		signal.Kind = SignalUnavailable
+		return domain.FailureSemantic, signal, authLine(tail)
 	case strings.Contains(s, "429"), strings.Contains(s, "rate limit"), strings.Contains(s, "timeout"), strings.Contains(s, "timed out"), strings.Contains(s, "connection reset"), strings.Contains(s, "connection refused"), serverErrorPattern.MatchString(s):
 		return domain.FailureTransient, signal, tail
 	default:

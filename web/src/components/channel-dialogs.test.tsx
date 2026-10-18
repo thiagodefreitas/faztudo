@@ -58,6 +58,19 @@ describe("ChannelSettingsDialog", () => {
     expect(qc.getQueryData<Channel[]>(qk.channels)?.[0]?.topic).toBe("new")
   })
 
+  it("lists the channel's lane preferences", () => {
+    wrap(
+      <ChannelSettingsDialog
+        channel={{ ...channel, lane_overrides: { coder: "claude/default" } }}
+        agents={agents}
+        open
+        onOpenChange={() => undefined}
+      />,
+    )
+    expect(screen.getByText("@coder: claude/default")).toBeInTheDocument()
+    expect(screen.getByText(/Clear one with/)).toBeInTheDocument()
+  })
+
   it("offers None plus every agent as the default agent and sends the choice", async () => {
     const user = userEvent.setup()
     const spy = vi.spyOn(api, "patchChannel").mockResolvedValue({ ...channel, default_agent_id: agents[1]?.id })

@@ -458,3 +458,34 @@ func (r *Registry) ApplySignalForChannel(ctx context.Context, runID, channelID, 
 	_, err = r.app.Append(ctx, events.Draft{Type: events.Notice, Version: 1, Actor: events.System, ChannelID: channelID, Payload: events.NoticePayload{Level: "warn", Text: fmt.Sprintf("Lane %s is %s (%s); next run uses %s", laneID, copyLane.Health, reason, next.ID)}})
 	return err
 }
+
+// Busy reports whether any lane in skipped was skipped only for lack of
+// free capacity, so waiting could still produce a lane.
+func Busy(skipped []Skipped) bool { return onlyBusy(skipped) }
+
+// Recover clears a failure signal after a probe or a run succeeded on the
+// lane: an unavailable or exhausted lane goes back to unknown until the next
+// reading, and the last error is dropped. It does nothing for a lane without
+// a recorded error.
+func (r *Registry) Recover(ctx context.Context, id, reason string) error {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil || l.LastError == nil {
+		r.mu.Unlock()
+		return nil
+	}
+	l.LastError = nil
+	if l.Health == domain.LaneUnavailable || l.Health == domain.LaneExhausted {
+		l.Health, l.HealthReason = domain.LaneUnknown, reason
+	}
+	delete(r.until, id)
+	close(r.changed)
+	r.changed = make(chan struct{})
+	copyLane := *l
+	r.mu.Unlock()
+	if r.app == nil {
+		return nil
+	}
+	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
+	return err
+}

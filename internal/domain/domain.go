@@ -67,9 +67,12 @@ type Channel struct {
 	RepoPath       string      `json:"repo_path,omitempty"`
 	TestCommand    string      `json:"test_command,omitempty"`
 	DefaultAgentID ID          `json:"default_agent_id,omitempty"`
-	MemberIDs      []ID        `json:"member_ids"`
-	Unread         int         `json:"unread"`
-	LastSeq        int64       `json:"last_seq,omitempty"`
+	// LaneOverrides maps a persona handle to the lane it prefers in this
+	// channel, set with "/lane <persona> <lane>".
+	LaneOverrides map[string]string `json:"lane_overrides,omitempty"`
+	MemberIDs     []ID              `json:"member_ids"`
+	Unread        int               `json:"unread"`
+	LastSeq       int64             `json:"last_seq,omitempty"`
 }
 
 type Message struct {
@@ -130,22 +133,24 @@ type DiffStat struct {
 }
 
 type Run struct {
-	ID               ID            `json:"id"`
-	ChannelID        ID            `json:"channel_id"`
-	TriggerMessageID ID            `json:"trigger_message_id"`
-	AgentID          ID            `json:"agent_id"`
-	LaneID           string        `json:"lane_id"`
-	Mode             RunMode       `json:"mode"`
-	State            RunState      `json:"state"`
-	Worktree         string        `json:"worktree,omitempty"`
-	BaseCommit       string        `json:"base_commit,omitempty"`
-	StartedAt        *time.Time    `json:"started_at,omitempty"`
-	EndedAt          *time.Time    `json:"ended_at,omitempty"`
-	ExitCode         *int          `json:"exit_code,omitempty"`
-	FailureClass     FailureClass  `json:"failure_class,omitempty"`
-	FailureReason    string        `json:"failure_reason,omitempty"`
-	Verification     *Verification `json:"verification,omitempty"`
-	DiffStat         *DiffStat     `json:"diff_stat,omitempty"`
+	ID               ID           `json:"id"`
+	ChannelID        ID           `json:"channel_id"`
+	TriggerMessageID ID           `json:"trigger_message_id"`
+	AgentID          ID           `json:"agent_id"`
+	LaneID           string       `json:"lane_id"`
+	Mode             RunMode      `json:"mode"`
+	State            RunState     `json:"state"`
+	Worktree         string       `json:"worktree,omitempty"`
+	BaseCommit       string       `json:"base_commit,omitempty"`
+	StartedAt        *time.Time   `json:"started_at,omitempty"`
+	EndedAt          *time.Time   `json:"ended_at,omitempty"`
+	ExitCode         *int         `json:"exit_code,omitempty"`
+	FailureClass     FailureClass `json:"failure_class,omitempty"`
+	FailureReason    string       `json:"failure_reason,omitempty"`
+	// RetryOf is the failed run this one retried on the next lane.
+	RetryOf      ID            `json:"retry_of,omitempty"`
+	Verification *Verification `json:"verification,omitempty"`
+	DiffStat     *DiffStat     `json:"diff_stat,omitempty"`
 }
 
 type ApprovalOption struct {

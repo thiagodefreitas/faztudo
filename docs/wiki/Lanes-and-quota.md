@@ -34,10 +34,17 @@ If a number is wrong, the API (`PATCH /api/v1/lanes/{id}`) accepts a health over
 
 ## Switching
 
-- **By hand**: `@coder /lane claude/opus ...` for one message. A
-  channel-wide override is planned.
+- **By hand**: `@coder /lane claude/opus ...` for one message. That run
+  does not fall back to another lane if the lane fails.
+- **For a channel**: `/lane coder claude/opus` makes that lane Coder's
+  preferred lane in the channel, and `/lane coder default` clears it. The
+  channel settings list what is set.
 - **Automatic**: when a lane is exhausted or unavailable, new runs take the
   next usable lane in the persona's list and the channel gets a notice.
+  This includes login and plan errors such as an expired sign-in or a
+  subscription that no longer covers the CLI: the run that hit the error is
+  retried once on the next lane, and the notice names both lanes and the
+  reason. Probe the lane from the Lanes page after you fix the problem.
   Conserve lanes run only when nothing else in the chain is usable. A lane
   that is merely busy counts as usable, so the run waits for it.
 

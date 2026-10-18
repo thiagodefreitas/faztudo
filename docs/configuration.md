@@ -149,6 +149,30 @@ Switching:
   override applies to that persona for that message only and is removed from
   the prompt. An unknown lane, or one outside the persona's list, gets a
   notice and no run.
-- For a channel: `/lane coder claude/opus` in that channel.
+- For a channel: `/lane coder claude/opus` in that channel makes that lane
+  the persona's preferred lane there, until `/lane coder default` clears it.
+  The lane must be in the persona's list. If the preferred lane is exhausted
+  or unavailable, the normal order applies. Channel settings list the
+  preferences, and `PATCH /api/v1/channels/{id}` accepts `lane_overrides`.
+  The command starts no agent.
 - Automatically: when a lane becomes exhausted or unavailable, new runs take
   the next healthy lane in the persona's list and the channel gets a notice.
+
+Login and plan errors:
+
+- Each adapter reads the CLI's error lines. A login or plan failure (HTTP
+  401 or 403, `auth_error`, "not logged in", "please log in", "upgrade your
+  plan", "subscription") marks the lane unavailable, with that line as the
+  reason, on the Lanes page and in `/status`. A monthly or plan quota
+  message marks it exhausted, until the reset time when the message gives
+  one. Timeouts and 5xx errors stay transient and are retried on the same
+  lane. A failed task stays a failed task.
+- The run that hit the error is retried once on the next healthy lane in the
+  persona's list, as a new run whose `retry_of` is the failed run. The
+  channel gets a notice naming both lanes and the reason, and the failed
+  attempt posts no reply of its own.
+- A lane chosen in the message (`@coder /lane ...`) does not fall back. The
+  run fails and the notice says why.
+- An unavailable lane stays out of use until you probe it
+  (`POST /api/v1/lanes/{id}/probe`, or the probe button on the Lanes page)
+  or a run on it succeeds. The next failed run marks it again.

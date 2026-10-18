@@ -353,6 +353,8 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 		TestCommand  *string   `json:"test_command"`
 		DefaultAgent *string   `json:"default_agent_id"`
 		MemberIDs    *[]string `json:"member_ids"`
+		// LaneOverrides replaces the channel's persona-to-lane preferences.
+		LaneOverrides *map[string]string `json:"lane_overrides"`
 	}
 	if !decode(w, r, &v) {
 		return
@@ -388,6 +390,25 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 		if _, ok := channelAgent(c, c.DefaultAgentID, members); !ok {
 			fail(w, 400, "bad_request", "default_agent_id must be an agent member of the channel")
 			return
+		}
+	}
+	if v.LaneOverrides != nil {
+		members, err := a.Store.Members(r.Context())
+		if err != nil {
+			failErr(w, err)
+			return
+		}
+		overrides := map[string]string{}
+		for handle, lane := range *v.LaneOverrides {
+			if err := checkLaneOverride(members, handle, lane); err != nil {
+				fail(w, 400, "bad_request", "lane_overrides: "+err.Error())
+				return
+			}
+			overrides[strings.ToLower(handle)] = lane
+		}
+		c.LaneOverrides = overrides
+		if len(overrides) == 0 {
+			c.LaneOverrides = nil
 		}
 	}
 	if err := validateRepo(r.Context(), c.RepoPath); err != nil {
@@ -505,6 +526,9 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	if len(agents) == 0 {
 		agents = directAgent(c, members)
 	}
+	if isCommand(v.Body, "/lane") {
+		agents = nil // a channel command, even in a direct channel
+	}
 	if len(agents) == 0 && len(ids) == 0 && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
 		if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {
 			agents = []domain.Member{m}
@@ -524,6 +548,9 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	respond(w, 201, m)
 	if newMessageID == m.ID && len(agents) > 0 {
 		a.Trigger.OnMessage(r.Context(), m, agents)
+	}
+	if newMessageID == m.ID && isCommand(m.Body, "/lane") && len(ids) == 0 {
+		a.laneCommand(r.Context(), c, members, m.Body)
 	}
 	if newMessageID == m.ID && isCommand(m.Body, "/status") {
 		if text, err := a.statusText(r.Context(), c.ID); err == nil {
@@ -574,6 +601,9 @@ func (a *API) statusText(ctx context.Context, channelID string) (string, error) 
 	b.WriteString("\nLanes:")
 	for _, l := range lanes {
 		fmt.Fprintf(&b, "\n- %s: %s, %d/%d running", l.ID, l.Health, l.Running, l.Capacity)
+		if (l.Health == domain.LaneUnavailable || l.Health == domain.LaneExhausted) && l.HealthReason != "" {
+			fmt.Fprintf(&b, " (%s)", l.HealthReason)
+		}
 		for _, w := range l.Windows {
 			if w.UsedPct != nil {
 				fmt.Fprintf(&b, ", %s %.0f%%", w.Name, *w.UsedPct)
