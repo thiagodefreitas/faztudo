@@ -451,7 +451,8 @@ func TestLiveSandboxedCLIWriteRun(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		adapter adapters.Adapter
-	}{{"claude", adapters.Claude{}}, {"codex", adapters.Codex{}}} {
+		// SECURITY.md lists which of these have been checked live.
+	}{{"claude", adapters.Claude{}}, {"codex", adapters.Codex{}}, {"grok", adapters.Grok{}}, {"kimi", adapters.Kimi{}}, {"agy", adapters.Agy{}}, {"opencode", adapters.OpenCode{}}} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := exec.LookPath(tc.name); err != nil {
 				t.Skipf("%s unavailable: %v", tc.name, err)

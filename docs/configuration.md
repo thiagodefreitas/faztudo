@@ -78,12 +78,19 @@ With `auto`, write runs use bubblewrap on Linux when it and unprivileged user
 namespaces work. It posts one channel notice per run if it falls back to the
 old process mode. `required` refuses the run instead; `off` disables the
 sandbox. Existing config files that explicitly say `sandbox = "off"` keep
-that setting until you change it. The worktree is writable. The shared git directory is read-only
-except its objects, refs, logs and packed-refs. The run's worktree metadata
-is a writable copy, isolated from host Git.
+that setting until you change it. The worktree is writable, except its `.git`
+file. The shared git directory is read-only except its objects. The run's
+worktree metadata is a writable copy, isolated from host Git, and the run's
+own branch `fz/<run id>` is a private writable copy of its ref and reflog, so
+the agent can commit but cannot move `main` or any other ref.
 The channel test command runs inside the same sandbox. Host-side git commands
-disable fsmonitor, hooks, external diffs and textconv. CLI config and sign-in
-paths are read-only except existing OAuth credential files: Claude's
+on an agent worktree name its real git directory and work tree explicitly, and
+disable fsmonitor, hooks, external diffs, textconv and global attributes; a
+worktree whose `.git` file was changed fails the run as tampered with.
+Codex runs with a `CODEX_HOME` under the run's state directory: your
+`config.toml`, `AGENTS.md`, `packages/`, `plugins/`, `skills/` and `rules/` are
+read-only, `auth.json` is writable, and the rest is fresh. Other CLI config and
+sign-in paths are read-only except existing OAuth credential files: Claude's
 `.claude/.credentials.json`, Codex's `.codex/auth.json`, Grok's
 `.grok/auth.json`, Kimi's `.kimi-code/credentials/*` and
 `.kimi-code/oauth/*`, Agy's `.gemini/antigravity-cli/antigravity-oauth-token`,

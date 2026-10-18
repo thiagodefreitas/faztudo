@@ -102,9 +102,15 @@ func TestGitMetadataIsReadOnly(t *testing.T) {
 	if !hasBind(args, "--ro-bind", git) || hasBind(args, "--bind", git) {
 		t.Fatal("shared git metadata is writable")
 	}
-	for _, p := range []string{"objects", "refs", "logs", "worktrees/run"} {
-		if !hasBind(args, "--bind", filepath.Join(git, p)) {
-			t.Fatalf("missing writable git %s", p)
+	if !hasBind(args, "--bind", filepath.Join(git, "objects")) {
+		t.Fatal("missing writable git objects")
+	}
+	if !hasMount(args, "--bind", filepath.Join(git, "worktrees", "run"), filepath.Join(git, "worktrees", "run")) {
+		t.Fatal("missing writable git worktree admin")
+	}
+	for _, p := range []string{"refs", "logs", "packed-refs", "config", "hooks", "info"} {
+		if hasBind(args, "--bind", filepath.Join(git, p)) {
+			t.Fatalf("git %s is writable", p)
 		}
 	}
 }
@@ -170,7 +176,7 @@ func TestSessionFileUsesPerRunCopy(t *testing.T) {
 	worktree := filepath.Join(t.TempDir(), "run")
 	git := filepath.Join(t.TempDir(), ".git")
 	state := filepath.Join(t.TempDir(), "state")
-	sessions := filepath.Join(home, ".codex", "session_index.jsonl")
+	sessions := filepath.Join(home, ".grok", "active_sessions.json")
 	for _, p := range []string{worktree, git, state, filepath.Dir(sessions)} {
 		if err := os.MkdirAll(p, 0700); err != nil {
 			t.Fatal(err)
@@ -179,11 +185,11 @@ func TestSessionFileUsesPerRunCopy(t *testing.T) {
 	if err := os.WriteFile(sessions, []byte("original"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "codex", StateDir: state})
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "grok", StateDir: state})
 	if err != nil {
 		t.Fatal(err)
 	}
-	copy := filepath.Join(state, "sessions", ".codex", "session_index.jsonl")
+	copy := filepath.Join(state, "sessions", ".grok", "active_sessions.json")
 	if !hasMount(args, "--bind", copy, sessions) {
 		t.Fatal("session file does not have a private writable copy")
 	}
@@ -259,36 +265,36 @@ func TestSandboxCannotRewriteHostGitOrCLISettings(t *testing.T) {
 	git := filepath.Join(t.TempDir(), ".git")
 	admin := filepath.Join(git, "worktrees", "run")
 	state := filepath.Join(t.TempDir(), "state")
-	for _, p := range []string{worktree, admin, filepath.Join(home, ".codex"), state} {
+	for _, p := range []string{worktree, admin, filepath.Join(home, ".grok"), state} {
 		if err := os.MkdirAll(p, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, p := range []string{filepath.Join(git, "config"), filepath.Join(admin, "commondir"), filepath.Join(home, ".codex", "config.toml"), filepath.Join(home, ".codex", "auth.json"), filepath.Join(home, ".codex", "session_index.jsonl")} {
+	for _, p := range []string{filepath.Join(git, "config"), filepath.Join(admin, "commondir"), filepath.Join(home, ".grok", "config.toml"), filepath.Join(home, ".grok", "auth.json"), filepath.Join(home, ".grok", "active_sessions.json")} {
 		if err := os.WriteFile(p, []byte("original"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "codex", Network: true, StateDir: state})
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "grok", Network: true, StateDir: state})
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := "if echo changed > '" + filepath.Join(git, "config") + "'; then exit 11; fi; " +
-		"if echo changed > '" + filepath.Join(home, ".codex", "config.toml") + "'; then exit 12; fi; " +
+		"if echo changed > '" + filepath.Join(home, ".grok", "config.toml") + "'; then exit 12; fi; " +
 		"echo changed > '" + filepath.Join(admin, "commondir") + "'; " +
-		"echo changed > '" + filepath.Join(home, ".codex", "session_index.jsonl") + "'; " +
-		"echo refreshed > '" + filepath.Join(home, ".codex", "auth.json") + "'; " +
+		"echo changed > '" + filepath.Join(home, ".grok", "active_sessions.json") + "'; " +
+		"echo refreshed > '" + filepath.Join(home, ".grok", "auth.json") + "'; " +
 		"echo work > result"
 	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", script)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("sandbox command: %v: %s", err, out)
 	}
-	for _, p := range []string{filepath.Join(git, "config"), filepath.Join(admin, "commondir"), filepath.Join(home, ".codex", "config.toml"), filepath.Join(home, ".codex", "session_index.jsonl")} {
+	for _, p := range []string{filepath.Join(git, "config"), filepath.Join(admin, "commondir"), filepath.Join(home, ".grok", "config.toml"), filepath.Join(home, ".grok", "active_sessions.json")} {
 		if got, err := os.ReadFile(p); err != nil || string(got) != "original" {
 			t.Fatalf("host file %s changed: %q, %v", p, got, err)
 		}
 	}
-	if got, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json")); err != nil || string(got) != "refreshed\n" {
+	if got, err := os.ReadFile(filepath.Join(home, ".grok", "auth.json")); err != nil || string(got) != "refreshed\n" {
 		t.Fatalf("OAuth refresh exception failed: %q, %v", got, err)
 	}
 	if got, err := os.ReadFile(filepath.Join(worktree, "result")); err != nil || string(got) != "work\n" {

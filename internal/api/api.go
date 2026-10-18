@@ -838,7 +838,18 @@ func (a *API) diff(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "conflict", "run has no base commit")
 		return
 	}
-	_, diff, e := (worktree.Manager{}).Diff(r.Context(), worktree.Worktree{Path: v.Worktree, BaseCommit: v.BaseCommit})
+	ch, e := a.Store.Channel(r.Context(), v.ChannelID)
+	if e != nil {
+		failErr(w, e)
+		return
+	}
+	wm := worktree.Manager{}
+	wt, e := wm.Open(r.Context(), ch.RepoPath, v.Worktree, "fz/"+v.ID, v.BaseCommit)
+	if e != nil {
+		fail(w, 500, "internal", "diff unavailable")
+		return
+	}
+	_, diff, e := wm.Diff(r.Context(), wt)
 	if e != nil {
 		fail(w, 500, "internal", "diff unavailable")
 		return

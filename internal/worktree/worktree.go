@@ -16,22 +16,122 @@ import (
 )
 
 type Manager struct{ BaseDir string }
-type Worktree struct{ Repo, Path, Branch, BaseCommit string }
+
+// Worktree is one run's checkout. Admin is the run's own administration
+// directory inside the shared git directory (<git dir>/worktrees/<name>).
+type Worktree struct{ Repo, Path, Branch, BaseCommit, Admin string }
+
+// ErrTampered means the agent changed the worktree's .git file.
+var ErrTampered = errors.New("worktree was tampered with")
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {
-	// Repository configuration may have been changed by an agent. Never run
-	// its executable Git extensions in the host process.
+	return runGit(ctx, dir, nil, args...)
+}
+
+// runGit runs host-side git. Repository configuration may have been changed
+// by an agent, so never run its executable Git extensions in the host process.
+func runGit(ctx context.Context, dir string, prefix []string, args ...string) (string, error) {
 	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null"}
+	flags = append(flags, prefix...)
 	if len(args) > 0 && args[0] == "diff" {
 		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
 	}
 	cmd := exec.CommandContext(ctx, "git", append(flags, args...)...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_ATTR_NOSYSTEM=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// runIn runs git on an agent worktree. It never trusts the worktree's own
+// .git: the git directory and work tree are named explicitly, so a .git file
+// or repository the agent put there is not read, and neither is any filter,
+// alias or config defined in it. The agent cannot write the real git
+// directory's config, so a filter driver cannot be defined at all.
+func runIn(ctx context.Context, w Worktree, args ...string) (string, error) {
+	if w.Admin == "" {
+		return "", errors.New("worktree git directory unknown")
+	}
+	return runGit(ctx, w.Path, []string{"-c", "core.attributesFile=/dev/null", "--git-dir=" + w.Admin, "--work-tree=" + w.Path}, args...)
+}
+
+// Git runs host-side git on the run's worktree after checking that the agent
+// left its .git file alone.
+func (m Manager) Git(ctx context.Context, w Worktree, args ...string) (string, error) {
+	if err := m.Check(w); err != nil {
+		return "", err
+	}
+	return runIn(ctx, w, args...)
+}
+
+// Commit makes a commit as the human: their Git identity, not the run's.
+func (m Manager) Commit(ctx context.Context, w Worktree, message string) error {
+	if err := m.Check(w); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null",
+		"--git-dir="+w.Admin, "--work-tree="+w.Path, "commit", "-q", "-m", message)
+	cmd.Dir = w.Path
+	cmd.Env = []string{"GIT_ATTR_NOSYSTEM=1"}
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(key, "GIT_AUTHOR_") && !strings.HasPrefix(key, "GIT_COMMITTER_") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func gitFile(admin string) string { return "gitdir: " + admin + "\n" }
+
+// adminDir finds the run's administration directory from the trusted repo.
+func adminDir(ctx context.Context, repo, path string) (string, error) {
+	out, err := run(ctx, repo, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(repo, out)
+	}
+	common, err := filepath.Abs(out)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(common, "worktrees", filepath.Base(path)), nil
+}
+
+// Open rebuilds a Worktree for an existing run from the trusted repository.
+func (m Manager) Open(ctx context.Context, repo, path, branch, base string) (Worktree, error) {
+	admin, err := adminDir(ctx, repo, path)
+	if err != nil {
+		return Worktree{}, err
+	}
+	return Worktree{Repo: repo, Path: path, Branch: branch, BaseCommit: base, Admin: admin}, nil
+}
+
+// Check fails with ErrTampered unless the worktree's .git is still the exact
+// gitdir file faztudo wrote.
+func (m Manager) Check(w Worktree) error {
+	if w.Admin == "" {
+		return errors.New("worktree git directory unknown")
+	}
+	path := filepath.Join(w.Path, ".git")
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: its .git file is missing or not a plain file; nothing was diffed or merged", ErrTampered)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != gitFile(w.Admin) {
+		return fmt.Errorf("%w: its .git file no longer points at the run's git directory; nothing was diffed or merged", ErrTampered)
+	}
+	return nil
 }
 func (m Manager) Create(ctx context.Context, repo, id string) (Worktree, error) {
 	if m.BaseDir == "" || id == "" || strings.ContainsAny(id, "/\\.") || id == ".." {
@@ -51,6 +151,16 @@ func (m Manager) Create(ctx context.Context, repo, id string) (Worktree, error) 
 	w := Worktree{Repo: abs, Path: filepath.Join(m.BaseDir, id), Branch: "fz/" + id, BaseCommit: base}
 	if _, err = run(ctx, abs, "worktree", "add", "-b", w.Branch, w.Path, base); err != nil {
 		return Worktree{}, err
+	}
+	// Write the .git file ourselves so Check can compare it byte for byte.
+	if w.Admin, err = adminDir(ctx, abs, w.Path); err == nil {
+		if _, err = os.Stat(w.Admin); err == nil {
+			err = os.WriteFile(filepath.Join(w.Path, ".git"), []byte(gitFile(w.Admin)), 0644)
+		}
+	}
+	if err != nil {
+		_ = m.Cleanup(context.Background(), w)
+		return Worktree{}, fmt.Errorf("worktree git directory: %w", err)
 	}
 	return w, nil
 }
@@ -86,7 +196,7 @@ func IsArtifact(path string) bool {
 // untracked lists new files in the worktree that respect .gitignore and are
 // not build or test leftovers.
 func untracked(ctx context.Context, w Worktree) ([]string, error) {
-	out, err := run(ctx, w.Path, "ls-files", "--others", "--exclude-standard", "-z")
+	out, err := runIn(ctx, w, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -102,33 +212,39 @@ func untracked(ctx context.Context, w Worktree) ([]string, error) {
 // Stage stages the agent's change for a commit: modifications and deletions
 // of tracked files, plus new files that are not build or test leftovers.
 func (m Manager) Stage(ctx context.Context, w Worktree) error {
-	if _, err := run(ctx, w.Path, "add", "-u", "--", "."); err != nil {
+	if err := m.Check(w); err != nil {
+		return err
+	}
+	if _, err := runIn(ctx, w, "add", "-u", "--", "."); err != nil {
 		return err
 	}
 	paths, err := untracked(ctx, w)
 	if err != nil || len(paths) == 0 {
 		return err
 	}
-	_, err = run(ctx, w.Path, append([]string{"add", "--"}, paths...)...)
+	_, err = runIn(ctx, w, append([]string{"add", "--"}, paths...)...)
 	return err
 }
 
 func (m Manager) Diff(ctx context.Context, w Worktree) (domain.DiffStat, string, error) {
+	if err := m.Check(w); err != nil {
+		return domain.DiffStat{}, "", err
+	}
 	// Intent-to-add includes untracked files in git diff without staging content.
 	paths, err := untracked(ctx, w)
 	if err != nil {
 		return domain.DiffStat{}, "", err
 	}
 	if len(paths) > 0 {
-		if _, err = run(ctx, w.Path, append([]string{"add", "-N", "--"}, paths...)...); err != nil {
+		if _, err = runIn(ctx, w, append([]string{"add", "-N", "--"}, paths...)...); err != nil {
 			return domain.DiffStat{}, "", err
 		}
 	}
-	statText, err := run(ctx, w.Path, "diff", "--numstat", w.BaseCommit, "--")
+	statText, err := runIn(ctx, w, "diff", "--numstat", w.BaseCommit, "--")
 	if err != nil {
 		return domain.DiffStat{}, "", err
 	}
-	diff, err := run(ctx, w.Path, "diff", "--no-ext-diff", "--binary", w.BaseCommit, "--")
+	diff, err := runIn(ctx, w, "diff", "--binary", w.BaseCommit, "--")
 	if err != nil {
 		return domain.DiffStat{}, "", err
 	}

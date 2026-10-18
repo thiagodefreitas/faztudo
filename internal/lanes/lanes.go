@@ -381,6 +381,16 @@ func (r *Registry) emitAlert(ctx context.Context, l domain.Lane, skipChannel str
 
 // UpdateUsage refreshes readings without clearing a hard failure signal.
 func (r *Registry) UpdateUsage(ctx context.Context, id string, windows []domain.LaneWindow) error {
+	return r.UpdateUsageAsked(ctx, id, windows, false)
+}
+
+// UpdateUsageAsked is UpdateUsage for a reading the human asked for. A failed
+// run marks a lane exhausted until a reset time it guessed; if the human
+// probes and the fresh reading shows every window below the conserve
+// threshold, that mark was stale and the probe clears it. The background
+// ticker passes asked=false and never does, so a wrong reading cannot undo a
+// real failure on its own.
+func (r *Registry) UpdateUsageAsked(ctx context.Context, id string, windows []domain.LaneWindow, asked bool) error {
 	r.mu.Lock()
 	l := r.lanes[id]
 	if l == nil {
@@ -389,7 +399,18 @@ func (r *Registry) UpdateUsage(ctx context.Context, id string, windows []domain.
 	}
 	l.Windows = windows
 	now := time.Now()
-	if r.canUpdateFromUsage(id, l, now) {
+	cleared := false
+	if asked && l.Health == domain.LaneExhausted {
+		if health, _ := usageHealth(l.CLI, windows, r.thresholds[id], now); health == domain.LaneAvailable {
+			l.LastError = nil
+			delete(r.until, id)
+			l.Health, l.HealthReason = domain.LaneAvailable, "cleared by probe"
+			cleared = true
+			close(r.changed)
+			r.changed = make(chan struct{})
+		}
+	}
+	if !cleared && r.canUpdateFromUsage(id, l, now) {
 		l.Health, l.HealthReason = usageHealth(l.CLI, windows, r.thresholds[id], now)
 	}
 	alert := r.alertTransition(id, l.Health)

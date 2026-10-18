@@ -95,7 +95,7 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		readOnly = append(readOnly, modcache)
 		cache["GOMODCACHE"] = modcache
 	}
-	args, err := sandbox.Build(sandbox.Options{Worktree: worktree, GitDir: filepath.Clean(gitDir), Home: home, CLI: cli, Executable: program, Network: opts.Network, StateDir: opts.runStateDir, ReadOnly: readOnly})
+	args, err := sandbox.Build(sandbox.Options{Worktree: worktree, GitDir: filepath.Clean(gitDir), Home: home, CLI: cli, Executable: program, Network: opts.Network, StateDir: opts.runStateDir, Branch: "fz/" + filepath.Base(worktree), CodexHome: os.Getenv("CODEX_HOME"), ReadOnly: readOnly})
 	if err != nil {
 		return fallback(err)
 	}

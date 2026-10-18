@@ -372,7 +372,7 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 	if err != nil {
 		return domain.Lane{}, err
 	}
-	if err := a.Registry.UpdateUsage(ctx, id, windows); err != nil {
+	if err := a.Registry.UpdateUsageAsked(ctx, id, windows, asked); err != nil {
 		return domain.Lane{}, err
 	}
 	if lane.CLI == "claude" || lane.CLI == "grok" {
@@ -1027,10 +1027,18 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 	if run.Mode != domain.RunWrite || run.Worktree == "" || channel.RepoPath == "" || run.State != domain.RunWaitingApproval {
 		return "", errors.New("run is not awaiting a write approval")
 	}
-	w := worktree.Worktree{Repo: channel.RepoPath, Path: run.Worktree, Branch: "fz/" + run.ID}
+	wm := worktree.Manager{BaseDir: a.Paths.WorktreesDir}
+	w, err := wm.Open(ctx, channel.RepoPath, run.Worktree, "fz/"+run.ID, run.BaseCommit)
+	if err != nil {
+		return "", err
+	}
 	var outcome string
 	switch option {
 	case "merge":
+		// Host git must never run on a worktree whose .git the agent replaced.
+		if err := wm.Check(w); err != nil {
+			return "", domain.UserError{Message: "Merge refused: " + err.Error() + ". Choose Keep to inspect it, or Discard."}
+		}
 		// Untracked files in the channel repo do not block a fast-forward;
 		// uncommitted changes to tracked files do.
 		out, err := git(ctx, w.Repo, "status", "--porcelain", "--untracked-files=no")
@@ -1043,13 +1051,13 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 		if run.BaseCommit == "" {
 			return "", errors.New("run has no base commit")
 		}
-		if _, err := git(ctx, w.Path, "reset", "--soft", run.BaseCommit); err != nil {
+		if _, err := wm.Git(ctx, w, "reset", "--soft", run.BaseCommit); err != nil {
 			return "", err
 		}
-		if err := (worktree.Manager{BaseDir: a.Paths.WorktreesDir}).Stage(ctx, w); err != nil {
+		if err := wm.Stage(ctx, w); err != nil {
 			return "", err
 		}
-		if _, err := git(ctx, w.Path, "diff", "--cached", "--quiet"); err != nil {
+		if _, err := wm.Git(ctx, w, "diff", "--cached", "--quiet"); err != nil {
 			// The author is the human's Git identity: they approved it.
 			// Hooks are disabled because the run could have changed Git metadata.
 			message := strings.TrimSpace(commitMessage)
@@ -1059,7 +1067,7 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 			if message == "" {
 				message = a.commitMessage(ctx, run)
 			}
-			if err := gitHumanCommit(ctx, w.Path, message); err != nil {
+			if err := wm.Commit(ctx, w, message); err != nil {
 				return "", fmt.Errorf("committing run changes (repository hooks may have refused them): %w", err)
 			}
 		}
@@ -1073,9 +1081,9 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 			// commit). Replay the run's single commit on top instead of
 			// failing the fast-forward; on a conflict, leave everything as it
 			// was so Keep and Discard still work.
-			if _, err := git(ctx, w.Path, "rebase", "--no-autostash", head); err != nil {
-				files, _ := git(ctx, w.Path, "diff", "--name-only", "--diff-filter=U")
-				_, _ = git(ctx, w.Path, "rebase", "--abort")
+			if _, err := wm.Git(ctx, w, "rebase", "--no-autostash", head); err != nil {
+				files, _ := wm.Git(ctx, w, "diff", "--name-only", "--diff-filter=U")
+				_, _ = wm.Git(ctx, w, "rebase", "--abort")
 				return "", domain.UserError{Message: "The branch moved since this run started and the run's changes conflict in: " +
 					strings.Join(strings.Fields(files), ", ") + ". Choose Keep to resolve it by hand, or Discard."}
 			}
@@ -1087,13 +1095,13 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 		if replayed {
 			outcome = "Merged " + w.Branch + " on top of changes made since the run started."
 		}
-		if err := (worktree.Manager{BaseDir: a.Paths.WorktreesDir}).Cleanup(ctx, w); err != nil {
+		if err := wm.Cleanup(ctx, w); err != nil {
 			outcome += " Worktree cleanup failed: " + err.Error()
 		}
 	case "keep":
 		outcome = "Kept " + w.Branch + " and its worktree for review."
 	case "discard":
-		if err := (worktree.Manager{BaseDir: a.Paths.WorktreesDir}).Cleanup(ctx, w); err != nil {
+		if err := wm.Cleanup(ctx, w); err != nil {
 			return "", err
 		}
 		outcome = "Discarded " + w.Branch + " and removed its worktree."
@@ -1201,19 +1209,4 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-func gitHumanCommit(ctx context.Context, dir, message string) error {
-	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-C", dir, "commit", "-q", "-m", message)
-	for _, kv := range os.Environ() {
-		key, _, _ := strings.Cut(kv, "=")
-		if !strings.HasPrefix(key, "GIT_AUTHOR_") && !strings.HasPrefix(key, "GIT_COMMITTER_") {
-			cmd.Env = append(cmd.Env, kv)
-		}
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }

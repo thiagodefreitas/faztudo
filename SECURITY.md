@@ -54,17 +54,34 @@ design assumes that agents make mistakes and that messages from outside
   other actions that go through faztudo need an approval.
 - **Write-run sandbox.** `runs.sandbox = "auto"` is the default. On Linux,
   write runs use bubblewrap when unprivileged user namespaces work. The
-  worktree is writable. The shared git directory is read-only except its
-  objects, refs, logs and packed-refs. The run's worktree metadata is a
-  private writable copy, so its config changes do not reach host Git. Host-side
-  git commands disable fsmonitor, hooks, external diffs and textconv. The
-  channel's test command runs in the same sandbox with a stripped environment.
+  worktree is writable, except its `.git` file, which is read-only. The shared
+  git directory is read-only except its objects. The run's worktree metadata
+  is a private writable copy, and the run's own branch (`fz/<run id>`) lives in
+  a private copy of its ref and reflog directory. The agent can commit on its
+  branch inside the sandbox but cannot move `main`, any other branch or a tag;
+  the merge flow recommits from the base commit, so host Git never reads that
+  private copy. Host-side git commands on an agent worktree name the run's
+  real git directory and work tree explicitly (`--git-dir`, `--work-tree`), so
+  a `.git` file or repository the agent put in the worktree is never read, and
+  neither is any filter, alias or config defined in it. They also disable
+  fsmonitor, hooks, external diffs and textconv, and ignore system and global
+  attributes. Before every diff, stage and merge, faztudo checks that the
+  worktree's `.git` is still the exact file it wrote; if not, the run fails as
+  tampered with and nothing is diffed or merged. Filter drivers can only come
+  from your own git configuration (for example Git LFS), which the agent
+  cannot write. The channel's test command runs in the same sandbox with a
+  stripped environment.
   System tools and a small set of `/etc` files are read-only. Toolchain roots
   in home `PATH` entries named `bin`, `shims` or `scripts`, the Go module cache and paths in
   `runs.sandbox_read_only` are read-only. Go, npm and XDG caches use a private
   writable directory for this run. The selected CLI's config and sign-in
   paths are read-only, with writable per-run session directories and copies
-  of session index files. Existing OAuth credential files are writable
+  of session index files. Codex gets a `CODEX_HOME` of its own under the run's
+  state directory: `config.toml`, `AGENTS.md`, `packages/`, `plugins/`,
+  `skills/` and `rules/` are read-only binds of your `~/.codex` (or
+  `$CODEX_HOME`), `auth.json` is the one writable host file, and everything
+  else (sqlite databases, `tmp`, sessions) is fresh. Your Codex history,
+  sessions and databases are not visible in the sandbox. Existing OAuth credential files are writable
   exceptions for Claude (`.claude/.credentials.json`), Codex
   (`.codex/auth.json`), Grok (`.grok/auth.json`), Kimi
   (`.kimi-code/credentials/*` and `.kimi-code/oauth/*`), Agy
@@ -79,8 +96,9 @@ design assumes that agents make mistakes and that messages from outside
   sandboxed, just without those limits. Run `faztudo doctor` to check
   bubblewrap, unprivileged user namespaces and systemd user scope availability.
 - **Honest limits.** The sandbox shares the host kernel, and the CLI still
-  runs as your user. It can change its worktree, shared git objects and refs,
-  writable credential exceptions and session state, and access the network
+  runs as your user. It can change its worktree, shared git objects (a bad
+  object is only reachable through a ref, and refs are read-only), writable
+  credential exceptions and session state, and access the network
   when allowed. Repository content and the channel test command remain
   untrusted, but execute inside the sandbox. Disabling host-side git hooks
   also means repository hooks do not protect merges from agent worktrees;
@@ -91,6 +109,17 @@ design assumes that agents make mistakes and that messages from outside
   channel notice. Set `runs.sandbox = "required"` to refuse that run instead.
   Read runs are unchanged. A sandboxed run ends if its parent exits; recovery
   records an interrupted run rather than resuming its process.
+- **Which CLIs run in the sandbox.** Claude: verified live (a write run that
+  runs `go test` and `npm test`). Codex: given its own `CODEX_HOME` after it
+  failed to start on the read-only `~/.codex`; the mount layout is tested with
+  bubblewrap, and the model-backed run is the same live test. Grok, Kimi, Agy
+  and OpenCode have their config read-only with per-run session directories;
+  they keep more mutable state (databases, logs, caches) than that covers, so
+  one may fail to start in the sandbox. None of those four has been checked
+  live. Check one with `FAZTUDO_LIVE_SANDBOX=1 go test ./internal/runner -run
+  TestLiveSandboxedCLIWriteRun -v`. The check at the start of every run only
+  proves the CLI answers `--version` inside the mounts, so a CLI that fails
+  later fails that run; it does not fall back to an unsandboxed one.
 - **Stripped environment.** Agent processes start with known secret variables
   removed from their environment.
 - **Local token limit.** An unsandboxed agent runs as you and can read the

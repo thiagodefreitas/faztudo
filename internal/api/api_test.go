@@ -18,6 +18,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
+	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
 type countTrigger struct{ count int }
@@ -252,24 +253,33 @@ func TestDiffIncludesCommittedAgentWork(t *testing.T) {
 	git("add", "file.txt")
 	base := git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit-tree", git("write-tree"), "-m", "base")
 	git("update-ref", "HEAD", base)
-	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("changed\n"), 0600); err != nil {
+	// The agent works in a real run worktree and commits there.
+	wt, err := (worktree.Manager{BaseDir: filepath.Join(root, "trees")}).Create(ctx, repo, "run")
+	if err != nil {
 		t.Fatal(err)
 	}
-	git("add", "file.txt")
-	commit := git("-c", "user.name=Agent", "-c", "user.email=agent@example.invalid", "commit-tree", git("write-tree"), "-p", base, "-m", "agent")
-	git("update-ref", "HEAD", commit)
+	if err := os.WriteFile(filepath.Join(wt.Path, "file.txt"), []byte("changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	commit := exec.Command("git", "-c", "user.name=Agent", "-c", "user.email=agent@example.invalid", "commit", "-q", "-am", "agent")
+	commit.Dir = wt.Path
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("agent commit: %v: %s", err, out)
+	}
 	s, err := store.Open(filepath.Join(root, "db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	human := domain.Member{ID: "human", Kind: domain.MemberHuman, Handle: "human"}
-	run := domain.Run{ID: "run", Mode: domain.RunWrite, State: domain.RunWaitingApproval, Worktree: repo, BaseCommit: base}
+	ch := domain.Channel{ID: "chan", Name: "chan", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic, RepoPath: repo}
+	run := domain.Run{ID: "run", ChannelID: ch.ID, Mode: domain.RunWrite, State: domain.RunWaitingApproval, Worktree: wt.Path, BaseCommit: base}
 	for _, entry := range []struct {
 		typ     events.Type
 		payload any
-	}{{events.MemberUpdated, human}, {events.RunCreated, run}} {
-		if _, err := s.Append(ctx, events.Draft{Type: entry.typ, Actor: events.System, Payload: entry.payload}); err != nil {
+		channel string
+	}{{events.MemberUpdated, human, ""}, {events.ChannelCreated, ch, ch.ID}, {events.RunCreated, run, ch.ID}} {
+		if _, err := s.Append(ctx, events.Draft{Type: entry.typ, Actor: events.System, ChannelID: entry.channel, Payload: entry.payload}); err != nil {
 			t.Fatal(err)
 		}
 	}
