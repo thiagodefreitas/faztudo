@@ -37,8 +37,8 @@ their commit, because the Go toolchain records it.
 2. Move the `## [Unreleased]` entries in `CHANGELOG.md` under a new
    `## [X.Y.Z] - YYYY-MM-DD` heading, commit as a person, push.
 3. Tag and push: `git tag -a vX.Y.Z -m "faztudo X.Y.Z" && git push origin vX.Y.Z`.
-4. The release workflow builds Linux binaries (amd64, arm64), a tarball, deb
-   and rpm packages and checksums with GoReleaser, using the CHANGELOG
+4. The release workflow builds Linux binaries (amd64, arm64), a tarball, a deb
+   package and checksums with GoReleaser, using the CHANGELOG
    section as the notes, and opens a draft release.
 5. Read the draft, try the binary, then publish it.
 

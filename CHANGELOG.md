@@ -4,9 +4,9 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-10-18
 
-First usable alpha. Not tagged yet; the date is set when it ships.
+First usable alpha.
 
 ### Chat
 
