@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Approval, Lane, Member, Run } from "../../types"
+import type { Approval, Department, Lane, Member, Run } from "../../types"
+import { layoutRoom } from "./layout"
 import { deriveMemberDesk, deriveOfficeDesks, FAIL_WINDOW_MS, formatRunTitle, laneBorrower, resolveMemberHue } from "./state"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
@@ -260,5 +261,33 @@ describe("laneBorrower", () => {
     })
     expect(desk.state).toBe("idle")
     expect(desk.busyFor?.handle).toBe("coder")
+  })
+})
+
+describe("layoutRoom", () => {
+  it("keeps every pod seat facing down across multiple rows while the Director faces up", () => {
+    const members: Member[] = [
+      director,
+      claudeAgent,
+      codexAgent,
+      { id: "mem-coder", kind: "agent", handle: "coder", display_name: "Coder", presence: "online", agent: { lanes: ["codex/default"], role: "coder", mode: "write" } },
+      { id: "mem-reviewer", kind: "agent", handle: "reviewer", display_name: "Reviewer", presence: "online", agent: { lanes: ["claude/opus"], role: "reviewer", mode: "read" } },
+    ]
+    const departments: Department[] = [
+      { handle: "eng", display_name: "Engineering", lead: "claude", members: ["codex", "coder", "reviewer"] },
+    ]
+    const desks = deriveOfficeDesks({ members, runs: [], approvals: [], lanes: [healthyLane, exhaustedLane], now })
+    const room = layoutRoom(desks, { departments })
+
+    const agentSeats = room.seats.filter((seat) => !seat.desk.isDirector)
+    expect(agentSeats).toHaveLength(4)
+    // First row and second row of the 2x2 pod both sit behind their desk facing down.
+    expect(agentSeats[0]?.y).toBeLessThan(agentSeats[2]!.y)
+    for (const seat of agentSeats) {
+      expect(seat.facing).toBe("down")
+    }
+
+    const directorSeat = room.seats.find((seat) => seat.desk.isDirector)
+    expect(directorSeat?.facing).toBe("up")
   })
 })

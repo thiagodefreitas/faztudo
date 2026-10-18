@@ -169,7 +169,7 @@ function boxZone(spec: ZoneSpec, maxCols: number): ZoneBox {
           x: pod.x + POD_PAD + (i % POD_COLS) * (DESK_W + DESK_GAP_X),
           y: pod.y + POD_PAD + podRow * (DESK_H + DESK_GAP_Y),
           scale: 1,
-          facing: podRow === 0 ? "down" : "up",
+          facing: "down",
         })
       })
     }

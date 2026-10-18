@@ -292,7 +292,7 @@ describe("OfficeScene", () => {
         handle: "eng",
         display_name: "Engineering",
         lead: "claude",
-        members: ["coder", "codex"],
+        members: ["coder", "codex", "grok"],
       },
     ]
     await renderScene({ departments, reducedMotion: false })
@@ -300,6 +300,11 @@ describe("OfficeScene", () => {
     expect(within(screen.getByTestId("zone-dept-eng")).getByText("Engineering")).toBeInTheDocument()
     expect(screen.getByTestId("desk-avatar-m-coder")).toHaveAttribute("data-glance", "true")
     expect(screen.getByTestId("typing-hands-m-claude")).toHaveAttribute("data-animated", "true")
+    // All four agents in the 2x2 pod sit behind their desk facing down; only the Director faces up.
+    for (const id of ["m-claude", "m-coder", "m-codex", "m-grok"]) {
+      expect(screen.getByTestId(`desk-${id}`)).toHaveAttribute("data-facing", "down")
+    }
+    expect(screen.getByTestId("desk-m-director")).toHaveAttribute("data-facing", "up")
   })
 
   it("selects a desk with the keyboard", async () => {

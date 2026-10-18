@@ -1,9 +1,10 @@
 import * as Dialog from "@radix-ui/react-dialog"
-import { Billboard, Html, OrbitControls } from "@react-three/drei"
+import { Billboard, Edges, Html, OrbitControls } from "@react-three/drei"
 import { Canvas, useFrame } from "@react-three/fiber"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { Group, MeshStandardMaterial } from "three"
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib"
 import { api } from "../../../api/client"
 import type { ThemeChoice } from "../../../lib/theme"
 import { useOpenDirect } from "../../../state/direct"
@@ -18,46 +19,82 @@ import { DeskDetailPanel, Legend, OfficeViewToggle } from "../scene"
 import { type DeskInfo, useOfficeDesks, useReducedMotion } from "../state"
 
 // Convert 2D SVG layout units (1200 wide) into compact 3D world meters.
-const SCALE_3D = 0.02
+export const SCALE_3D = 0.02
 
-interface ScenePalette {
+export interface ScenePalette {
   canvas: string
   surface: string
   sidebar: string
   line: string
   ink: string
+  faint: string
   accent: string
   accentSoft: string
   warn: string
   danger: string
   code: string
+  hemiSky: string
+  hemiGround: string
+  keyLight: string
+  hemiIntensity: number
+  keyIntensity: number
 }
 
-const SCENE_PALETTES: Record<ThemeChoice, ScenePalette> = {
+export const SCENE_PALETTES: Record<ThemeChoice, ScenePalette> = {
   light: {
     canvas: "#f7f9fa",
     surface: "#ffffff",
     sidebar: "#eef2f5",
     line: "#dfe6eb",
     ink: "#11181c",
+    faint: "#576670",
     accent: "#0e7c74",
     accentSoft: "#dff3f0",
     warn: "#8a4b08",
     danger: "#b42318",
     code: "#eef2f5",
+    hemiSky: "#ffffff",
+    hemiGround: "#dfe6eb",
+    keyLight: "#ffffff",
+    hemiIntensity: 1.35,
+    keyIntensity: 1.15,
   },
   dark: {
-    canvas: "#0f1417",
-    surface: "#151c21",
-    sidebar: "#0b0f12",
-    line: "#222c33",
+    canvas: "#141c21",
+    surface: "#1f2a32",
+    sidebar: "#0f1417",
+    line: "#33424d",
     ink: "#edf2f4",
+    faint: "#84949e",
     accent: "#5cd6c8",
-    accentSoft: "#102a29",
+    accentSoft: "#153533",
     warn: "#f5b942",
     danger: "#f97066",
     code: "#0b0f12",
+    hemiSky: "#d7e6f0",
+    hemiGround: "#1f2a32",
+    keyLight: "#f4f9fc",
+    hemiIntensity: 1.55,
+    keyIntensity: 1.3,
   },
+}
+
+export interface CameraPose {
+  position: [number, number, number]
+  target: [number, number, number]
+}
+
+// Computes a smooth starting camera position that frames the entire room.
+export function defaultCameraPose(roomWidth: number, roomHeight: number): CameraPose {
+  const floorW = roomWidth * SCALE_3D
+  const floorD = roomHeight * SCALE_3D
+  const span = Math.max(floorW * 0.68, floorD * 1.05, 10)
+  const y = Math.round((span * 0.62 + 1.8) * 100) / 100
+  const z = Math.round((span * 0.78 + 2.4) * 100) / 100
+  return {
+    position: [0, y, z],
+    target: [0, 0.2, 0.3],
+  }
 }
 
 export function isWebGLAvailable(): boolean {
@@ -72,7 +109,7 @@ export function isWebGLAvailable(): boolean {
   }
 }
 
-function toWorld(rect: Rect, roomWidth: number, roomHeight: number): { x: number; z: number; w: number; d: number } {
+export function toWorld(rect: Rect, roomWidth: number, roomHeight: number): { x: number; z: number; w: number; d: number } {
   const w = rect.w * SCALE_3D
   const d = rect.h * SCALE_3D
   const x = (rect.x + rect.w / 2 - roomWidth / 2) * SCALE_3D
@@ -102,6 +139,7 @@ function DeskMesh({
   const dimmed = state === "out_of_quota" || outOfQuota
   const working = state === "working"
   const faceUp = facing === "up"
+  const label = member.display_name.trim() || member.handle
 
   const world = toWorld(
     { x: seat.x, y: seat.y, w: DESK_W * scale, h: DESK_H * scale },
@@ -117,7 +155,7 @@ function DeskMesh({
     const t = clock.getElapsedTime()
     if (agentGroupRef.current) {
       if (working) {
-        agentGroupRef.current.position.y = Math.sin(t * 4) * 0.035
+        agentGroupRef.current.position.y = Math.sin(t * 4) * 0.04
         agentGroupRef.current.rotation.y = 0
       } else if (state === "idle" && !dimmed) {
         agentGroupRef.current.position.y = 0
@@ -128,7 +166,7 @@ function DeskMesh({
       }
     }
     if (screenMatRef.current && working) {
-      screenMatRef.current.emissiveIntensity = 0.55 + Math.sin(t * 3.2) * 0.25
+      screenMatRef.current.emissiveIntensity = 1.05 + Math.sin(t * 3.2) * 0.35
     }
   })
 
@@ -147,15 +185,18 @@ function DeskMesh({
         ? palette.warn
         : state === "failed"
           ? palette.danger
-          : "#000000"
-  const monitorIntensity = state === "working" ? 0.65 : state === "waiting_approval" || state === "failed" ? 0.35 : 0
+          : palette.line
+  const monitorIntensity =
+    state === "working" ? 1.15 : state === "waiting_approval" || state === "failed" ? 0.5 : 0.12
 
-  const deskW = 1.65 * scale
-  const deskD = 0.9 * scale
-  const deskH = 0.42 * scale
+  const deskW = 1.68 * scale
+  const deskD = 0.92 * scale
+  const baseH = 0.36 * scale
+  const topH = 0.06 * scale
+  const deskH = baseH + topH
   const zSign = faceUp ? -1 : 1
   const deskOffsetZ = 0.14 * scale * zSign
-  const agentOffsetZ = -0.46 * scale * zSign
+  const agentOffsetZ = -0.44 * scale * zSign
 
   return (
     <group
@@ -173,66 +214,94 @@ function DeskMesh({
         </mesh>
       )}
 
-      {/* Low-poly desk box */}
-      <mesh position={[0, deskH / 2, deskOffsetZ]}>
-        <boxGeometry args={[deskW, deskH, deskD]} />
+      {/* Desk base in brand line color */}
+      <mesh position={[0, baseH / 2, deskOffsetZ]} castShadow receiveShadow>
+        <boxGeometry args={[deskW * 0.94, baseH, deskD * 0.9]} />
         <meshStandardMaterial
-          color={palette.surface}
-          roughness={0.85}
+          color={palette.line}
+          roughness={0.8}
           transparent={dimmed}
           opacity={dimmed ? 0.5 : 1}
         />
       </mesh>
 
-      {/* Hue accent strip along the desk top */}
-      <mesh position={[0, deskH + 0.01, deskOffsetZ - 0.32 * scale * zSign]}>
-        <boxGeometry args={[deskW * 0.78, 0.025, 0.06]} />
-        <meshBasicMaterial color={hue.accent} />
+      {/* Visible desk top surface in brand surface color with crisp line edge */}
+      <mesh position={[0, baseH + topH / 2, deskOffsetZ]} castShadow receiveShadow>
+        <boxGeometry args={[deskW, topH, deskD]} />
+        <meshStandardMaterial
+          color={palette.surface}
+          roughness={0.55}
+          transparent={dimmed}
+          opacity={dimmed ? 0.55 : 1}
+        />
+        <Edges threshold={15} color={palette.line} />
       </mesh>
 
-      {/* Monitor stand and screen */}
-      <mesh position={[0, deskH + 0.06 * scale, deskOffsetZ]}>
-        <boxGeometry args={[0.14 * scale, 0.12 * scale, 0.1 * scale]} />
-        <meshStandardMaterial color={palette.line} roughness={0.8} />
+      {/* Hue accent strip along the desk top edge */}
+      <mesh position={[0, deskH + 0.008, deskOffsetZ - 0.34 * scale * zSign]}>
+        <boxGeometry args={[deskW * 0.82, 0.024, 0.065]} />
+        <meshBasicMaterial color={desk.isDirector ? palette.accent : hue.accent} />
       </mesh>
-      <mesh position={[0, deskH + 0.24 * scale, deskOffsetZ]}>
-        <boxGeometry args={[0.62 * scale, 0.34 * scale, 0.06 * scale]} />
+
+      {/* Monitor stand and bezel */}
+      <mesh position={[0, deskH + 0.06 * scale, deskOffsetZ]} castShadow>
+        <boxGeometry args={[0.14 * scale, 0.12 * scale, 0.1 * scale]} />
+        <meshStandardMaterial color={palette.line} roughness={0.75} />
+      </mesh>
+      <mesh position={[0, deskH + 0.25 * scale, deskOffsetZ]} castShadow>
+        <boxGeometry args={[0.66 * scale, 0.38 * scale, 0.06 * scale]} />
+        <meshStandardMaterial color={palette.sidebar} roughness={0.6} />
+        <Edges threshold={15} color={palette.line} />
+      </mesh>
+      {/* Monitor screen face */}
+      <mesh position={[0, deskH + 0.25 * scale, deskOffsetZ - 0.033 * scale * zSign]}>
+        <planeGeometry args={[0.58 * scale, 0.3 * scale]} />
         <meshStandardMaterial
           ref={screenMatRef}
           color={monitorColor}
           emissive={monitorEmissive}
           emissiveIntensity={monitorIntensity}
-          roughness={0.4}
+          roughness={0.25}
         />
       </mesh>
+      {/* Soft glow halo on desk surface when working */}
+      {working && (
+        <mesh position={[0, deskH + 0.004, deskOffsetZ - 0.14 * scale * zSign]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.52 * scale, 24]} />
+          <meshBasicMaterial color={hue.accent} transparent opacity={0.28} />
+        </mesh>
+      )}
 
-      {/* Agent rounded capsule + billboarded AgentAvatar */}
+      {/* Agent rounded capsule clearly visible above the desk edge + billboarded AgentAvatar and name */}
       <group ref={agentGroupRef} position={[0, 0, agentOffsetZ]}>
-        <mesh position={[0, 0.38 * scale, 0]}>
-          <capsuleGeometry args={[0.22 * scale, 0.32 * scale, 4, 8]} />
+        <mesh position={[0, 0.56 * scale, 0]} castShadow receiveShadow>
+          <capsuleGeometry args={[0.25 * scale, 0.44 * scale, 6, 12]} />
           <meshStandardMaterial
             color={desk.isDirector ? palette.accent : hue.accent}
-            roughness={0.6}
+            roughness={0.45}
             transparent={dimmed}
-            opacity={dimmed ? 0.45 : 1}
+            opacity={dimmed ? 0.5 : 1}
           />
         </mesh>
 
-        <Billboard position={[0, 1.08 * scale, 0]}>
+        <Billboard position={[0, 1.32 * scale, 0]}>
           <Html center transform={false} zIndexRange={[10, 0]}>
             <button
               type="button"
               data-testid={`desk3d-${member.id}`}
-              aria-label={`${member.display_name}, ${desk.stateLabel}`}
+              aria-label={`${label}, ${desk.stateLabel}`}
               onClick={(event) => {
                 event.stopPropagation()
                 onSelect(desk)
               }}
-              className="group flex flex-col items-center gap-0.5 rounded-lg px-1.5 py-0.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="group flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg px-1.5 py-0.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <AgentAvatar member={member} size={28} state={avatarState(state)} decorative />
-              <span className="max-w-24 truncate rounded bg-surface/90 px-1.5 py-0.2 font-sans text-[10px] font-semibold text-ink shadow-xs">
-                {member.display_name}
+              <span
+                data-testid={`desk3d-label-${member.id}`}
+                className="max-w-28 truncate rounded border border-line bg-surface/95 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-ink shadow-xs"
+              >
+                {label}
               </span>
             </button>
           </Html>
@@ -251,6 +320,8 @@ function RoomWorld({
   palette,
   selectedId,
   reducedMotion,
+  cameraPose,
+  resetSignal,
   onSelect,
 }: {
   width: number
@@ -261,47 +332,109 @@ function RoomWorld({
   palette: ScenePalette
   selectedId: string | null
   reducedMotion: boolean
+  cameraPose: CameraPose
+  resetSignal: number
   onSelect: (desk: DeskInfo) => void
 }) {
   const floorW = width * SCALE_3D
   const floorD = height * SCALE_3D
   const wallH = 1.15
   const wallT = 0.22
+  const gridSize = Math.ceil(Math.max(floorW, floorD))
+  const gridDivisions = Math.max(12, Math.round(gridSize / 0.8))
+  const controlsRef = useRef<OrbitControlsImpl | null>(null)
+
+  useEffect(() => {
+    if (resetSignal === 0) return
+    const controls = controlsRef.current
+    if (!controls) return
+    controls.object.position.set(...cameraPose.position)
+    controls.target.set(...cameraPose.target)
+    controls.update()
+  }, [resetSignal, cameraPose])
 
   return (
     <group>
-      <ambientLight intensity={0.85} />
-      <directionalLight position={[8, 16, 10]} intensity={0.95} />
+      {/* Soft hemisphere light plus one key light with gentle shadows */}
+      <hemisphereLight
+        args={[palette.hemiSky, palette.hemiGround, palette.hemiIntensity]}
+        position={[0, 18, 0]}
+      />
+      <directionalLight
+        color={palette.keyLight}
+        position={[7, 15, 9]}
+        intensity={palette.keyIntensity}
+        castShadow
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.0004}
+        shadow-camera-near={2}
+        shadow-camera-far={36}
+        shadow-camera-left={-15}
+        shadow-camera-right={15}
+        shadow-camera-top={15}
+        shadow-camera-bottom={-15}
+      />
 
-      {/* Floor */}
-      <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      {/* Lighter floor from the canvas token with a subtle grid */}
+      <mesh position={[0, -0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[floorW, floorD]} />
-        <meshStandardMaterial color={palette.canvas} roughness={0.95} />
+        <meshStandardMaterial color={palette.canvas} roughness={0.92} />
       </mesh>
+      <gridHelper
+        args={[gridSize, gridDivisions, palette.line, palette.line]}
+        position={[0, -0.01, 0]}
+      />
 
       {/* Low back and side walls */}
-      <mesh position={[0, wallH / 2, -floorD / 2 + wallT / 2]}>
+      <mesh position={[0, wallH / 2, -floorD / 2 + wallT / 2]} receiveShadow>
         <boxGeometry args={[floorW, wallH, wallT]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.9} />
+        <meshStandardMaterial color={palette.sidebar} roughness={0.85} />
+        <Edges threshold={15} color={palette.line} />
       </mesh>
-      <mesh position={[-floorW / 2 + wallT / 2, wallH * 0.35, 0]}>
+      <mesh position={[-floorW / 2 + wallT / 2, wallH * 0.35, 0]} receiveShadow>
         <boxGeometry args={[wallT, wallH * 0.7, floorD]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.9} />
+        <meshStandardMaterial color={palette.sidebar} roughness={0.85} />
+        <Edges threshold={15} color={palette.line} />
       </mesh>
-      <mesh position={[floorW / 2 - wallT / 2, wallH * 0.35, 0]}>
+      <mesh position={[floorW / 2 - wallT / 2, wallH * 0.35, 0]} receiveShadow>
         <boxGeometry args={[wallT, wallH * 0.7, floorD]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.9} />
+        <meshStandardMaterial color={palette.sidebar} roughness={0.85} />
+        <Edges threshold={15} color={palette.line} />
       </mesh>
 
-      {/* Zone mats */}
+      {/* Zone mats, pod mats, and faint department/pod floor labels */}
       {zones.map((zone) => {
         const zWorld = toWorld(zone, width, height)
         return (
           <group key={zone.id}>
-            <mesh position={[zWorld.x, 0.005, zWorld.z]} rotation={[-Math.PI / 2, 0, 0]}>
+            <mesh position={[zWorld.x, 0.005, zWorld.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
               <planeGeometry args={[zWorld.w, zWorld.d]} />
-              <meshStandardMaterial color={palette.surface} roughness={0.95} />
+              <meshStandardMaterial color={palette.surface} roughness={0.9} />
             </mesh>
+            {zone.pods.map((pod) => {
+              const pWorld = toWorld(pod, width, height)
+              return (
+                <mesh
+                  key={`${pod.x}-${pod.y}`}
+                  position={[pWorld.x, 0.009, pWorld.z]}
+                  rotation={[-Math.PI / 2, 0, 0]}
+                  receiveShadow
+                >
+                  <planeGeometry args={[pWorld.w, pWorld.d]} />
+                  <meshStandardMaterial color={palette.sidebar} roughness={0.9} />
+                </mesh>
+              )
+            })}
+            <Billboard position={[zWorld.x - zWorld.w / 2 + 1.1, 0.06, zWorld.z - zWorld.d / 2 + 0.32]}>
+              <Html center transform={false} zIndexRange={[5, 0]}>
+                <span
+                  data-testid={`zone3d-label-${zone.id}`}
+                  className="pointer-events-none select-none whitespace-nowrap rounded px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wider text-faint/85"
+                >
+                  {zone.label}
+                </span>
+              </Html>
+            </Billboard>
           </group>
         )
       })}
@@ -310,10 +443,19 @@ function RoomWorld({
       {rug && (() => {
         const rWorld = toWorld(rug, width, height)
         return (
-          <mesh position={[rWorld.x, 0.008, rWorld.z]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[rWorld.w, rWorld.d]} />
-            <meshStandardMaterial color={palette.accentSoft} roughness={0.9} />
-          </mesh>
+          <group>
+            <mesh position={[rWorld.x, 0.008, rWorld.z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <planeGeometry args={[rWorld.w, rWorld.d]} />
+              <meshStandardMaterial color={palette.accentSoft} roughness={0.88} />
+            </mesh>
+            <Billboard position={[rWorld.x - rWorld.w / 2 + 0.9, 0.06, rWorld.z - rWorld.d / 2 + 0.28]}>
+              <Html center transform={false} zIndexRange={[5, 0]}>
+                <span className="pointer-events-none select-none whitespace-nowrap font-sans text-[10px] font-semibold uppercase tracking-wider text-accent/85">
+                  Director
+                </span>
+              </Html>
+            </Billboard>
+          </group>
         )
       })()}
 
@@ -332,13 +474,15 @@ function RoomWorld({
       ))}
 
       <OrbitControls
+        ref={controlsRef}
+        target={cameraPose.target}
         enablePan
         enableZoom
         enableRotate
         enableDamping={!reducedMotion}
         minPolarAngle={Math.PI / 7}
         maxPolarAngle={Math.PI / 2.25}
-        minDistance={6}
+        minDistance={5}
         maxDistance={28}
       />
     </group>
@@ -371,9 +515,11 @@ export function Office3DScene({
   onMessage,
 }: Office3DSceneProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
+  const [resetSignal, setResetSignal] = useState(0)
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
   const webglAvailable = useMemo(() => webglProp ?? isWebGLAvailable(), [webglProp])
   const room = useMemo(() => layoutRoom(desks, { departments }), [desks, departments])
+  const cameraPose = useMemo(() => defaultCameraPose(room.width, room.height), [room.width, room.height])
   const palette = SCENE_PALETTES[theme]
   const workingCount = desks.filter((desk) => desk.state === "working").length
   const frameloop = reducedMotion || workingCount === 0 ? "demand" : "always"
@@ -394,6 +540,10 @@ export function Office3DScene({
     setSelectedId((prev) => (prev === desk.member.id ? prev : desk.member.id))
   }
 
+  function handleResetView() {
+    setResetSignal((count) => count + 1)
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2 sm:p-4">
@@ -403,7 +553,17 @@ export function Office3DScene({
             <span className="font-medium text-ink">3D studio floor</span>
             <span className="font-mono text-faint">{desks.length} desks</span>
           </div>
-          <span className="text-[11px] text-muted">Drag to orbit, scroll to zoom, click a desk for details</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-muted">Drag to orbit, scroll to zoom, click a desk for details</span>
+            <button
+              type="button"
+              data-testid="office3d-reset-view"
+              onClick={handleResetView}
+              className="min-h-7 rounded-md border border-line bg-surface px-2.5 py-0.5 text-[11px] font-medium text-ink shadow-xs hover:bg-sidebar"
+            >
+              Reset view
+            </button>
+          </div>
         </div>
 
         {desks.length === 0 ? (
@@ -420,7 +580,16 @@ export function Office3DScene({
             <p className="max-w-md text-[12px] text-muted">
               Switch to the 2D floor plan, or select a desk below to inspect its lane, health, and active run.
             </p>
-            <div className="mt-2 flex flex-wrap justify-center gap-2">
+            {room.zones.length > 0 && (
+              <div className="flex flex-wrap justify-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+                {room.zones.map((zone) => (
+                  <span key={zone.id} data-testid={`fallback-zone-${zone.id}`}>
+                    {zone.label}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="mt-1 flex flex-wrap justify-center gap-2">
               {room.seats.map((seat) => (
                 <button
                   key={seat.desk.member.id}
@@ -435,7 +604,7 @@ export function Office3DScene({
                     state={avatarState(seat.desk.state)}
                     decorative
                   />
-                  <span>{seat.desk.member.display_name}</span>
+                  <span>{seat.desk.member.display_name || seat.desk.member.handle}</span>
                 </button>
               ))}
             </div>
@@ -446,11 +615,13 @@ export function Office3DScene({
             className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs"
           >
             <Canvas
+              shadows="soft"
               dpr={[1, 1.5]}
               frameloop={frameloop}
-              camera={{ position: [0, 12, 14], fov: 42, near: 0.5, far: 80 }}
+              camera={{ position: cameraPose.position, fov: 38, near: 0.5, far: 80 }}
               gl={{ antialias: true, powerPreference: "low-power" }}
             >
+              <color attach="background" args={[palette.canvas]} />
               <RoomWorld
                 width={room.width}
                 height={room.height}
@@ -460,6 +631,8 @@ export function Office3DScene({
                 palette={palette}
                 selectedId={selectedDesk?.member.id ?? null}
                 reducedMotion={reducedMotion}
+                cameraPose={cameraPose}
+                resetSignal={resetSignal}
                 onSelect={handleSelect}
               />
             </Canvas>
