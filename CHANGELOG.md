@@ -16,6 +16,8 @@ All notable changes are listed here. The format follows
   2G to 8G), a write run waits for free memory instead of being killed, and
   the web tests use at most four workers.
 - A `/lane` override a persona cannot use says which lanes it can.
+- Long agent answers keep their beginning, where the summary is, instead of
+  only their last 8 KB; the full text stays in the run output.
 
 ## [0.1.0] - 2026-10-18
 

@@ -31,7 +31,25 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
-const maxAnswerBytes = 8192
+// A run's answer is read from the end of its stdout (CLIs print progress
+// first), up to maxAnswerRead, and posted up to maxAnswerBytes from its start.
+const (
+	maxAnswerRead  = 256 << 10
+	maxAnswerBytes = 64 << 10
+)
+
+// shortenAnswer keeps the start of a long answer, where the summary is, cut
+// at a line break, and says where the rest is.
+func shortenAnswer(s string) string {
+	if len(s) <= maxAnswerBytes {
+		return s
+	}
+	cut := s[:maxAnswerBytes]
+	if i := strings.LastIndexByte(cut, '\n'); i > maxAnswerBytes/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " \n") + "\n\n(The answer was longer; the rest is in the run output.)"
+}
 
 const mcpPromptNote = "Faztudo MCP tools are available for this channel only. ask_human returns immediately. You cannot resolve an approval."
 
@@ -746,6 +764,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		if mode == domain.RunWrite {
 			answer, proposal = splitCommit(answer)
 		}
+		answer = shortenAnswer(answer)
 		if err != nil {
 			if answer != "" {
 				answer = "Run failed: " + run.FailureReason + "\n\n" + answer
@@ -1114,10 +1133,10 @@ func (a *App) answer(id string) string {
 	if err != nil {
 		return ""
 	}
-	if info.Size() > maxAnswerBytes {
-		_, _ = f.Seek(info.Size()-maxAnswerBytes, io.SeekStart)
+	if info.Size() > maxAnswerRead {
+		_, _ = f.Seek(info.Size()-maxAnswerRead, io.SeekStart)
 	}
-	b, _ := io.ReadAll(io.LimitReader(f, maxAnswerBytes))
+	b, _ := io.ReadAll(io.LimitReader(f, maxAnswerRead))
 	return strings.TrimSpace(string(b))
 }
 
