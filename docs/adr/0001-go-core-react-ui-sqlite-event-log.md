@@ -2,6 +2,8 @@
 
 Status: accepted, 2026-10-17
 
+Note: the desktop window is a thin client over this same UI; see 0005.
+
 ## Context
 
 faztudo has to install in one step, start fast, sit idle cheaply, supervise

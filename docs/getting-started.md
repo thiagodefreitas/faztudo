@@ -101,6 +101,11 @@ faztudo serve     # starts the server and opens an authenticated local browser
 faztudo open      # opens the browser again after a restart or token rotation
 ```
 
+`faztudo connect --json` is for other programs, such as the desktop shell. It
+prints `{"url","code","version"}`: the loopback address, a single-use sign-in
+code and the daemon version. The local token is never printed. Without
+`--json` it prints a one-time sign-in link for you.
+
 ## First steps
 
 1. Create a channel, for example `#my-project`, and point it at a local git

@@ -39,7 +39,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: faztudo serve|open|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|passwd|version")
+		return fmt.Errorf("usage: faztudo serve|open|connect [--json]|token --rotate|init [--template solo|team|empty]|doctor|agents detect|lanes|passwd|version")
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
@@ -83,6 +83,12 @@ func run(args []string) error {
 			return err
 		}
 		return openLocalBrowser(c.Server.Listen, auth.LocalTokenPath(p.DataDir))
+	case "connect":
+		c, err := config.Load(p)
+		if err != nil {
+			return err
+		}
+		return runConnect(c.Server.Listen, auth.LocalTokenPath(p.DataDir), args[1:], os.Stdout)
 	case "lanes":
 		return printLanes(p)
 	case "serve":
@@ -212,28 +218,41 @@ func run(args []string) error {
 // browser launcher's command line is readable by other local users, so it
 // never carries the token itself.
 func openLocalBrowser(listen, tokenPath string) error {
+	code, err := requestLocalCode(listen, tokenPath)
+	if err != nil {
+		return err
+	}
+	return exec.Command("xdg-open", "http://"+listen+"/auth/local#"+code).Run()
+}
+
+// requestLocalCode trades the local token for a single-use sign-in code. The
+// token goes only in the Authorization header of a loopback request.
+func requestLocalCode(listen, tokenPath string) (string, error) {
+	if !config.IsLoopbackListen(listen) {
+		return "", fmt.Errorf("server.listen %q is not a loopback address; faztudo only signs in locally", listen)
+	}
 	token, err := auth.ReadLocalToken(tokenPath)
 	if err != nil {
-		return fmt.Errorf("read local token: %w", err)
+		return "", fmt.Errorf("read local token: %w", err)
 	}
 	req, err := http.NewRequest("POST", "http://"+listen+"/api/v1/auth/local/code", nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	client := &http.Client{Timeout: 5 * time.Second}
 	res, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("ask faztudo for a sign-in code (is it running?): %w", err)
+		return "", fmt.Errorf("ask faztudo for a sign-in code (is it running?): %w", err)
 	}
 	defer res.Body.Close()
 	var out struct {
 		Code string `json:"code"`
 	}
 	if res.StatusCode != 200 || json.NewDecoder(res.Body).Decode(&out) != nil || out.Code == "" {
-		return fmt.Errorf("faztudo did not give a sign-in code (status %d)", res.StatusCode)
+		return "", fmt.Errorf("faztudo did not give a sign-in code (status %d)", res.StatusCode)
 	}
-	return exec.Command("xdg-open", "http://"+listen+"/auth/local#"+out.Code).Run()
+	return out.Code, nil
 }
 
 func shouldOpenBrowser(configured, noOpen, terminal bool, display, wayland string) bool {
