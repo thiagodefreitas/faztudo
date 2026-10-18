@@ -518,7 +518,7 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 			return "", err
 		}
 		if out != "" {
-			return "", errors.New("channel repo has uncommitted changes; clean it before merge")
+			return "", domain.UserError{Message: "The channel repository has uncommitted changes to tracked files. Commit or stash them, then merge again."}
 		}
 		if run.BaseCommit == "" {
 			return "", errors.New("run has no base commit")
@@ -544,10 +544,30 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 				return "", fmt.Errorf("committing run changes (repository hooks may have refused them): %w", err)
 			}
 		}
+		head, err := git(ctx, w.Repo, "rev-parse", "HEAD")
+		if err != nil {
+			return "", err
+		}
+		replayed := head != run.BaseCommit
+		if replayed {
+			// The branch moved while the run waited (another merge, a human
+			// commit). Replay the run's single commit on top instead of
+			// failing the fast-forward; on a conflict, leave everything as it
+			// was so Keep and Discard still work.
+			if _, err := git(ctx, w.Path, "rebase", "--no-autostash", head); err != nil {
+				files, _ := git(ctx, w.Path, "diff", "--name-only", "--diff-filter=U")
+				_, _ = git(ctx, w.Path, "rebase", "--abort")
+				return "", domain.UserError{Message: "The branch moved since this run started and the run's changes conflict in: " +
+					strings.Join(strings.Fields(files), ", ") + ". Choose Keep to resolve it by hand, or Discard."}
+			}
+		}
 		if _, err := git(ctx, w.Repo, "merge", "--ff-only", w.Branch); err != nil {
 			return "", err
 		}
 		outcome = "Fast-forwarded " + w.Branch + " into the current branch."
+		if replayed {
+			outcome = "Merged " + w.Branch + " on top of changes made since the run started."
+		}
 		if err := (worktree.Manager{BaseDir: a.Paths.WorktreesDir}).Cleanup(ctx, w); err != nil {
 			outcome += " Worktree cleanup failed: " + err.Error()
 		}

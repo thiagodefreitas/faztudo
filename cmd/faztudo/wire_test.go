@@ -515,3 +515,100 @@ func TestLanesCommandReadsStoredHealth(t *testing.T) {
 		t.Fatalf("lanes output: %s %v", out, err)
 	}
 }
+
+// mergeMovedSetup starts a write run whose agent adds added.txt, and returns
+// once its approval is pending.
+func mergeMovedSetup(t *testing.T) (*store.Store, *httptest.Server, string, string, domain.Approval) {
+	t.Helper()
+	c := config.Defaults()
+	c.Lanes.Lane = []config.Lane{{ID: "codex/default", CLI: "codex", Capacity: 1}}
+	c.Lanes.Persona = []config.Persona{{Handle: "coder", Lanes: []string{"codex/default"}, Mode: "write"}}
+	s, a, srv, p := setupWire(t, c)
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "init", "-q")
+	f, err := os.OpenFile(filepath.Join(repo, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n[user]\n name = Synthetic Human\n email = human@example.invalid\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "base.txt")
+	gitTest(t, repo, "commit", "-q", "-m", "base")
+	base := gitTest(t, repo, "rev-parse", "HEAD")
+	fake := filepath.Join(p.DataDir, "fake-agent")
+	script := "#!/bin/sh\nprintf 'agent line\\n' > added.txt\nprintf 'synthetic answer\\n'\n"
+	if err := os.WriteFile(fake, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a.Adapters["codex"] = fakeCodex{fake}
+	var ch domain.Channel
+	body, _ := json.Marshal(map[string]string{"name": "work", "repo_path": repo})
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels", string(body), 201, &ch)
+	requestJSON(t, "POST", srv.URL+"/api/v1/channels/"+ch.ID+"/messages", `{"body":"@coder add a file"}`, 201, nil)
+	approval := waitFor(t, func() (domain.Approval, bool) {
+		v, _ := s.Approvals(context.Background(), "pending")
+		if len(v) == 1 {
+			return v[0], true
+		}
+		return domain.Approval{}, false
+	})
+	return s, srv, repo, base, approval
+}
+
+func TestMergeReplaysRunWhenBranchMoved(t *testing.T) {
+	_, srv, repo, base, approval := mergeMovedSetup(t)
+	// Someone else lands a commit while the run waits for approval.
+	if err := os.WriteFile(filepath.Join(repo, "other.txt"), []byte("other\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "other.txt")
+	gitTest(t, repo, "commit", "-q", "-m", "meanwhile")
+	moved := gitTest(t, repo, "rev-parse", "HEAD")
+	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 200, nil)
+	if got := gitTest(t, repo, "rev-parse", "HEAD~1"); got != moved {
+		t.Fatalf("run commit is not on top of the moved branch: parent %s, want %s (base %s)", got, moved, base)
+	}
+	for _, name := range []string{"added.txt", "other.txt"} {
+		if _, err := os.Stat(filepath.Join(repo, name)); err != nil {
+			t.Fatalf("%s missing after merge: %v", name, err)
+		}
+	}
+	if got := gitTest(t, repo, "log", "-1", "--format=%an"); got != "Synthetic Human" {
+		t.Fatalf("author %q", got)
+	}
+}
+
+func TestMergeConflictKeepsApprovalAndNamesFiles(t *testing.T) {
+	s, srv, repo, _, approval := mergeMovedSetup(t)
+	if err := os.WriteFile(filepath.Join(repo, "added.txt"), []byte("human line\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "added.txt")
+	gitTest(t, repo, "commit", "-q", "-m", "conflicting")
+	var res map[string]map[string]string
+	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 409, &res)
+	if msg := res["error"]["message"]; !strings.Contains(msg, "added.txt") {
+		t.Fatalf("conflict message does not name the file: %q", msg)
+	}
+	still, err := s.Approval(context.Background(), approval.ID)
+	if err != nil || still.State != domain.ApprovalPending {
+		t.Fatalf("approval after conflict: %+v %v", still, err)
+	}
+	run, err := s.Run(context.Background(), approval.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := gitTest(t, run.Worktree, "status", "--porcelain"); strings.Contains(out, "UU") {
+		t.Fatalf("worktree left mid-rebase: %s", out)
+	}
+	// Keep still works after a failed merge.
+	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"keep"}`, 200, nil)
+}

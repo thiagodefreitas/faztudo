@@ -222,6 +222,14 @@ type LaneWindow struct {
 	MeasuredAt *time.Time  `json:"measured_at,omitempty"`
 }
 
+// UserError is an error written for the person who acted. The API shows its
+// message as is; other errors go only to the daemon log.
+type UserError struct {
+	Message string
+}
+
+func (e UserError) Error() string { return e.Message }
+
 type LaneError struct {
 	Class   string    `json:"class"`
 	Message string    `json:"message"`

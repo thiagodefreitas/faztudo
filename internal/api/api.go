@@ -801,7 +801,12 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		outcome, err := a.ResolveApproval(r.Context(), v, req.Option, req.CommitMessage)
 		if err != nil {
 			slog.Error("resolve approval", "approval", v.ID, "run", v.RunID, "err", err)
-			fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
+			var userErr domain.UserError
+			if errors.As(err, &userErr) {
+				fail(w, 409, "conflict", userErr.Message)
+			} else {
+				fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
+			}
 			return
 		}
 		req.Note = outcome
