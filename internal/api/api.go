@@ -1318,6 +1318,7 @@ func (a *API) watchSession(ctx context.Context, cancel context.CancelFunc, sessi
 		}
 	}
 }
+
 // streamHead tells a client where the event log ends, so it can subscribe
 // from there instead of replaying everything.
 func (a *API) streamHead(w http.ResponseWriter, r *http.Request) {
