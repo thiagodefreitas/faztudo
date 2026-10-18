@@ -39,6 +39,8 @@ func (fakeCodex) Classify(code int, tail string) (domain.FailureClass, adapters.
 
 func setupWire(t *testing.T, c config.Config) (*store.Store, *app.App, *httptest.Server, config.Paths) {
 	t.Helper()
+	// The tests run fake agents; the sandbox default of "required" would need bubblewrap.
+	c.Runs.Sandbox = "off"
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))

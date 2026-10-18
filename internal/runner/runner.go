@@ -806,6 +806,13 @@ func stripEnv(base, remove []string, add map[string]string, extraAllow ...string
 	}
 	return out
 }
+
+// CommandEnv builds the environment an agent command gets: the same allowlist
+// Execute uses, so callers outside the runner do not leak host secrets.
+func CommandEnv(base []string, c adapters.Cmd) []string {
+	return stripEnv(base, c.EnvRemove, c.EnvAdd, c.EnvAllow...)
+}
+
 func addHas(add map[string]string, k string) bool { _, ok := add[k]; return ok }
 
 // Recover inspects persisted running runs. A matching live process is left

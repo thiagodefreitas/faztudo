@@ -300,6 +300,22 @@ func loopbackHost(addr string) bool {
 	return host == "localhost" || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback())
 }
 func current(r *http.Request) domain.Member { return r.Context().Value(actorKey{}).(domain.Member) }
+
+// humanOnly answers 403 and returns false unless the caller is a human.
+func humanOnly(w http.ResponseWriter, r *http.Request, what string) bool {
+	if current(r).Kind != domain.MemberHuman {
+		fail(w, 403, "forbidden", "only a human can "+what)
+		return false
+	}
+	return true
+}
+
+// canSee reports whether the member may read the channel. An unknown channel
+// is treated as not visible.
+func (a *API) canSee(ctx context.Context, memberID, channelID string) bool {
+	c, err := a.Store.Channel(ctx, channelID)
+	return err == nil && visible(c, memberID)
+}
 func respond(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -355,10 +371,15 @@ func (a *API) channels(w http.ResponseWriter, r *http.Request) {
 		failErr(w, e)
 		return
 	}
-	for i := range v {
-		v[i].Unread, _ = a.Store.Unread(r.Context(), v[i].ID, current(r).ID)
+	out := v[:0]
+	for _, c := range v {
+		if !visible(c, current(r).ID) {
+			continue
+		}
+		c.Unread, _ = a.Store.Unread(r.Context(), c.ID, current(r).ID)
+		out = append(out, c)
 	}
-	respond(w, 200, v)
+	respond(w, 200, out)
 }
 
 var channelName = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -367,6 +388,9 @@ func validChannel(c domain.Channel) bool {
 	return channelName.MatchString(c.Name) && (c.Kind == domain.ChannelTeam || c.Kind == domain.ChannelDepartment || c.Kind == domain.ChannelProject || c.Kind == domain.ChannelAgent || c.Kind == domain.ChannelDirect) && (c.Visibility == domain.VisibilityPublic || c.Visibility == domain.VisibilityPrivate || c.Visibility == domain.VisibilityDirect)
 }
 func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
+	if !humanOnly(w, r, "create channels") {
+		return
+	}
 	var v struct {
 		Name        string             `json:"name"`
 		Kind        domain.ChannelKind `json:"kind"`
@@ -406,13 +430,12 @@ func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
-	if current(r).Kind != domain.MemberHuman {
-		fail(w, 403, "forbidden", "only a human can change channel settings")
+	if !humanOnly(w, r, "change channel settings") {
 		return
 	}
 	c, e := a.Store.Channel(r.Context(), r.PathValue("id"))
-	if e != nil {
-		failErr(w, e)
+	if e != nil || !visible(c, current(r).ID) {
+		fail(w, 404, "not_found", "resource not found")
 		return
 	}
 	var v struct {
@@ -501,8 +524,8 @@ func validateRepo(ctx context.Context, path string) error {
 }
 func (a *API) messages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, e := a.Store.Channel(r.Context(), id); e != nil {
-		failErr(w, e)
+	if !a.canSee(r.Context(), current(r).ID, id) {
+		fail(w, 404, "not_found", "resource not found")
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -515,8 +538,13 @@ func (a *API) messages(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) thread(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, e := a.Store.Message(r.Context(), id); e != nil {
+	m, e := a.Store.Message(r.Context(), id)
+	if e != nil {
 		failErr(w, e)
+		return
+	}
+	if !a.canSee(r.Context(), current(r).ID, m.ChannelID) {
+		fail(w, 404, "not_found", "resource not found")
 		return
 	}
 	v, e := a.Store.Thread(r.Context(), id)
@@ -875,6 +903,9 @@ func (a *API) diff(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(diff))
 }
 func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
+	if !humanOnly(w, r, "cancel runs") {
+		return
+	}
 	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
 	if err != nil {
 		failErr(w, err)
@@ -891,6 +922,9 @@ func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
 	respond(w, 202, map[string]bool{"ok": true})
 }
 func (a *API) retry(w http.ResponseWriter, r *http.Request) {
+	if !humanOnly(w, r, "retry runs") {
+		return
+	}
 	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
 	if err != nil {
 		failErr(w, err)
@@ -1076,6 +1110,9 @@ func (a *API) laneHistory(w http.ResponseWriter, r *http.Request) {
 }
 func laneID(r *http.Request) string { return strings.TrimSuffix(r.PathValue("id"), "/probe") }
 func (a *API) patchLane(w http.ResponseWriter, r *http.Request) {
+	if !humanOnly(w, r, "change lanes") {
+		return
+	}
 	if strings.HasSuffix(r.PathValue("id"), "/probe") {
 		fail(w, 404, "not_found", "endpoint not found")
 		return
@@ -1124,6 +1161,9 @@ func (a *API) patchLane(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *API) probe(w http.ResponseWriter, r *http.Request) {
+	if !humanOnly(w, r, "probe lanes") {
+		return
+	}
 	if !strings.HasSuffix(r.PathValue("id"), "/probe") {
 		fail(w, 404, "not_found", "endpoint not found")
 		return
@@ -1234,7 +1274,12 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		// closeDeviceStreams, so re-read the session row on a timer.
 		go a.watchSession(streamCtx, cancel, sessID)
 	}
+	me := current(r).ID
 	for evt := range ch {
+		// Events of a channel the caller cannot read never reach this stream.
+		if evt.ChannelID != "" && !a.canSee(streamCtx, me, evt.ChannelID) {
+			continue
+		}
 		b, _ := json.Marshal(evt)
 		if err = conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			return

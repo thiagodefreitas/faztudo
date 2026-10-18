@@ -52,7 +52,9 @@ design assumes that agents make mistakes and that messages from outside
 - **Isolated write runs.** An agent that changes code works in its own git
   worktree, not in your checkout. Pushing a branch, sending to a bridge and
   other actions that go through faztudo need an approval.
-- **Write-run sandbox.** `runs.sandbox = "auto"` is the default. On Linux,
+- **Write-run sandbox.** `runs.sandbox = "required"` is the default in a
+  new config: without bubblewrap and unprivileged user namespaces a write run
+  fails at once with a notice that says why and how to opt into `"auto"`. On Linux,
   write runs use bubblewrap when unprivileged user namespaces work. The
   worktree is writable, except its `.git` file, which is read-only. The shared
   git directory is read-only except its objects; `objects/info` is read-only
@@ -118,11 +120,32 @@ design assumes that agents make mistakes and that messages from outside
   also means repository hooks do not protect merges from agent worktrees;
   review the diff before approving. Codex receives its per-run MCP bearer
   token through the process environment, not argv. It does not
-  isolate the CLI from another process running as your user. In `auto` mode,
-  a missing or unusable sandbox falls back to an unsandboxed run with one
-  channel notice. Set `runs.sandbox = "required"` or `lane.sandbox = "required"`
-  to refuse that run instead. A lane's `sandbox` setting takes precedence over
-  the global setting for write runs.
+  isolate the CLI from another process running as your user. In `auto` mode
+  (an explicit opt-in), a missing or unusable sandbox falls back to an
+  unsandboxed run with one channel notice, and the channel test command is
+  then not run at all, because it would execute agent-written code as you.
+  In `required` mode that run is refused. A lane's `sandbox` setting takes
+  precedence over the global setting for write runs. A config file written
+  before v0.1.0 that says `sandbox = "auto"` keeps it; change it to `"required"`.
+- **v0.1.0 network and OAuth exception.** Write runs keep the network on by
+  default, so the CLI can reach its provider and the faztudo MCP endpoint.
+  Inside the sandbox these host credential files stay writable, because the
+  CLI must refresh its login: Claude `.claude/.credentials.json`, Codex
+  `auth.json` (in its per-run `CODEX_HOME`), Grok `.grok/auth.json`, Agy
+  `.gemini/antigravity-cli/antigravity-oauth-token`, OpenCode
+  `.local/share/opencode/auth.json`, and for Kimi the whole `credentials/` and
+  `oauth/` directories under `~/.kimi-code`. A hostile run with network can
+  read these tokens and send them out, or replace one so the next unsandboxed
+  run uses another account. To close that, set `sandbox_network = false` on
+  the lane (this also removes MCP for that lane); the CLI then cannot reach
+  its API, so use it for offline tools or accept a broken refresh.
+- **Channel access.** Channel lists, messages, threads, pins, search, the live
+  stream and uploaded files are limited to channels the caller may read.
+  Lane edits, channel create/edit, run cancel and retry, lane probes and
+  uploads are human-only. Read runs without a repository start in an empty
+  scratch directory, never the data directory, and channel summaries use the
+  same stripped environment as runs. Run and approval lists are not yet
+  filtered by channel membership.
   Read runs are unchanged. A sandboxed run ends if its parent exits; recovery
   records an interrupted run rather than resuming its process.
 - **Which CLIs run in the sandbox.** Claude, Codex, Grok and Agy passed the

@@ -600,6 +600,25 @@ func (s *Store) Channel(ctx context.Context, id string) (domain.Channel, error) 
 func (s *Store) Message(ctx context.Context, id string) (domain.Message, error) {
 	return oneJSON[domain.Message](ctx, s.db, "SELECT data FROM messages WHERE id=?", id)
 }
+
+// FileChannels lists the channels with a message that attaches the file id.
+func (s *Store) FileChannels(ctx context.Context, fileID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT channel_id FROM messages WHERE instr(data, ?)>0`, `"id":"`+fileID+`"`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Messages(ctx context.Context, channelID, before string, limit int) ([]domain.Message, error) {
 	return s.messages(ctx, channelID, before, limit, false)
 }

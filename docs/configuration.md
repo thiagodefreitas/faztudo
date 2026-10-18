@@ -34,7 +34,7 @@ context_messages = 40       # recent messages sent to an agent
 summary_every = 20         # update the rolling channel summary after this many new messages
 context_limit_tokens = 128000 # model context estimate used for rollover
 # summary_lane = "kimi/default" # optional; otherwise the cheapest healthy lane
-sandbox = "auto"            # auto (default), off or required for write runs
+sandbox = "required"        # required (default), auto or off for write runs
 sandbox_memory_max = "4G"  # systemd user scope, when available
 sandbox_tasks_max = 512    # systemd user scope, when available
 sandbox_read_only = []      # extra absolute toolchain paths to mount read-only
@@ -74,10 +74,11 @@ listener on `lan.listen` (default `0.0.0.0:7458`) and the plain-HTTP CA
 helper listener on `lan.ca_listen` (default `0.0.0.0:7459`). Run
 `faztudo passwd` before starting LAN mode for the first time.
 
-With `auto`, write runs use bubblewrap on Linux when it and unprivileged user
-namespaces work. It posts one channel notice per run if it falls back to the
-old process mode. `required` refuses the run instead; `off` disables the
-sandbox. Each `[[lane]]` may set `sandbox = "auto"`, `"off"` or `"required"`
+With `required` (the default), write runs use bubblewrap on Linux and fail at
+once, naming the reason, when it or unprivileged user namespaces do not work.
+`auto` is an opt-in: it posts one channel notice per run if it falls back to
+the old process mode, and then skips the channel test command, which would
+otherwise run unsandboxed. `off` disables the sandbox. Each `[[lane]]` may set `sandbox = "auto"`, `"off"` or `"required"`
 to override `[runs].sandbox` for write runs on that lane. Without it, the
 global value applies. Existing config files that explicitly say `sandbox = "off"` keep
 that setting until you change it. The worktree is writable, except its `.git`

@@ -22,7 +22,7 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 	worktree := req.Workdir
 	fallback := func(cause error) (adapters.Cmd, error) {
 		if opts.SandboxMode == "required" {
-			return command, fmt.Errorf("write run requires bubblewrap: %w", cause)
+			return command, fmt.Errorf("write run requires bubblewrap (sandbox = \"required\"): %w. Install bubblewrap and allow unprivileged user namespaces, or set sandbox = \"auto\" under [runs] or on the lane to run unsandboxed", cause)
 		}
 		if opts.OnFallback != nil {
 			opts.OnFallback("Write run is not sandboxed: " + cause.Error())
@@ -337,6 +337,11 @@ func (r *Runner) verifyWrite(ctx context.Context, w worktree.Worktree, testComma
 		return "", nil
 	}
 	if len(opts.sandboxArgs) == 0 {
+		if opts.SandboxMode == "required" || opts.SandboxMode == "auto" {
+			// The agent ran without its sandbox (auto fell back). Its tests
+			// would execute agent-written code as the user, so do not run them.
+			return "", fmt.Errorf("verification not run: the write run was meant to be sandboxed but was not; review the change by hand or fix bubblewrap")
+		}
 		cmd := exec.Command("sh", "-c", testCommand)
 		cmd.Dir = w.Path
 		return runVerification(ctx, cmd, timeout)

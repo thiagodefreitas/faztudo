@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
+	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
 func TestSandboxFallbackPolicy(t *testing.T) {
@@ -26,6 +28,30 @@ func TestSandboxFallbackPolicy(t *testing.T) {
 	}
 	if len(notices) != 1 {
 		t.Fatalf("required mode sent a fallback notice: %q", notices)
+	}
+	_, err = sandboxCommand(context.Background(), command, "codex", req, &opts)
+	if err == nil || !strings.Contains(err.Error(), `sandbox = "auto"`) {
+		t.Fatalf("required failure does not say how to opt into auto: %v", err)
+	}
+}
+
+func TestVerificationNeverRunsUnsandboxedForSandboxedRuns(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	r := &Runner{}
+	for _, mode := range []string{"auto", "required"} {
+		_, err := r.verifyWrite(context.Background(), worktree.Worktree{Path: t.TempDir()}, "touch "+marker, time.Minute, WriteOptions{SandboxMode: mode})
+		if err == nil || !strings.Contains(err.Error(), "verification not run") {
+			t.Fatalf("%s: %v", mode, err)
+		}
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("verification command ran without a sandbox")
+	}
+	if _, err := r.verifyWrite(context.Background(), worktree.Worktree{Path: t.TempDir()}, "touch "+marker, time.Minute, WriteOptions{SandboxMode: "off"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("sandbox = off must still verify")
 	}
 }
 

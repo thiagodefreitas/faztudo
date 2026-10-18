@@ -682,7 +682,12 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	a.syncTask(ctx, m.ID, false)
 	workdir := channel.RepoPath
 	if workdir == "" {
-		workdir = a.Paths.DataDir
+		// Never the data directory: it holds the local token. Use an empty
+		// scratch directory under the run's own state.
+		workdir = filepath.Join(a.Paths.RunsDir, run.ID, "scratch")
+		if err := os.MkdirAll(workdir, 0700); err != nil {
+			return err
+		}
 	}
 	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout, AllowedTools: a.allowedTools(lane.ID)}
 	if mcpReachable && mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
@@ -1054,7 +1059,17 @@ func (a *App) generateSummary(ctx context.Context, lane domain.Lane, prompt, cha
 	}
 	dir := channel.RepoPath
 	if dir == "" {
-		dir = a.Paths.DataDir
+		if a.Paths.RunsDir != "" {
+			if err := os.MkdirAll(a.Paths.RunsDir, 0700); err != nil {
+				return "", err
+			}
+		}
+		scratch, err := os.MkdirTemp(a.Paths.RunsDir, "summary-")
+		if err != nil {
+			return "", err
+		}
+		defer os.RemoveAll(scratch)
+		dir = scratch
 	}
 	command, err := adapter.Command(adapters.Request{Prompt: prompt, Mode: domain.RunRead, Model: lane.Model, Workdir: dir, Timeout: 2 * time.Minute})
 	if err != nil {
@@ -1067,19 +1082,7 @@ func (a *App) generateSummary(ctx context.Context, lane domain.Lane, prompt, cha
 	defer cancel()
 	cmd := exec.CommandContext(callCtx, command.Path, command.Args...)
 	cmd.Dir = command.Dir
-	cmd.Env = append([]string{}, os.Environ()...)
-	for key, value := range command.EnvAdd {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
-	for _, key := range command.EnvRemove {
-		filtered := cmd.Env[:0]
-		for _, item := range cmd.Env {
-			if !strings.HasPrefix(item, key+"=") {
-				filtered = append(filtered, item)
-			}
-		}
-		cmd.Env = filtered
-	}
+	cmd.Env = runner.CommandEnv(os.Environ(), command)
 	var out summaryOutput
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard

@@ -32,6 +32,9 @@ func (a *API) maxUpload() int64 {
 // upload stores one file from a multipart form field named "file" and returns
 // its description. The file is not tied to a message until one names it.
 func (a *API) upload(w http.ResponseWriter, r *http.Request) {
+	if !humanOnly(w, r, "upload files") {
+		return
+	}
 	if a.FilesDir == "" {
 		fail(w, 503, "unavailable", "file uploads are not configured")
 		return
@@ -85,6 +88,27 @@ func uploadError(w http.ResponseWriter, err error) {
 // image types are shown inline, and everything else is a download. Nothing
 // uploaded is ever served as HTML, SVG or script.
 func (a *API) serveFile(w http.ResponseWriter, r *http.Request) {
+	// A file named by messages is served only when one of them is in a
+	// channel the caller can read. A file no message names yet is the
+	// caller's own pending upload (the id is a content hash), so it is served.
+	channelIDs, err := a.Store.FileChannels(r.Context(), r.PathValue("id"))
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if len(channelIDs) > 0 {
+		ok := false
+		for _, id := range channelIDs {
+			if a.canSee(r.Context(), current(r).ID, id) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			fail(w, 404, "not_found", "file not found")
+			return
+		}
+	}
 	f, err := files.Store{Dir: a.FilesDir}.Open(r.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, files.ErrNotFound) {
