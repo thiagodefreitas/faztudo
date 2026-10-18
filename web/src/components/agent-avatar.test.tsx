@@ -71,6 +71,26 @@ describe("AgentAvatar", () => {
     expect(screen.getByTestId("avatar")).toHaveAttribute("aria-hidden", "true")
   })
 
+  it("animates only a working agent, with eyes that every character exposes", () => {
+    render(
+      <div>
+        {CLIS.map((member) => (
+          <AgentAvatar key={member.id} member={member} state="working" />
+        ))}
+        <AgentAvatar member={UNKNOWN} state="waiting" />
+      </div>,
+    )
+    for (const member of CLIS) {
+      const svg = screen.getByRole("img", { name: `${member.display_name}, working` })
+      expect(svg).toHaveClass("fz-av-working")
+      expect(svg.querySelector(".fz-av-orbit")).not.toBeNull()
+      expect(svg.querySelector(".fz-av-eyes")).not.toBeNull()
+    }
+    const waiting = screen.getByRole("img", { name: "Zed, waiting" })
+    expect(waiting).not.toHaveClass("fz-av-working")
+    expect(waiting.querySelector(".fz-av-orbit")).toBeNull()
+  })
+
   it("names the state and marks off agents", () => {
     render(<AgentAvatar member={CLIS[1]!} state="waiting" />)
     expect(screen.getByRole("img", { name: "Codex, waiting" })).toBeInTheDocument()

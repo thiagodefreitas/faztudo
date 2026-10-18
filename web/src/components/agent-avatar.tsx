@@ -18,10 +18,10 @@ const STROKE = { strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round"
 
 function Eyes({ y = 18, x1 = 12.5, x2 = 19.5 }: { y?: number; x1?: number; x2?: number }) {
   return (
-    <>
+    <g className="fz-av-eyes">
       <circle cx={x1} cy={y} r={2} className={EYE} />
       <circle cx={x2} cy={y} r={2} className={EYE} />
-    </>
+    </g>
   )
 }
 
@@ -40,8 +40,10 @@ const CHARACTERS: Record<Cli | "unknown", () => ReactNode> = {
     <>
       <rect x={6.5} y={8.5} width={19} height={17} rx={5} fill="currentColor" />
       <rect x={9.5} y={14} width={13} height={7} rx={3.5} className={EYE} />
-      <circle cx={13} cy={17.5} r={1.5} fill="currentColor" />
-      <circle cx={19} cy={17.5} r={1.5} fill="currentColor" />
+      <g className="fz-av-eyes">
+        <circle cx={13} cy={17.5} r={1.5} fill="currentColor" />
+        <circle cx={19} cy={17.5} r={1.5} fill="currentColor" />
+      </g>
     </>
   ),
   // Round head with two pointed ears.
@@ -57,7 +59,7 @@ const CHARACTERS: Record<Cli | "unknown", () => ReactNode> = {
     <>
       <circle cx={16} cy={16.5} r={9.5} fill="currentColor" />
       <circle cx={16} cy={16.5} r={4.5} className={EYE} />
-      <circle cx={16} cy={16.5} r={2} fill="currentColor" />
+      <circle cx={16} cy={16.5} r={2} fill="currentColor" className="fz-av-eyes" />
       <path d="M13 26.5h6" {...STROKE} />
     </>
   ),
@@ -110,7 +112,7 @@ const BADGES: Record<Role, () => ReactNode> = {
 }
 
 const STATE_RING: Record<Exclude<AvatarState, "off">, string> = {
-  working: "stroke-current motion-safe:animate-pulse",
+  working: "stroke-current",
   waiting: "stroke-warn",
   failed: "stroke-danger",
 }
@@ -173,11 +175,11 @@ export function AgentAvatar({
       width={size}
       height={size}
       {...a11y}
-      className={cx("shrink-0", hue.ink, state === "off" && "opacity-60 grayscale", className)}
+      className={cx("shrink-0", hue.ink, state === "off" && "opacity-60 grayscale", state === "working" && "fz-av-working", className)}
       style={{ ["--fz-tile" as string]: `var(--color-agent-${identity.slot + 1}-soft)` }}
     >
       <rect width={32} height={32} rx={8} className={hue.tile} />
-      {Character()}
+      <g className="fz-av-body">{Character()}</g>
       {badge && (
         // Scaled toward the corner so the disc and its stroke stay inside
         // the 32 unit tile instead of being clipped at the edges.
@@ -188,7 +190,26 @@ export function AgentAvatar({
           </g>
         </g>
       )}
-      {ring && (
+      {ring && state === "working" && (
+        <>
+          <rect x={1} y={1} width={30} height={30} rx={7} fill="none" strokeWidth={2} className={cx(ring, "opacity-25")} />
+          {/* A short arc that travels around the tile while the agent works. */}
+          <rect
+            x={1}
+            y={1}
+            width={30}
+            height={30}
+            rx={7}
+            fill="none"
+            strokeWidth={2}
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray="22 78"
+            className={cx(ring, "fz-av-orbit")}
+          />
+        </>
+      )}
+      {ring && state !== "working" && (
         <rect
           x={1}
           y={1}
