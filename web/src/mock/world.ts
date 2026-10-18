@@ -292,6 +292,67 @@ export class MockWorld {
     return structuredClone(this.channels)
   }
 
+  // A fuller team for screenshots and demos (VITE_MOCK_SHOWCASE=1): every
+  // agent CLI plus two more personas, one run working and one waiting for
+  // an approval. Tests use the small default world.
+  seedShowcase(): void {
+    const minute = 60_000
+    const now = this.clock.now()
+    const agent = (handle: string, name: string, lanes: string[], role: string, presence: Member["presence"] = "offline"): Member => ({
+      id: ulid(now),
+      kind: "agent",
+      handle,
+      display_name: name,
+      presence,
+      agent: { lanes, role },
+    })
+    const added = [
+      agent("architect", "Architect", ["claude/opus"], "Plans changes before anyone writes code", "busy"),
+      agent("writer", "Writer", ["agy/default"], "Writes docs and release notes", "busy"),
+      agent("codex", "Codex", ["codex/default"], "Codex CLI"),
+      agent("grok", "Grok", ["grok/default"], "Grok CLI"),
+      agent("kimi", "Kimi", ["kimi/default"], "Kimi CLI"),
+      agent("agy", "Agy", ["agy/default"], "Antigravity CLI"),
+      agent("opencode", "Opencode", ["opencode/default"], "OpenCode CLI"),
+    ]
+    this.members.push(...added)
+    // The writer works on agy, so that lane has room in the showcase.
+    const agy = this.lanes.find((lane) => lane.id === "agy/default")
+    if (agy) {
+      agy.health = "available"
+      delete agy.health_reason
+      agy.running = 1
+      // The stream replays earlier lane events, so announce the change too.
+      this.emit("lane.updated", undefined, agy, "system")
+    }
+    const dev = this.channels.find((channel) => channel.id === IDS.dev)
+    if (dev) dev.member_ids = [...dev.member_ids, ...added.map((member) => member.id)]
+    const [architect, writer] = added
+    const working: Run = {
+      id: ulid(now),
+      trigger_message_id: IDS.msgHello,
+      channel_id: IDS.dev,
+      agent_id: writer!.id,
+      lane_id: "agy/default",
+      mode: "write",
+      state: "running",
+      started_at: iso(now - 3 * minute),
+    }
+    this.insertRun(working)
+    const asking: Run = {
+      id: ulid(now),
+      trigger_message_id: IDS.msgHello,
+      channel_id: IDS.dev,
+      agent_id: architect!.id,
+      lane_id: "claude/opus",
+      mode: "read",
+      state: "running",
+      started_at: iso(now - 6 * minute),
+    }
+    this.insertRun(asking)
+    this.requestApproval(asking.id)
+  }
+
   getLanes(): Lane[] {
     return structuredClone(this.lanes)
   }

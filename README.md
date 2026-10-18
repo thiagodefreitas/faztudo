@@ -19,7 +19,7 @@ The name is Portuguese for "does everything". It does not, yet.
   <img src="docs/images/chat.png" alt="A faztudo channel: a person asks for a change, the Coder agent's run passes its checks, the Reviewer agent's run fails with the test output shown" width="860">
 </p>
 <p align="center">
-  <img src="docs/images/office.png" alt="The office view: agents at desks in two pods, the Director's desk in front" width="620">
+  <img src="docs/images/office.png" alt="The office view: eleven desks in two pods, one agent working, one waiting with a raised hand for an approval, one out of quota, the Director's desk in front" width="620">
   <img src="docs/images/inbox-phone.png" alt="The phone inbox: channels with their members' avatars and last messages" width="200">
 </p>
 

@@ -48,6 +48,7 @@ function attachSocket(world: MockWorld, socket: WebSocket): void {
 
 export function mockPlugin(): Plugin {
   const world = new MockWorld(realClock)
+  if (process.env.VITE_MOCK_SHOWCASE === "1") world.seedShowcase()
   return {
     name: "faztudo-mock",
     configureServer(server) {
