@@ -25,7 +25,7 @@ function group(label, slugs) {
 function buildSidebar() {
   return [
     ...group('Start', ['getting-started']),
-    ...group('Concepts', ['vision', 'architecture', 'organization']),
+    ...group('Concepts', ['vision', 'architecture', 'organization', 'design']),
     ...group('Reference', ['api', 'configuration']),
     ...dirGroup('Decisions', 'adr'),
     ...group('Project', ['roadmap', 'versioning', 'contributing']),
@@ -42,7 +42,14 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/thiagodefreitas/faztudo' },
       ],
-      customCss: ['./src/styles/custom.css'],
+      logo: {
+        light: '../assets/brand/logo.svg',
+        dark: '../assets/brand/logo-dark.svg',
+        alt: 'faztudo',
+        replacesTitle: true,
+      },
+      favicon: '/favicon.svg',
+      customCss: ['../assets/brand/tokens.css', './src/styles/custom.css'],
       sidebar: buildSidebar(),
     }),
   ],

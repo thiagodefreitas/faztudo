@@ -1,29 +1,91 @@
 ---
 title: faztudo
-description: A local-first, chat-first workspace for you and your AI coding agents.
+description: A local-first, chat-first workspace where you and the agent CLIs you already use work together.
 template: splash
 hero:
-  tagline: Your agents and you, in one room.
+  title: Your agents and you, in one room.
+  tagline: A small program for your own Linux machine. Claude Code, Codex, Grok, Kimi, Antigravity and OpenCode join your channels, work in their own git worktrees, and ask before anything is merged.
   actions:
     - text: Get started
       link: /faztudo/getting-started/
       icon: right-arrow
       variant: primary
-    - text: GitHub
+    - text: View on GitHub
       link: https://github.com/thiagodefreitas/faztudo
-      variant: minimal
+      icon: external
+      variant: secondary
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
+<div class="fz-status">
+  <strong>Pre-alpha.</strong> Chat, runs, approvals, the Lanes dashboard and
+  phone access over your LAN work today. There is no release yet, so you build
+  from source. Signal, Discord and the office views are planned. See the
+  <a href="/faztudo/roadmap/">roadmap</a>.
+</div>
+
+## Why faztudo
 
 <CardGrid>
-  <Card title="Chat-first">
-    People and agents share channels, from a browser on your local network.
+  <Card title="The agents you already have" icon="rocket">
+    faztudo runs each agent through its own command line tool and sign-in. No
+    extra API keys and no new accounts.
   </Card>
-  <Card title="Local-first">
-    One Go binary with an embedded web UI. The agent CLIs already on your machine do the work.
+  <Card title="Chat first" icon="comment">
+    Channels, threads, direct messages, mentions and a command palette. Humans
+    and agents are members of the same channels.
   </Card>
-  <Card title="Office views">
-    2D and 3D office views show the same activity as the chat.
+  <Card title="Lanes and quota" icon="seti:graph">
+    See what each agent account has left, where the number came from and how
+    old it is. When a lane runs out, work moves to the next one and the channel
+    says so.
+  </Card>
+  <Card title="You approve" icon="approve-check">
+    Write runs work in their own git worktree. You read the diff, then Merge,
+    Keep or Discard. An agent cannot approve for you.
+  </Card>
+  <Card title="Local by default" icon="laptop">
+    One binary, one SQLite file, no cloud service and no telemetry.
+  </Card>
+  <Card title="Your phone, over your LAN" icon="phone">
+    Optional HTTPS on your local network, with a password and QR code pairing.
+    No VPN or third party required.
   </Card>
 </CardGrid>
+
+## How it works
+
+<Steps>
+
+1. **Start it.** Run `faztudo init`, then `faztudo serve`. It finds the agent
+   CLIs on your machine and opens the web app on `127.0.0.1`.
+
+2. **Make a channel.** Point it at a local git repository. Add agents as
+   members, and pick a default agent if you want unaddressed messages answered.
+
+3. **Mention an agent.** `@codex what does this repository do?` starts a
+   read-only run. `@coder add a --version flag` starts a write run in its own
+   worktree. Output streams into the channel.
+
+4. **Decide.** When a write run finishes you see the diff and the test result.
+   Merge, keep or discard. Check `/status` any time to see runs, approvals and
+   lane health without spending quota.
+
+</Steps>
+
+Everything is an event in an append-only log, so the chat and the Lanes
+dashboard are two views of the same record. Read the
+[architecture](/faztudo/architecture/).
+
+## Where to next
+
+<CardGrid>
+  <LinkCard title="Getting started" description="Build, run and pair your phone." href="/faztudo/getting-started/" />
+  <LinkCard title="Configuration" description="Lanes, personas and LAN mode settings." href="/faztudo/configuration/" />
+  <LinkCard title="Roadmap" description="What works today and what comes next." href="/faztudo/roadmap/" />
+  <LinkCard title="Contributing" description="How to report bugs and send changes." href="/faztudo/contributing/" />
+</CardGrid>
+
+faztudo is MIT licensed. The name is Portuguese for "does everything". It
+does not, yet.

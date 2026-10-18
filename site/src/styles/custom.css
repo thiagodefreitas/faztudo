@@ -17,3 +17,15 @@
 }
 .sl-markdown-content { line-height: 1.7; }
 .sl-markdown-content :not(pre) > code { border-radius: 4px; }
+
+/* Landing page */
+.fz-status {
+  border: 1px solid var(--sl-color-accent);
+  background: var(--sl-color-accent-low);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 2rem;
+  color: var(--sl-color-white);
+}
+.fz-status a { color: var(--sl-color-accent-high); }
+[data-has-hero] .hero h1 { letter-spacing: -0.02em; }

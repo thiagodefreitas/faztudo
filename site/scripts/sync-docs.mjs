@@ -1,4 +1,4 @@
-// Copies ../docs/**/*.md into src/content/docs/ (excluding docs/wiki/).
+// Copies ../docs/**/*.md into src/content/docs/ (excluding docs/wiki/), plus ../CONTRIBUTING.md.
 // Files without frontmatter get a title from their first "# " heading, which is stripped.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -52,6 +52,18 @@ try {
     await fs.writeFile(out, transform(await fs.readFile(path.join(src, rel), 'utf8')));
     n++;
   }
+} catch (e) {
+  if (e.code !== 'ENOENT') throw e;
+}
+// CONTRIBUTING.md lives at the repository root; the Project sidebar group links it.
+try {
+  const root = path.resolve(here, '../../CONTRIBUTING.md');
+  const text = (await fs.readFile(root, 'utf8')).replace(
+    /\]\(docs\/([a-z-]+)\.md\)/g,
+    ']($1.md)',
+  );
+  await fs.writeFile(path.join(dest, 'contributing.md'), transform(text));
+  n++;
 } catch (e) {
   if (e.code !== 'ENOENT') throw e;
 }
