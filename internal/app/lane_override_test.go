@@ -99,12 +99,12 @@ func TestOnMessageRejectsBadLaneOverride(t *testing.T) {
 	}
 	defer s.Close()
 	ctx := context.Background()
-	for _, l := range []domain.Lane{{ID: "a", CLI: "codex", Capacity: 1, Windows: []domain.LaneWindow{}}, {ID: "b", CLI: "codex", Capacity: 1, Windows: []domain.LaneWindow{}}} {
+	for _, l := range []domain.Lane{{ID: "claude/sonnet", CLI: "claude", Capacity: 1}, {ID: "codex/default", CLI: "codex", Capacity: 1}, {ID: "claude/opus", CLI: "claude", Capacity: 1}} {
 		if _, err := s.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: l}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	coder := domain.Member{ID: "m1", Kind: domain.MemberAgent, Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"a"}}}
+	coder := domain.Member{ID: "m1", Kind: domain.MemberAgent, Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"claude/sonnet", "codex/default"}}}
 	if _, err := s.Append(ctx, events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: coder}); err != nil {
 		t.Fatal(err)
 	}
@@ -124,24 +124,87 @@ func TestOnMessageRejectsBadLaneOverride(t *testing.T) {
 		}
 	}
 	for body, want := range map[string]string{
-		"@coder /lane nope do it": "Unknown lane nope",
-		"@coder /lane b do it":    "not in @coder's chain",
+		"@coder /lane unknown/model do it": "@coder runs on claude/sonnet or codex/default; unknown/model is not a known lane.",
+		"@coder /lane claude/opus do it":   "@coder runs on claude/sonnet or codex/default; claude/opus is not one of them.",
 	} {
 		a.OnMessage(ctx, domain.Message{ID: store.NewID(), ChannelID: ch.ID, Body: body}, []domain.Member{agent})
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			if found := noticeContaining(t, s, ch.ID, want); found {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("no notice containing %q", want)
-			}
-			time.Sleep(10 * time.Millisecond)
+		if !noticeContaining(t, s, ch.ID, want) {
+			t.Fatalf("no immediate notice containing %q", want)
 		}
 	}
 	runs, _ := s.Runs(ctx, ch.ID, "")
 	if len(runs) != 0 {
 		t.Fatalf("a rejected override started %d run(s)", len(runs))
+	}
+}
+
+func TestOnMessageRunsValidOverrideForPersonaAndRawAgent(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	s, err := store.Open(filepath.Join(root, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	coder := domain.Member{ID: "coder", Kind: domain.MemberAgent, Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"claude/sonnet", "codex/default"}, Mode: domain.RunRead}}
+	claude := domain.Member{ID: "claude", Kind: domain.MemberAgent, Handle: "claude", Agent: &domain.AgentInfo{Lanes: []string{"claude/sonnet", "claude/opus"}, Mode: domain.RunRead}}
+	ch := domain.Channel{ID: "ch", Name: "work", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic}
+	for _, draft := range []events.Draft{
+		{Type: events.MemberUpdated, Actor: events.System, Payload: coder},
+		{Type: events.MemberUpdated, Actor: events.System, Payload: claude},
+		{Type: events.LaneUpdated, Actor: events.System, Payload: domain.Lane{ID: "claude/sonnet", CLI: "claude", Capacity: 1}},
+		{Type: events.LaneUpdated, Actor: events.System, Payload: domain.Lane{ID: "codex/default", CLI: "codex", Capacity: 1}},
+		{Type: events.LaneUpdated, Actor: events.System, Payload: domain.Lane{ID: "claude/opus", CLI: "claude", Capacity: 1}},
+		{Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch},
+	} {
+		if _, err := s.Append(ctx, draft); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.Defaults()
+	cfg.Runs.Sandbox = "off"
+	a, err := New(ctx, s, cfg, config.Paths{DataDir: root, RunsDir: filepath.Join(root, "runs")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Adapters["claude"] = refusingCLI{}
+	a.Adapters["codex"] = refusingCLI{}
+	for _, tc := range []struct {
+		agent domain.Member
+		lane  string
+	}{
+		{coder, "codex/default"},
+		{claude, "claude/opus"},
+	} {
+		body := "@" + tc.agent.Handle + " /lane " + tc.lane + " do it"
+		m := domain.Message{ID: store.NewID(), ChannelID: ch.ID, Body: body, AuthorID: "human", CreatedAt: time.Now().UTC()}
+		if _, err := s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human("human"), ChannelID: ch.ID, Payload: m}); err != nil {
+			t.Fatal(err)
+		}
+		a.OnMessage(ctx, m, []domain.Member{tc.agent})
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			runs, err := s.Runs(ctx, ch.ID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, run := range runs {
+				if run.TriggerMessageID == m.ID {
+					if run.LaneID != tc.lane {
+						t.Fatalf("@%s ran on %s, want %s", tc.agent.Handle, run.LaneID, tc.lane)
+					}
+					found = run.State == domain.RunFailed
+				}
+			}
+			if found {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("@%s did not start a run on %s", tc.agent.Handle, tc.lane)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }
 

@@ -29,3 +29,22 @@ func TestLaneCommandAcceptsLeadingMention(t *testing.T) {
 		t.Fatalf("the command started %d agent run(s)", f.trigger.count)
 	}
 }
+
+func TestMentionLaneOverrideMessagesAreAcceptedAndForwarded(t *testing.T) {
+	f := newThreadFixture(t)
+	f.coder.Agent = &domain.AgentInfo{Lanes: []string{"claude/sonnet", "codex/default"}}
+	if _, err := f.h.Store.Append(context.Background(), events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: f.coder}); err != nil {
+		t.Fatal(err)
+	}
+	for i, body := range []string{
+		"@coder /lane claude/opus do it",
+		"@coder /lane unknown/model do it",
+		"@coder /lane codex/default do it",
+	} {
+		var posted domain.Message
+		f.do(t, "POST", "/api/v1/channels/"+f.team.ID+"/messages", `{"body":"`+body+`"}`, 201, &posted)
+		if posted.Body != body || f.trigger.count != i+1 {
+			t.Fatalf("message %q: posted %q, forwarded %d times", body, posted.Body, f.trigger.count)
+		}
+	}
+}

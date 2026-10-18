@@ -446,12 +446,11 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 		if found {
 			msg.Body = body
 			if err := a.syncManualLane(ctx, override); err != nil {
-				go a.notice(context.Background(), m.ChannelID, "error", err.Error())
+				a.notice(ctx, m.ChannelID, "error", err.Error())
 				continue
 			}
 			if err := a.checkLaneOverride(agent, override); err != nil {
-				channel := m.ChannelID
-				go a.notice(context.Background(), channel, "warn", err.Error())
+				a.notice(ctx, m.ChannelID, "warn", err.Error())
 				continue
 			}
 		}
@@ -461,28 +460,27 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 
 // checkLaneOverride says why a "/lane" override cannot run.
 func (a *App) checkLaneOverride(agent domain.Member, id string) error {
-	lane, ok := a.Registry.Snapshot(id)
-	if !ok {
-		return fmt.Errorf("Unknown lane %s; @%s did not run.", id, agent.Handle)
+	if agent.Agent == nil || len(agent.Agent.Lanes) == 0 {
+		return fmt.Errorf("@%s has no configured lanes; %s cannot run.", agent.Handle, id)
 	}
-	if agent.Agent != nil {
-		for _, l := range agent.Agent.Lanes {
-			if l == id {
-				if lane.Health == domain.LaneExhausted {
-					until := a.Registry.ResetAt(id)
-					if until.IsZero() || time.Now().Before(until) {
-						if !until.IsZero() {
-							return fmt.Errorf("%s is out of quota until %s; @%s did not run.", id, until.Local().Format("15:04"), agent.Handle)
-						}
-						return fmt.Errorf("%s is out of quota; @%s did not run.", id, agent.Handle)
-					}
-				}
-				return nil
+	choices := strings.Join(agent.Agent.Lanes, " or ")
+	lane, known := a.Registry.Snapshot(id)
+	if !known {
+		return fmt.Errorf("@%s runs on %s; %s is not a known lane.", agent.Handle, choices, id)
+	}
+	if !slices.Contains(agent.Agent.Lanes, id) {
+		return fmt.Errorf("@%s runs on %s; %s is not one of them.", agent.Handle, choices, id)
+	}
+	if lane.Health == domain.LaneExhausted {
+		until := a.Registry.ResetAt(id)
+		if until.IsZero() || time.Now().Before(until) {
+			if !until.IsZero() {
+				return fmt.Errorf("%s is out of quota until %s; @%s did not run.", id, until.Local().Format("15:04"), agent.Handle)
 			}
+			return fmt.Errorf("%s is out of quota; @%s did not run.", id, agent.Handle)
 		}
-		return fmt.Errorf("Lane %s is not in @%s's chain (%s); @%s did not run.", id, agent.Handle, strings.Join(agent.Agent.Lanes, ", "), agent.Handle)
 	}
-	return fmt.Errorf("@%s has no lane chain", agent.Handle)
+	return nil
 }
 
 // syncManualLane brings a health override written by the human API into the

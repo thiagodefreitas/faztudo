@@ -101,6 +101,11 @@ this channel (a `channel.updated` event and a notice confirm it);
 leading `@`. The command starts no agent. A write run that changes nothing
 ends `done` with a "No changes" notice and no approval.
 
+A message can select one run's lane with `@persona /lane <lane> <directive>`.
+The message is saved even when the lane is unknown or outside that persona's
+chain. In either case no run starts for that persona, and a channel notice
+names the lanes it can use. A valid override runs only on the named lane.
+
 ```ts
 interface Message {
   id: ID;
