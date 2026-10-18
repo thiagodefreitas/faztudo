@@ -18,6 +18,9 @@ First usable alpha. Not tagged yet; the date is set when it ships.
   folded after about twelve lines, and a run timeline with tokens and an
   estimated cost when the CLI logs them.
 - Project homes, a sidebar grouped by project and a "Needs you" count.
+- A catch-up card when you open a busy channel, a New divider with a jump
+  to the first unread message, day dividers, grouped messages, filters for
+  mentions, runs, decisions and files, and a list of the channel's threads.
 
 ### Agents and lanes
 
@@ -28,17 +31,30 @@ First usable alpha. Not tagged yet; the date is set when it ships.
 - Lanes with usage read from the CLIs' own logs, health, announced switching,
   history, cost estimates, alerts and rolling channel summaries.
 
+### Tasks and approvals
+
+- Tasks: a directive for one agent with scope, checks and acceptance,
+  started from the composer or `/task`, tracked on a board per project.
+- An approvals inbox with every pending decision across channels, diff
+  previews, an editable commit message and one-key answers; refused merges
+  say why.
+- Merge replays a run's commit when the branch moved, names conflicting
+  files, and refuses when the repository switched branches.
+
 ### Organization
 
 - A Director, departments, specialists and cross-functional projects, with
   project-scoped routing.
+- New project and team channel dialogs, a members panel, project settings,
+  archiving, and a daily digest on each project home.
 - A Chief of Staff that delegates work, routines on a schedule or on new
   messages, and `faztudo init --template solo|team|empty`.
 
 ### Office
 
-- A 2D office where every agent has a desk and a live state, and a lazy
-  loaded 3D office with low-poly characters.
+- A 2D office where every agent has a desk, a character and a live state,
+  and a lazy loaded 3D office with the same characters, keyboard control and
+  a side panel per desk.
 
 ### Security
 
