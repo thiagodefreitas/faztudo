@@ -64,6 +64,15 @@ design assumes that agents make mistakes and that messages from outside
   sandboxed, just without those limits. Run `faztudo doctor` to check
   bubblewrap, unprivileged user namespaces and systemd user scope
   availability.
+- **Known gaps (2026-10-18 review), why the sandbox is opt-in.** Until they
+  are fixed, do not treat the sandbox as a boundary against a hostile agent:
+  the channel's test command runs the agent's edited tree on the host,
+  outside the sandbox; the shared `.git` directory is writable, so git
+  settings an agent writes (fsmonitor, filters, hooks) run when faztudo
+  diffs or merges on the host; the CLI's config directories are writable,
+  so an agent can leave hooks that later unsandboxed sessions run; and with
+  the network shared, an agent can reach the local API, which treats
+  loopback requests as you. Fixes are tracked in the issues.
 - **Honest limits.** The sandbox shares the host kernel, and the CLI still
   runs as your user. It can change its worktree and git metadata, read and
   write its own bound sign-in and config files, and access the network when
