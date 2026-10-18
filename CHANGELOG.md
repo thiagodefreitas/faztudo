@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-10-18
+
+### Added
+
+- Office zoom: scroll or pinch to zoom the 2D office, drag to pan, click a
+  department, pod or the Director area to zoom to it, and use the corner
+  control or the keyboard to zoom, fit all or jump to an area. In 3D,
+  "Jump to" moves the camera to that area.
+- `faztudo connect --json` prints the daemon address and a one-time sign-in
+  code, never the token, for programs such as the desktop app.
+- The demo data shows a fuller organization, with Engineering, Quality and
+  Product departments.
+
+### Fixed
+
+- The web app starts the live event stream at the current head instead of
+  replaying the whole event log, so a large workspace opens quickly.
+
 ## [0.1.2] - 2026-10-18
 
 ### Added
