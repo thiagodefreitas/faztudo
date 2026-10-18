@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
@@ -114,4 +115,33 @@ func TestDirectChannelSoleAgentIsTriggered(t *testing.T) {
 	if f.trigger.count != 2 {
 		t.Fatalf("explicit mention in DM: %d", f.trigger.count)
 	}
+}
+
+func TestStatusCommandAnswersWithoutAnAgent(t *testing.T) {
+	f := newThreadFixture(t)
+	lane := domain.Lane{ID: "codex/default", CLI: "codex", Capacity: 2, Health: domain.LaneConserve}
+	if _, err := f.h.Store.Append(context.Background(), events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: lane}); err != nil {
+		t.Fatal(err)
+	}
+	f.do(t, "POST", "/api/v1/channels/"+f.team.ID+"/messages", `{"body":"/status"}`, 201, nil)
+	if f.trigger.count != 0 {
+		t.Fatalf("/status started %d agent run(s)", f.trigger.count)
+	}
+	evs, err := f.h.Store.EventsAfter(context.Background(), 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.Type == events.Notice && e.ChannelID == f.team.ID {
+			var p events.NoticePayload
+			if err := json.Unmarshal(e.Payload, &p); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(p.Text, "0 active run(s)") || !strings.Contains(p.Text, "codex/default: conserve, 0/2 running") {
+				t.Fatalf("status text:\n%s", p.Text)
+			}
+			return
+		}
+	}
+	t.Fatal("no status notice posted")
 }

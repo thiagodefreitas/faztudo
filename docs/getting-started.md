@@ -28,6 +28,9 @@ faztudo serve     # starts the server and opens http://127.0.0.1:7457
 3. Type `@coder add a --version flag`. A write run starts in its own worktree.
    When it finishes you see the diff and decide what to do with it.
 4. Open the Lanes page to see how much quota each agent has left.
+5. Type `/status` in any channel for a quick summary: active runs, approvals
+   waiting for you and lane health. faztudo answers it itself, so it costs no
+   agent quota.
 
 ## Run it in the background
 

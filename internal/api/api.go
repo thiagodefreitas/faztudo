@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime"
 	"net"
 	"net/http"
@@ -410,6 +411,69 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	if newMessageID == m.ID && len(agents) > 0 {
 		a.Trigger.OnMessage(r.Context(), m, agents)
 	}
+	if newMessageID == m.ID && isCommand(m.Body, "/status") {
+		if text, err := a.statusText(r.Context(), c.ID); err == nil {
+			_, _ = a.Store.Append(r.Context(), events.Draft{Type: events.Notice, Actor: events.System, ChannelID: c.ID, Payload: events.NoticePayload{Level: "info", Text: text}})
+		}
+	}
+}
+
+func isCommand(body, name string) bool {
+	f := strings.Fields(body)
+	return len(f) > 0 && strings.EqualFold(f[0], name)
+}
+
+// statusText answers /status without an agent: active runs in the channel,
+// pending approvals in the channel, and every lane's health. It costs no
+// agent quota, so it is safe to ask from a phone at any time.
+func (a *API) statusText(ctx context.Context, channelID string) (string, error) {
+	runs, err := a.Store.Runs(ctx, channelID, "")
+	if err != nil {
+		return "", err
+	}
+	approvals, err := a.Store.Approvals(ctx, string(domain.ApprovalPending))
+	if err != nil {
+		return "", err
+	}
+	lanes, err := a.Store.Lanes(ctx)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	active := 0
+	for _, run := range runs {
+		if run.State.Terminal() {
+			continue
+		}
+		active++
+		fmt.Fprintf(&b, "\n- run %s on %s: %s", shortID(run.ID), run.LaneID, run.State)
+	}
+	head := fmt.Sprintf("Status: %d active run(s) here", active)
+	pending := 0
+	for _, ap := range approvals {
+		if ap.ChannelID == channelID {
+			pending++
+			fmt.Fprintf(&b, "\n- waiting for you: %s", ap.Title)
+		}
+	}
+	head += fmt.Sprintf(", %d approval(s) waiting.", pending)
+	b.WriteString("\nLanes:")
+	for _, l := range lanes {
+		fmt.Fprintf(&b, "\n- %s: %s, %d/%d running", l.ID, l.Health, l.Running, l.Capacity)
+		for _, w := range l.Windows {
+			if w.UsedPct != nil {
+				fmt.Fprintf(&b, ", %s %.0f%%", w.Name, *w.UsedPct)
+			}
+		}
+	}
+	return head + b.String(), nil
+}
+
+func shortID(id string) string {
+	if len(id) > 6 {
+		return id[len(id)-6:]
+	}
+	return id
 }
 
 // directAgent returns the sole agent of a direct channel, so a human message
