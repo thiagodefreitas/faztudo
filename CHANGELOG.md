@@ -4,6 +4,35 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Compare mode: mention a write persona with `x2` to run one request on two
+  lanes, then merge one candidate, discard both or combine them. Only people
+  can start a compare.
+- A worked organization example (`docs/examples/organization.toml`) and a
+  guide to start a new project from an existing one.
+- Signal bridge, step 1: the bridge protocol, a shared path for posting and
+  resolving approvals, and the bridge supervisor. Off by default; the Signal
+  program itself comes next.
+
+### Fixed
+
+- Ubuntu 24.04: the AppArmor profile now gives user namespaces to
+  bubblewrap only; everything else faztudo starts, and everything
+  bubblewrap runs, gets none. The package no longer replaces a profile you
+  edited.
+- A run that hits its timeout ends instead of being retried.
+- A run killed for memory says so and records its peak memory; lane health
+  shows the CLI's own quota line instead of agent output.
+- Lane probes for CLIs without a probe say so instead of "resource
+  conflict".
+- The approvals inbox no longer shows resolved approvals as waiting, and
+  hidden lanes stay hidden.
+- The compare card reads only its channel's events (new index, migration
+  008) instead of the whole event log.
+
 ## [0.1.1] - 2026-10-18
 
 ### Fixed
