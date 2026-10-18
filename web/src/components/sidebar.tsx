@@ -24,11 +24,13 @@ const PRESENCE: Record<Presence, string> = {
   offline: "bg-faint",
 }
 
+// An agent with no run is "offline", which is its normal resting state, so
+// it stays in color; the lane dot next to it says whether it can run.
 const AGENT_STATE: Record<Presence, AvatarState | undefined> = {
   online: undefined,
   idle: undefined,
   busy: "working",
-  offline: "off",
+  offline: undefined,
 }
 
 const STATUS_LABEL = {
@@ -174,6 +176,14 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <div className="border-t border-line px-2 py-2">
         <LanesGauge lanes={lanes.data ?? []} />
+        <Link
+          to="/office"
+          onClick={onNavigate}
+          className={cx(ROW, "justify-between text-ink hover:bg-canvas", pathname === "/office" && "bg-accent-soft")}
+        >
+          <span>Office</span>
+          <span className="font-mono text-[11px] text-faint">2D</span>
+        </Link>
         <Link to="/settings/devices" onClick={onNavigate} className={cx(ROW, "justify-between text-ink hover:bg-canvas")}>
           <span>Devices</span>
           <span className="font-mono text-[11px] text-faint">LAN</span>

@@ -1,5 +1,11 @@
 import { QueryClient } from "@tanstack/react-query"
-import { createRootRouteWithContext, createRoute, createRouter, redirect } from "@tanstack/react-router"
+import {
+  createRootRouteWithContext,
+  createRoute,
+  createRouter,
+  lazyRouteComponent,
+  redirect,
+} from "@tanstack/react-router"
 import { ApiError, api } from "./api/client"
 import { DevicesPage, LoginPage, PairPage } from "./components/auth"
 import { isDirect } from "./lib/direct"
@@ -124,11 +130,36 @@ const lanesRoute = createRoute({
   component: LanesPage,
 })
 
+const officeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/office",
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.lanes, queryFn: () => api.lanes() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
+      ]),
+    ),
+  component: lazyRouteComponent(() => import("./components/office/scene"), "OfficePage"),
+})
+
 function HomePage() {
   return <p className="p-6 text-[14px] text-muted">No channels yet.</p>
 }
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute, pairRoute, devicesRoute, channelRoute, lanesRoute])
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  loginRoute,
+  pairRoute,
+  devicesRoute,
+  channelRoute,
+  lanesRoute,
+  officeRoute,
+])
 
 export const router = createRouter({
   routeTree,
