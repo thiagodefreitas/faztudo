@@ -13,11 +13,13 @@ regexes = [
   '''<your-[a-z-]+>''',
 ]
 
-# Access information, not just secrets. A real Tailscale MagicDNS name
-# (host.tailXXXX.ts.net) identifies a private network; docs use
-# placeholders such as mypc.tailnet-name.ts.net instead.
+# Access information, not just secrets. Any machine name under ts.net
+# (host.tailnet-name.ts.net, host.tail1a2b.ts.net, host.cat-crocodile.ts.net)
+# identifies a private network. Only the placeholders below are allowed.
 [[rules]]
 id = "tailnet-hostname"
 description = "Real Tailscale machine name"
-regex = '''(?i)\b[a-z0-9-]+\.tail[0-9a-f]{4,}\.ts\.net\b'''
+regex = '''(?i)\b[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\b'''
 keywords = [".ts.net"]
+[rules.allowlist]
+regexes = ['''(?i)\b(mypc\.tailnet-name|pc\.example|box\.example)\.ts\.net\b''']

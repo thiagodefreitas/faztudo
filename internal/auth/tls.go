@@ -67,7 +67,7 @@ func DefaultHostAndIPs() (string, []net.IP, error) {
 			if ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
 				continue
 			}
-			found = append(found, ranked{ip, interfaceRank(iface.Name)})
+			found = append(found, ranked{ip, addressRank(iface.Name, ip)})
 		}
 	}
 	slices.SortStableFunc(found, func(a, b ranked) int { return a.rank - b.rank })
@@ -83,6 +83,20 @@ func DefaultHostAndIPs() (string, []net.IP, error) {
 var virtualInterfacePrefixes = []string{
 	"docker", "br-", "veth", "virbr", "vmnet", "vboxnet", "lxc", "lxd", "cni", "flannel", "podman",
 	"tailscale", "wg", "tun", "tap", "zt", "utun",
+}
+
+// addressRank orders reachable addresses first: physical IPv4, physical
+// global IPv6, then the same on virtual interfaces, and link-local last
+// (a link-local address is all Wi-Fi has before DHCP answers).
+func addressRank(iface string, ip net.IP) int {
+	rank := interfaceRank(iface) * 10
+	switch {
+	case ip.IsLinkLocalUnicast():
+		rank += 100
+	case ip.To4() == nil:
+		rank += 1
+	}
+	return rank
 }
 
 // interfaceRank orders physical interfaces (0) before virtual ones (1).
@@ -374,31 +388,28 @@ func writePrivateFile(path string, data []byte, mode os.FileMode) error {
 	return os.Chmod(path, mode)
 }
 
-// LANURLs returns the https://<ip>:<port> URLs for all non-loopback interface
-// addresses, placing IPv4 addresses first.
+// LANURLs returns the https://<ip>:<port> URLs for the given addresses in
+// their order (DefaultHostAndIPs puts the reachable ones first), after the
+// listen address itself when that is a specific IP. Loopback and link-local
+// addresses are dropped: a phone cannot use them in a URL.
 func LANURLs(ips []net.IP, listenAddr string) []string {
 	host, port, err := net.SplitHostPort(listenAddr)
 	if err != nil || port == "" {
 		port = "7458"
 	}
-	var v4, v6 []string
+	var urls []string
 	seen := map[string]bool{}
 	add := func(ip net.IP) {
 		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() {
 			return
 		}
 		if ip4 := ip.To4(); ip4 != nil {
-			u := "https://" + net.JoinHostPort(ip4.String(), port)
-			if !seen[u] {
-				seen[u] = true
-				v4 = append(v4, u)
-			}
-			return
+			ip = ip4
 		}
 		u := "https://" + net.JoinHostPort(ip.String(), port)
 		if !seen[u] {
 			seen[u] = true
-			v6 = append(v6, u)
+			urls = append(urls, u)
 		}
 	}
 	if parsed := net.ParseIP(strings.Trim(host, "[]")); parsed != nil {
@@ -407,7 +418,7 @@ func LANURLs(ips []net.IP, listenAddr string) []string {
 	for _, ip := range ips {
 		add(ip)
 	}
-	return append(v4, v6...)
+	return urls
 }
 
 // CAHelperHandler returns an HTTP handler for port 7459 that serves ONLY a page

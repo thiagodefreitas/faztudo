@@ -17,6 +17,7 @@ pre-push:
   commands:
     private:
       run: scripts/check_private.sh push
+      use_stdin: true
 
 commit-msg:
   commands:

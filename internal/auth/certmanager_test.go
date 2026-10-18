@@ -70,3 +70,22 @@ func TestInterfaceRankPutsVirtualLast(t *testing.T) {
 		}
 	}
 }
+
+func TestLANURLsKeepReachableAddressFirst(t *testing.T) {
+	// An IPv6-only Wi-Fi with Docker up: the Wi-Fi address must still lead.
+	ips := []net.IP{net.ParseIP("2001:db8::7"), net.ParseIP("172.17.0.1")}
+	got := LANURLs(ips, "[::]:7458")
+	if len(got) != 2 || got[0] != "https://[2001:db8::7]:7458" {
+		t.Fatalf("LANURLs = %v, want the Wi-Fi address first", got)
+	}
+}
+
+func TestAddressRank(t *testing.T) {
+	wifi4 := addressRank("wlp4s0", net.ParseIP("192.0.2.10"))
+	wifi6 := addressRank("wlp4s0", net.ParseIP("2001:db8::7"))
+	docker4 := addressRank("docker0", net.ParseIP("172.17.0.1"))
+	linkLocal := addressRank("wlp4s0", net.ParseIP("fe80::1"))
+	if !(wifi4 < wifi6 && wifi6 < docker4 && docker4 < linkLocal) {
+		t.Fatalf("ranks wifi4=%d wifi6=%d docker4=%d linklocal=%d", wifi4, wifi6, docker4, linkLocal)
+	}
+}
