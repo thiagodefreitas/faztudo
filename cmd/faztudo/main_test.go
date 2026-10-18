@@ -16,8 +16,45 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/config"
+	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
+
+func TestSeedOrgKeepsArchivedProject(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := config.Defaults()
+	c.Lanes.Project = []config.Project{{Handle: "example", Name: "Example", Channels: []string{"work"}}}
+	if err := seedOrg(ctx, s, c); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Project(ctx, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Archived = true
+	if _, err := s.Append(ctx, events.Draft{Type: events.ProjectUpdated, Actor: events.Human("human"), Payload: p}); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedOrg(ctx, s, c); err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Project(ctx, "example")
+	if err != nil || !p.Archived {
+		t.Fatalf("archive was reset: %+v, %v", p, err)
+	}
+	if err := s.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Project(ctx, "example")
+	if err != nil || !got.Archived {
+		t.Fatalf("rebuild lost archive: %+v, %v", got, err)
+	}
+}
 
 func TestSeedFirstStart(t *testing.T) {
 	dir := t.TempDir()

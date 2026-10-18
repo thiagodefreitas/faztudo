@@ -12,9 +12,11 @@ way to the right agent.
 | :--- | :--- |
 | Departments and projects in `lanes.toml`, personas with description and standing instructions | built, see [configuration](configuration.md) |
 | `GET /api/v1/org`, and assigning or removing a department or specialist on a project (humans only) | built, see [API](api.md) |
-| Creating a project in the app (`POST /api/v1/projects`: name, handle, repository, lead, departments, specialists, first channels) and changing its name, repository, lead or channels (`PATCH`); humans only | built; a project also listed in lanes.toml takes those fields from the file on the next start |
+| Creating a project in the app (`POST /api/v1/projects`: name, handle, repository, lead, departments, specialists, first channels) and changing its name, repository, lead, channels or archived state (`PATCH`); humans only | built; a project also listed in lanes.toml takes its name, repository, lead and channels from the file on the next start, while its archived state stays |
 | New project and new team channel flows in the web app; a members panel on every channel with role, lane, live state and assignment, add and remove members, set the default agent | built |
-| Project home: lead and team in the header, new channel and assign actions, sections with counts and empty states, an activity timeline of merges, failures and answered approvals | built |
+| Project home: lead and team in the header, new channel and assign actions, sections with counts and empty states, an activity timeline, and Today and last 7 days digests with links to filtered activity | built; the waiting count is the current pending queue because approvals do not have a request timestamp |
+| Project settings: edit name, repository, lead and channel membership, plus each channel's test command and default agent | built; project and channel settings save separately; a channel's own repository setting is unchanged |
+| Archive and unarchive on the project settings and Organization pages | built; archived projects leave the rail and active project list, their channels stay readable, and routing new agent work in their channels is refused |
 | Rail: projects fold to one row that keeps unread and "needs you" counts; team channels show their faces | built |
 | In a project's channels only assigned agents run; others get a notice with an Assign button (the Director can use it; agents get 403) | built |
 | `@<department>` goes to its lead, `@<project>` to the project lead (a group with no lead answers with a notice) | built |

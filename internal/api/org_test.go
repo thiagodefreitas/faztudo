@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
@@ -228,6 +229,8 @@ func TestProjectsAreCreatedAndChangedByHumans(t *testing.T) {
 
 	f.do(t, "PATCH", "/api/v1/projects/missing", `{"name":"X"}`, 404, nil)
 	f.do(t, "PATCH", "/api/v1/projects/launch", `{"lead":"nobody"}`, 400, nil)
+	f.do(t, "PATCH", "/api/v1/projects/launch", `{"name":" "}`, 400, nil)
+	f.do(t, "PATCH", "/api/v1/projects/launch", `{"repo_path":"`+filepath.Join(repo, "missing")+`"}`, 400, nil)
 	f.do(t, "PATCH", "/api/v1/projects/launch", `{"channels":["faztudo-dev"]}`, 400, nil)
 	// A patch changes only the fields it names and never the assignments.
 	f.do(t, "PATCH", "/api/v1/projects/launch", `{"name":"Launch 2","channels":["launch"],"specialists":[]}`, 200, &p)
@@ -238,5 +241,40 @@ func TestProjectsAreCreatedAndChangedByHumans(t *testing.T) {
 	f.do(t, "PATCH", "/api/v1/projects/launch", `{"lead":""}`, 200, &p)
 	if p.Lead != "" || p.Name != "Launch 2" {
 		t.Fatalf("lead not cleared: %+v", p)
+	}
+}
+
+func TestProjectArchivePersistsAndRefusesLeadRouting(t *testing.T) {
+	f := newOrgFixture(t)
+	f.h.actorForRequest = func(*http.Request) (domain.Member, error) { return f.coder, nil }
+	f.do(t, "PATCH", "/api/v1/projects/faztudo", `{"archived":true}`, 403, nil)
+	f.do(t, "PATCH", "/api/v1/channels/"+f.proj.ID, `{"test_command":"go test ./..."}`, 403, nil)
+	f.h.actorForRequest = nil
+	var p domain.Project
+	f.do(t, "PATCH", "/api/v1/projects/faztudo", `{"archived":true}`, 200, &p)
+	if !p.Archived {
+		t.Fatal("project was not archived")
+	}
+	if err := f.h.Store.Rebuild(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.h.Store.Project(context.Background(), "faztudo")
+	if err != nil || !p.Archived {
+		t.Fatalf("archive lost after rebuild: %+v, %v", p, err)
+	}
+	f.post(t, f.proj, "@faztudo plan the release")
+	if len(f.who.handles) != 0 {
+		t.Fatalf("archived lead ran: %v", f.who.handles)
+	}
+	if n := f.notices(t, f.proj); len(n) == 0 || !strings.Contains(n[len(n)-1].Text, "archived") {
+		t.Fatalf("missing archive notice: %+v", n)
+	}
+	f.post(t, f.proj, "@coder work on the archive")
+	if len(f.who.handles) != 0 {
+		t.Fatalf("archived project ran an agent: %v", f.who.handles)
+	}
+	f.do(t, "PATCH", "/api/v1/projects/faztudo", `{"archived":false}`, 200, &p)
+	if p.Archived {
+		t.Fatal("project stayed archived")
 	}
 }

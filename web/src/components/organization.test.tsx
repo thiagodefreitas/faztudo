@@ -41,11 +41,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function setup(members: Member[] = [ada, coder, reviewer, writer]) {
+async function setup(members: Member[] = [ada, coder, reviewer, writer], organization: Org = org) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.members, members)
-  client.setQueryData(qk.org, org)
+  client.setQueryData(qk.org, organization)
   client.setQueryData(qk.lanes, [])
   client.setQueryData(qk.runs, [])
   client.setQueryData(qk.approvals, [])
@@ -62,6 +62,15 @@ async function setup(members: Member[] = [ada, coder, reviewer, writer]) {
 }
 
 describe("OrganizationPage", () => {
+  it("lists archived projects separately and can unarchive them", async () => {
+    const user = userEvent.setup()
+    const patch = vi.spyOn(api, "patchProject").mockResolvedValue({ ...project, archived: false })
+    await setup([ada, coder, reviewer, writer], { ...org, projects: [{ ...project, archived: true }] })
+    const archived = await screen.findByRole("region", { name: "Archived" })
+    expect(within(archived).getByText("Faztudo")).toBeInTheDocument()
+    await user.click(within(archived).getByRole("button", { name: "Unarchive" }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("faztudo", { archived: false }))
+  })
   it("shows the Director, departments with their lead, and projects with assignments", async () => {
     await setup()
     expect(await screen.findByTestId("director")).toHaveTextContent("Ada")

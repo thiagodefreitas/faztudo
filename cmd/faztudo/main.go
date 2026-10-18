@@ -329,6 +329,7 @@ func seedOrg(ctx context.Context, s *store.Store, c config.Config) error {
 		}
 		if cur, err := s.Project(ctx, p.Handle); err == nil {
 			proj.Departments, proj.Specialists = cur.Departments, cur.Specialists
+			proj.Archived = cur.Archived
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return err
 		}

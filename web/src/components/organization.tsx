@@ -106,6 +106,8 @@ export function OrganizationPage() {
 
   const departments = org.data?.departments ?? []
   const projects = org.data?.projects ?? []
+  const activeProjects = projects.filter((project) => !project.archived)
+  const archivedProjects = projects.filter((project) => project.archived)
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -115,7 +117,7 @@ export function OrganizationPage() {
         </Link>
         <h1 className="text-[15px] font-semibold">Organization</h1>
         <p className="font-mono text-[12px] text-muted">
-          {departments.length} departments, {projects.length} projects
+          {departments.length} departments, {activeProjects.length} projects
         </p>
         <Link to="/routines" className="ml-auto min-h-10 py-2 text-[13px] text-accent hover:underline md:min-h-0 md:py-0">
           Routines
@@ -168,7 +170,7 @@ export function OrganizationPage() {
               ) : (
                 <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                   {departments.map((department) => {
-                    const worksOn = projects.filter((project) => project.departments.some((h) => sameHandle(h, department.handle)))
+                    const worksOn = activeProjects.filter((project) => project.departments.some((h) => sameHandle(h, department.handle)))
                     return (
                     <article
                       key={department.handle}
@@ -229,13 +231,13 @@ export function OrganizationPage() {
                   New project
                 </button>
               </h2>
-              {projects.length === 0 ? (
+              {activeProjects.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-line px-3 py-2.5 text-[13px] text-muted">
                   No projects yet. Create one here or add <code className="font-mono">[[project]]</code> entries to lanes.toml.
                 </p>
               ) : (
                 <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-                  {projects.map((project) => (
+                  {activeProjects.map((project) => (
                     <ProjectCard
                       key={project.handle}
                       project={project}
@@ -250,6 +252,19 @@ export function OrganizationPage() {
                 </div>
               )}
             </div>
+            {archivedProjects.length > 0 && (
+              <section aria-label="Archived">
+                <h2 className="pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Archived</h2>
+                <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                  {archivedProjects.map((project) => (
+                    <li key={project.handle} className="flex min-h-10 items-center gap-3 px-3 py-1.5 text-[13px]">
+                      <Link to="/p/$handle" params={{ handle: project.handle }} className="min-w-0 flex-1 truncate hover:underline">{project.name}</Link>
+                      <button type="button" className="text-accent hover:underline" onClick={() => void change(() => api.patchProject(project.handle, { archived: false }))}>Unarchive</button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </>
         )}
       </div>

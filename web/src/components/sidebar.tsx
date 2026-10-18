@@ -156,7 +156,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
             void navigate({ to: "/p/$handle", params: { handle: project.handle } })
           }}
         />
-        {grouped.groups.map(({ project, channels }) => (
+        {grouped.groups.filter(({ project }) => !project.archived).map(({ project, channels }) => (
           <ProjectGroup
             key={project.handle}
             project={project}

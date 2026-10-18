@@ -31,6 +31,7 @@ import {
   CreateTeamChannelDialog,
 } from "./project-dialogs";
 import { TeamIcon } from "./team-icon";
+import { ProjectDigest } from "./projects/digest";
 
 const homeApi = getRouteApi("/p/$handle");
 
@@ -131,7 +132,7 @@ export function ProjectsIndexPage() {
   const approvals = useApprovals();
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
-  const projects = org.data?.projects ?? [];
+  const projects = (org.data?.projects ?? []).filter((project) => !project.archived);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-center gap-3 border-b border-line px-3 py-2">
@@ -377,6 +378,9 @@ export function ProjectHome({ handle }: { handle: string }) {
           <Link to="/organization" className={ACTION}>
             Assign
           </Link>
+          <Link to="/projects/$handle/settings" params={{ handle: project.handle }} className={ACTION}>
+            Settings
+          </Link>
           {first && (
             <Link
               to="/c/$channelId"
@@ -404,6 +408,7 @@ export function ProjectHome({ handle }: { handle: string }) {
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="mb-5"><ProjectDigest project={project} channels={channels.data ?? []} runs={runs.data ?? []} approvals={approvals.data ?? []} tasks={tasks.data ?? []} now={new Date(now)} /></div>
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="min-w-0 space-y-5">
             <Section title="Needs you" count={waiting.length}>

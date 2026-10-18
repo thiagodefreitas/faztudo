@@ -95,6 +95,7 @@ type projectBody struct {
 	Channels    *[]string `json:"channels"`
 	Departments *[]string `json:"departments"`
 	Specialists *[]string `json:"specialists"`
+	Archived    *bool     `json:"archived"`
 }
 
 // applyProject copies the body onto p and checks every handle it names. The
@@ -102,6 +103,9 @@ type projectBody struct {
 func (a *API) applyProject(ctx context.Context, p *domain.Project, v projectBody, others []domain.Project) (string, error) {
 	if v.Name != nil {
 		p.Name = strings.TrimSpace(*v.Name)
+		if p.Name == "" {
+			return "name is required", nil
+		}
 	}
 	if v.RepoPath != nil {
 		p.RepoPath = strings.TrimSpace(*v.RepoPath)
@@ -117,6 +121,9 @@ func (a *API) applyProject(ctx context.Context, p *domain.Project, v projectBody
 	}
 	if v.Specialists != nil {
 		p.Specialists = dedupeFold(*v.Specialists)
+	}
+	if v.Archived != nil {
+		p.Archived = *v.Archived
 	}
 	if p.Name == "" {
 		p.Name = p.Handle
@@ -329,7 +336,12 @@ func groupLeads(body string, departments []domain.Department, projects []domain.
 		}
 		for _, p := range projects {
 			if strings.EqualFold(p.Handle, h) {
-				lead, name = p.Lead, p.Name
+				if p.Archived {
+					problems = append(problems, fmt.Sprintf("@%s is archived, so its lead did not run.", p.Handle))
+					name, lead = "", ""
+				} else {
+					lead, name = p.Lead, p.Name
+				}
 			}
 		}
 		if name == "" {

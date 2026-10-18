@@ -406,6 +406,10 @@ func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
+	if current(r).Kind != domain.MemberHuman {
+		fail(w, 403, "forbidden", "only a human can change channel settings")
+		return
+	}
 	c, e := a.Store.Channel(r.Context(), r.PathValue("id"))
 	if e != nil {
 		failErr(w, e)
@@ -623,12 +627,12 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// A request nobody is addressed in goes to the Chief of Staff, in the
 	// channels that opted in. Replies in a thread and commands do not.
-	if len(agents) == 0 && len(ids) == 0 && v.ThreadID == "" && current(r).Kind == domain.MemberHuman && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
+	if len(agents) == 0 && len(ids) == 0 && len(problems) == 0 && v.ThreadID == "" && current(r).Kind == domain.MemberHuman && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
 		if m, ok := a.chiefOfStaff(c, members); ok {
 			agents = []domain.Member{m}
 		}
 	}
-	if len(agents) == 0 && len(ids) == 0 && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
+	if len(agents) == 0 && len(ids) == 0 && len(problems) == 0 && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
 		if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {
 			agents = []domain.Member{m}
 		}

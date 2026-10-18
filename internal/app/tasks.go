@@ -8,6 +8,7 @@ import (
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/tasks"
 )
@@ -109,6 +110,13 @@ func (a *App) StartTask(ctx context.Context, by domain.Member, id string) (domai
 	channel, err := a.Store.Channel(ctx, t.ChannelID)
 	if err != nil {
 		return domain.Task{}, err
+	}
+	projects, err := a.Store.Projects(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if project, ok := org.ProjectOfChannel(projects, channel.Name); ok && project.Archived {
+		return domain.Task{}, domain.UserError{Message: "Project " + project.Name + " is archived, so this task did not run."}
 	}
 	agent, err := a.agentByHandle(ctx, t.Assignee)
 	if err != nil {

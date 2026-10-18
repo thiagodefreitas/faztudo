@@ -435,6 +435,7 @@ export interface Department {
 export interface Project {
   handle: string
   name: string
+  archived?: boolean
   repo_path?: string
   lead?: string
   channels: string[]
@@ -491,6 +492,7 @@ export interface ProjectPatch {
   repo_path?: string
   lead?: string
   channels?: string[]
+  archived?: boolean
 }
 
 export interface AssignBody {

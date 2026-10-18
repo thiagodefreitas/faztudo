@@ -63,6 +63,12 @@ func Gate(projects []domain.Project, departments []domain.Department, channel st
 	if !ok {
 		return agents, nil
 	}
+	if project.Archived {
+		for _, ag := range agents {
+			notices = append(notices, events.NoticePayload{Level: "warn", Text: fmt.Sprintf("%s is archived, so @%s did not run.", project.Name, ag.Handle)})
+		}
+		return nil, notices
+	}
 	var refused []domain.Member
 	for _, ag := range agents {
 		if Assigned(project, departments, ag.Handle) {

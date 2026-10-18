@@ -65,6 +65,7 @@ type Project struct {
 	Channels    []string `json:"channels"`
 	Departments []string `json:"departments"`
 	Specialists []string `json:"specialists"`
+	Archived    bool     `json:"archived"`
 }
 
 type ChannelKind string

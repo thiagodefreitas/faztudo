@@ -147,6 +147,23 @@ func TestStartTaskRefusesWhatCannotRun(t *testing.T) {
 	}
 }
 
+func TestStartTaskRefusesArchivedProject(t *testing.T) {
+	f := newTaskFixture(t)
+	ctx := context.Background()
+	task := f.create(t, tasks.Input{Title: "Do work", Assignee: "coder"})
+	project := domain.Project{Handle: "old", Name: "Old", Channels: []string{f.general.Name}, Archived: true}
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.ProjectUpdated, Actor: events.Human(f.human.ID), Payload: project}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.StartTask(ctx, f.human, task.ID); err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("archived task: %v", err)
+	}
+	got, err := f.s.Task(ctx, task.ID)
+	if err != nil || got.Status != domain.TaskTodo || got.MessageID != "" {
+		t.Fatalf("task changed: %+v, %v", got, err)
+	}
+}
+
 func TestStartTaskTwiceIsRefused(t *testing.T) {
 	f := newTaskFixture(t)
 	f.holdUntil = make(chan struct{})

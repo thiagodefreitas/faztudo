@@ -309,6 +309,30 @@ const projectRoute = createRoute({
   ),
 });
 
+const projectSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$handle/settings",
+  loader: projectLoader,
+  component: lazyRouteComponent(
+    () => import("./components/projects/project-settings"),
+    "ProjectSettingsPage",
+  ),
+});
+
+const projectActivityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/projects/$handle/activity",
+  validateSearch: (search: Record<string, unknown>): { period: "today" | "week"; kind: "merged" | "failed" | "waiting" | "tasks" | "usage" } => ({
+    period: search.period === "week" ? "week" : "today",
+    kind: search.kind === "failed" || search.kind === "waiting" || search.kind === "tasks" || search.kind === "usage" ? search.kind : "merged",
+  }),
+  loader: projectLoader,
+  component: lazyRouteComponent(
+    () => import("./components/projects/project-activity"),
+    "ProjectActivityPage",
+  ),
+});
+
 const approvalsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/approvals",
@@ -474,6 +498,8 @@ const routeTree = rootRoute.addChildren([
   office3dRoute,
   projectsRoute,
   projectRoute,
+  projectSettingsRoute,
+  projectActivityRoute,
   approvalsRoute,
   tasksRoute,
   projectTasksRoute,

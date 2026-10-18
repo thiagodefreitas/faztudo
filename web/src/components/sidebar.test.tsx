@@ -84,6 +84,14 @@ async function setup(options: { members?: Member[]; runs?: Run[]; projects?: Pro
 }
 
 describe("WorkspaceNav", () => {
+  it("hides archived projects and their channels from the rail", async () => {
+    const dev: Channel = { ...general, id: "c3", name: "dev" }
+    const project: Project = { handle: "old", name: "Old project", archived: true, channels: ["dev"], departments: [], specialists: [] }
+    await setup({ projects: [project], channels: [general, dev, coderDm] })
+    expect(screen.queryByText("Old project")).not.toBeInTheDocument()
+    expect(screen.queryByText("dev")).not.toBeInTheDocument()
+    expect(screen.getByText("general")).toBeInTheDocument()
+  })
   it("lists each agent once and shows its unread count", async () => {
     await setup()
     expect(await screen.findAllByText("Coder")).toHaveLength(1)

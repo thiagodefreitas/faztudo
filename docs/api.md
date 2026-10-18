@@ -267,6 +267,7 @@ interface Project {
   channels: string[];       // channel names
   departments: string[];    // assigned departments (the lead and members may act)
   specialists: string[];    // assigned single agents
+  archived: boolean;        // archived channels remain readable, but do not run agents
 }
 
 interface Org {
@@ -304,7 +305,7 @@ interface NoticeAction {
 | GET | `/api/v1/members` | all members, humans and agents |
 | GET | `/api/v1/org` | `Org`: the Director's member id, the departments and the projects with their assignments |
 | POST | `/api/v1/projects` | create `{handle, name?, repo_path?, lead?, channels?, departments?, specialists?}`; humans only (403 for an agent), 400 for a bad handle, an unknown lead, department or specialist, a channel another project lists or a `repo_path` that is not a git work tree, 409 when the handle exists; the name defaults to the handle; 201 with the `Project`, and a `project.updated` event; the project is stored like one from lanes.toml and survives a restart |
-| PATCH | `/api/v1/projects/{project}` | change `{name?, repo_path?, lead?, channels?}` of a project; humans only; same checks as creating; assignments stay; returns the `Project`. A project that is also in lanes.toml takes its name, repository, lead and channels from the file again on the next start |
+| PATCH | `/api/v1/projects/{project}` | change `{name?, repo_path?, lead?, channels?, archived?}` of a project; humans only (403 for an agent), 400 for an empty name, unknown lead, invalid or duplicate channel, or repository that is not a git work tree; assignments stay; returns the `Project` and emits `project.updated`. Archiving persists across restarts, leaves channels readable, and refuses new agent routing in those channels. A project also in lanes.toml takes its name, repository, lead and channels from the file again on the next start |
 | POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/routines` | `Routine[]` with the time of the next run |
@@ -313,12 +314,12 @@ interface NoticeAction {
 | POST | `/api/v1/tasks` | humans only. `{channel_id, title, assignee, body?, lane?, mode?, scope?, checks?, acceptance?, start?}` creates a task in Todo and returns it (201). With `start: true` it also starts it. 400 with the reason when the input is wrong or the assignee is not an agent |
 | GET | `/api/v1/tasks/{id}` | `Task`, 404 if unknown |
 | PATCH | `/api/v1/tasks/{id}` | humans only. Any of `title, body, assignee, lane, mode, scope, checks, acceptance, order`; only a task in Todo can change (400 otherwise) |
-| POST | `/api/v1/tasks/{id}/start` | humans only. Posts the directive in the channel as a message that mentions the assignee, with `Message.task` set, and runs the agent. A failed task can be started again. 409 with the reason when it cannot run now (unknown lane, lane out of quota, write mode without `repo_path`, already started) and nothing is posted |
+| POST | `/api/v1/tasks/{id}/start` | humans only. Posts the directive in the channel as a message that mentions the assignee, with `Message.task` set, and runs the agent. A failed task can be started again. 409 with the reason when it cannot run now (archived project, unknown lane, lane out of quota, write mode without `repo_path`, already started) and nothing is posted |
 | POST | `/api/v1/tasks/{id}/cancel` | humans only. Drops a Todo task or stops a running one and its runs; 409 when it waits for an approval (decide that instead) or has ended |
 | POST | `/api/v1/routines/{handle}/run` | start the routine now, on or off; humans only; 202 `{status: "started"}`, or 409 with the reason in `message` when it cannot run now (lane health, no assignment, daily limit, already running) |
 | GET | `/api/v1/channels` | channels the caller can see |
 | POST | `/api/v1/channels` | create `{name, kind?, visibility?, topic?, repo_path?, member_ids?}`; kind defaults to `team`, visibility to `public` |
-| PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, default_agent_id, lane_overrides, members; a non-empty `repo_path` must be a git work tree, a non-empty `default_agent_id` must be an agent member of the channel, and every `lane_overrides` entry must name an agent and one of its lanes (400 otherwise); `lane_overrides` replaces the whole map |
+| PATCH | `/api/v1/channels/{id}` | humans only (403 for an agent); update name, topic, repo_path, test_command, default_agent_id, lane_overrides, members; a non-empty `repo_path` must be a git work tree, a non-empty `default_agent_id` must be an agent member of the channel, and every `lane_overrides` entry must name an agent and one of its lanes (400 otherwise); `lane_overrides` replaces the whole map |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of top-level messages (thread replies excluded), newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
 | POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?, attachments?}` where `attachments` is up to 10 `{id, name}` from `POST /api/v1/files` (type and size come from the stored file; `body` may be empty when there is an attachment); mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; `@<department>` triggers that department's lead and `@<project>` the project's lead; in a channel that belongs to a project only agents assigned to it run, and each other mentioned agent gets a `notice` with an `assign` action; a reply to a reply attaches to the thread root |

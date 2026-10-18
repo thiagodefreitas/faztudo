@@ -134,7 +134,7 @@ async function renderHome(handle = "faztudo") {
     run("r-other", "running", "c3"),
     run("r-merged", "done", "c2", {
       diff_stat: { files: 3, insertions: 10, deletions: 2 },
-      ended_at: new Date().toISOString(),
+      ended_at: new Date(Date.now() - 60_000).toISOString(),
     }),
     run("r-failed", "failed", "c1", {
       failure_reason: "tests red",
@@ -238,6 +238,13 @@ async function renderHome(handle = "faztudo") {
 }
 
 describe("ProjectHome", () => {
+  it("links digest counts to filtered project activity and settings", async () => {
+    await renderHome()
+    const digest = await screen.findByRole("region", { name: "Project digest" })
+    expect(within(digest).getAllByRole("link", { name: "merged 1" })[0]).toHaveAttribute("href", "/projects/faztudo/activity?period=today&kind=merged")
+    expect(within(digest).getAllByRole("link", { name: "failed 1" })[0]).toHaveAttribute("href", "/projects/faztudo/activity?period=today&kind=failed")
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/projects/faztudo/settings")
+  })
   it("shows the project's channels and not those of another project", async () => {
     await renderHome();
     const channels = await screen.findByRole("region", { name: "Channels" });

@@ -39,6 +39,7 @@ import type {
   RunState,
   SearchHit,
   StreamEvent,
+  Task,
   ThreadPage,
 } from "../types"
 import type { Clock } from "./clock"
@@ -93,6 +94,9 @@ export class MockWorld {
   private projects: Project[] = [
     { handle: "faztudo", name: "Faztudo", channels: ["faztudo-dev"], departments: ["engineering"], specialists: [] },
   ]
+  // The mock lists tasks for the board and project homes; it does not create
+  // or run them.
+  private tasks: Task[] = []
   private routines: Routine[] = [
     {
       handle: "daily-debrief",
@@ -380,6 +384,42 @@ export class MockWorld {
     }
     this.insertRun(asking)
     this.requestApproval(asking.id)
+    const task = (title: string, assignee: string, status: Task["status"], order: number, runIds: string[] = []): Task => ({
+      id: ulid(now),
+      channel_id: IDS.dev,
+      title,
+      assignee,
+      mode: "write",
+      scope: ["web/src/components/"],
+      checks: ["npm test"],
+      acceptance: [],
+      status,
+      order,
+      run_ids: runIds,
+      created_by: this.me.id,
+      created_at: iso(now - (40 - order) * minute),
+      updated_at: iso(now - (20 - order) * minute),
+    })
+    this.tasks = [
+      task("Write the release notes for 0.1.0", "writer", "running", 1, [working.id]),
+      task("Plan the Signal bridge", "architect", "review", 2, [asking.id]),
+      task("Add day dividers to the chat", "coder", "done", 3),
+      task("Show lane history on the dashboard", "coder", "todo", 4),
+    ]
+  }
+
+  getTasks(channelId?: string, project?: string): Task[] {
+    const channels = project ? (this.projects.find((item) => item.handle === project)?.channels ?? []) : null
+    return structuredClone(
+      this.tasks.filter((item) => {
+        if (channelId && item.channel_id !== channelId) return false
+        if (channels) {
+          const name = this.channels.find((channel) => channel.id === item.channel_id)?.name
+          return name !== undefined && channels.includes(name)
+        }
+        return true
+      }),
+    )
   }
 
   getLanes(): Lane[] {
