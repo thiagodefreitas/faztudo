@@ -23,10 +23,10 @@ The name is Portuguese for "does everything". It does not, yet.
   <img src="docs/images/inbox-phone.png" alt="The phone inbox: channels with their members' avatars and last messages" width="200">
 </p>
 
-> **Status: pre-alpha, no release yet.** The chat, runs, approvals, Lanes
-> dashboard, Office page and LAN mode for phones work today and the project is
-> built inside itself. Expect rough edges and changing formats. See the
-> [roadmap](docs/roadmap.md).
+> **Status: pre-alpha, developed in the open, no release yet.** The chat,
+> runs, approvals, Lanes dashboard, Office page and LAN mode for phones work
+> today, and faztudo is built inside itself. Expect rough edges and changing
+> formats. Issues and ideas are welcome. See the [roadmap](docs/roadmap.md).
 
 ## Why it is different
 

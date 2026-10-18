@@ -41,7 +41,7 @@ result are visible in the chat.
   channels and a repository, assigning departments and specialists to
   projects, `@department` mentions. See [organization](organization.md).
 
-## M2 Usable alpha (the repository becomes public here)
+## M2 Usable alpha (first release)
 
 - LAN mode: TLS, login, pairing a phone by QR code, installable web app.
 - Search, pinned messages, files, unread state, notifications, presence.
@@ -57,7 +57,8 @@ result are visible in the chat.
   delegation, every handoff visible, run budgets), routines on a schedule or
   trigger with a daily debrief, starting organization templates.
 - At least two weeks of building faztudo inside faztudo, with what broke
-  written down, before the repository goes public.
+  written down, before the first release. (The repository itself went
+  public earlier, on 2026-10-18, so development happens in the open.)
 
 ## M3 Signal
 

@@ -15,8 +15,9 @@ This is the short version, as of the current main branch.
 | M6 3D office and desktop app | 3D view, Linux desktop app | planned |
 | M7 Teams and federation | several people per workspace, more bridges, agent computers on other machines and desktop computers | planned |
 
-The repository becomes public at M2, after at least two weeks of building
-faztudo inside faztudo.
+The repository is public and developed in the open. The first release
+packages come at M2, after at least two weeks of building faztudo inside
+faztudo.
 
 Milestones and issues are tracked on GitHub. Pick an open issue in the
 current milestone to help.
