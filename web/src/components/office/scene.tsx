@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { motion } from "motion/react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { cx } from "../../lib/cx"
 import { displayPct } from "../../lib/lane-format"
 import { primaryWindow } from "../../lib/lanes"
@@ -12,7 +12,9 @@ import { HealthBadge } from "../lanes"
 import { WorkspaceNav } from "../sidebar"
 import { AgentAvatar } from "../agent-avatar"
 import { avatarState } from "./avatar"
-import { DeskStateBadge, OfficeDesk } from "./desk"
+import { DeskStateBadge, RoomDesk } from "./desk"
+import { layoutRoom } from "./layout"
+import { RoomBackdrop } from "./room"
 import { type DeskInfo, useOfficeDesks, useReducedMotion } from "./state"
 
 const RUN_STATE_LABEL: Record<RunState, string> = {
@@ -36,6 +38,29 @@ const RUN_STATE_CLASS: Record<RunState, string> = {
 }
 
 const ACTIVE_RUN_STATES = new Set<RunState>(["queued", "running", "waiting_approval", "verifying"])
+
+const LEGEND = [
+  { key: "working", label: "Working", dot: "bg-accent" },
+  { key: "waiting", label: "Waiting", dot: "bg-warn" },
+  { key: "failed", label: "Failed", dot: "bg-danger" },
+  { key: "quota", label: "Out of quota", dot: "bg-faint opacity-50" },
+]
+
+function Legend() {
+  return (
+    <ul
+      aria-label="Legend"
+      className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface/90 px-2 py-1 text-[10px] text-muted"
+    >
+      {LEGEND.map((item) => (
+        <li key={item.key} className="flex items-center gap-1">
+          <span className={cx("inline-block h-2 w-2 rounded-full", item.dot)} aria-hidden="true" />
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 export interface OfficeSceneProps {
   desks: DeskInfo[]
@@ -71,8 +96,7 @@ export function OfficeScene({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [selectedDesk])
 
-  const directors = desks.filter((desk) => desk.isDirector)
-  const agents = desks.filter((desk) => !desk.isDirector)
+  const room = useMemo(() => layoutRoom(desks), [desks])
 
   const counts = {
     working: desks.filter((desk) => desk.state === "working").length,
@@ -93,19 +117,8 @@ export function OfficeScene({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden">
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5">
-        {/* Room container with subtle architectural floor grid */}
-        <div
-          data-testid="office-room"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 1px 1px, var(--color-line) 1px, transparent 0)",
-            backgroundSize: "24px 24px",
-          }}
-          className="mx-auto flex max-w-5xl flex-col gap-5 rounded-2xl border border-line bg-canvas/70 p-3 shadow-xs sm:p-6"
-        >
-          {/* Architectural daylight bar and room status summary */}
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-surface/90 px-3 py-2 text-[12px]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2 sm:p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
             <div className="flex items-center gap-2">
               <span className="inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
               <span className="font-medium text-ink">Studio floor</span>
@@ -136,63 +149,40 @@ export function OfficeScene({
                 </span>
               )}
             </div>
-          </div>
-
-          {desks.length === 0 ? (
-            <p className="py-12 text-center text-[13px] text-muted">No workspace members yet.</p>
-          ) : (
-            <>
-              {/* Front of the office: Director desk(s) */}
-              {directors.length > 0 && (
-                <section aria-label="Director zone" className="flex flex-col items-center gap-2">
-                  <div className="flex w-full items-center gap-2">
-                    <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-faint">
-                      Front of room - Director
-                    </span>
-                    <div className="h-px flex-1 bg-line" />
-                  </div>
-                  <div className="flex w-full flex-wrap justify-center gap-4">
-                    {directors.map((desk) => (
-                      <div key={desk.member.id} className="w-full max-w-md">
-                        <OfficeDesk
-                          desk={desk}
-                          selected={selectedDesk?.member.id === desk.member.id}
-                          reducedMotion={reducedMotion}
-                          onSelect={handleSelect}
-                          onOpenApproval={handleApproval}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {/* Agent desks grid */}
-              {agents.length > 0 && (
-                <section aria-label="Agent desks" className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-faint">
-                      Agent bays
-                    </span>
-                    <div className="h-px flex-1 bg-line" />
-                  </div>
-                  <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-                    {agents.map((desk) => (
-                      <OfficeDesk
-                        key={desk.member.id}
-                        desk={desk}
-                        selected={selectedDesk?.member.id === desk.member.id}
-                        reducedMotion={reducedMotion}
-                        onSelect={handleSelect}
-                        onOpenApproval={handleApproval}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-            </>
-          )}
         </div>
+
+        {desks.length === 0 ? (
+          <p className="py-12 text-center text-[13px] text-muted">No workspace members yet.</p>
+        ) : (
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs">
+            {/* On a phone the room keeps a readable size and pans inside this box only. */}
+            <div data-testid="office-room" className="h-full overflow-x-auto overflow-y-hidden overscroll-x-contain">
+              <svg
+                viewBox={`0 0 ${room.width} ${room.height}`}
+                preserveAspectRatio="xMidYMid meet"
+                role="group"
+                aria-label="Office floor plan"
+                className="mx-auto block h-full w-full min-w-[760px] select-none sm:min-w-0"
+              >
+                <RoomBackdrop height={room.height} zones={room.zones} rug={room.rug} />
+                {room.seats.map((seat) => (
+                  <RoomDesk
+                    key={seat.desk.member.id}
+                    desk={seat.desk}
+                    x={seat.x}
+                    y={seat.y}
+                    scale={seat.scale}
+                    selected={selectedDesk?.member.id === seat.desk.member.id}
+                    reducedMotion={reducedMotion}
+                    onSelect={handleSelect}
+                    onOpenApproval={handleApproval}
+                  />
+                ))}
+              </svg>
+            </div>
+            <Legend />
+          </div>
+        )}
       </div>
 
       {selectedDesk && (

@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import type { Approval, Channel, Lane, Member, Run } from "../../types"
 import { OfficeScene, type OfficeSceneProps } from "./scene"
@@ -38,6 +38,14 @@ const members: Member[] = [
     display_name: "Grok",
     presence: "offline",
     agent: { lanes: ["grok/default"], role: "reviewer", mode: "read" },
+  },
+  {
+    id: "m-coder",
+    kind: "agent",
+    handle: "coder",
+    display_name: "Coder",
+    presence: "online",
+    agent: { lanes: ["codex/default"], role: "coder", mode: "write" },
   },
 ]
 
@@ -211,5 +219,27 @@ describe("OfficeScene", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Message" }))
     expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "m-claude" }))
+  })
+
+  it("draws one room with labeled pod areas, a legend and desks in reading order", async () => {
+    await renderScene()
+
+    expect(screen.getAllByRole("group", { name: "Office floor plan" })).toHaveLength(1)
+    expect(within(screen.getByTestId("zone-personas")).getByText("Personas")).toBeInTheDocument()
+    expect(within(screen.getByTestId("zone-agents")).getByText("Agents")).toBeInTheDocument()
+    expect(within(screen.getByRole("list", { name: "Legend" })).getAllByRole("listitem")).toHaveLength(4)
+
+    const order = screen.getAllByRole("button").map((button) => button.getAttribute("data-testid"))
+    expect(order.slice(0, 5)).toEqual(["desk-m-coder", "desk-m-claude", "desk-m-codex", "desk-m-grok", "desk-m-director"])
+  })
+
+  it("selects a desk with the keyboard", async () => {
+    await renderScene()
+
+    const codex = screen.getByRole("button", { name: "Codex, waiting for approval" })
+    codex.focus()
+    fireEvent.keyDown(codex, { key: "Enter" })
+    expect(codex).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("complementary", { name: "Codex details" })).toBeInTheDocument()
   })
 })
