@@ -49,6 +49,9 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     .map((part) => decodeURIComponent(part))
 
   if (method === "GET" && parts.length === 1 && parts[0] === "health") return { status: 200, body: world.health() }
+  if (method === "GET" && parts.length === 2 && parts[0] === "stream" && parts[1] === "head") {
+    return { status: 200, body: { seq: world.head() } }
+  }
   if (method === "GET" && parts[0] === "me" && parts.length === 1) return { status: 200, body: world.getMe() }
   if (method === "GET" && parts[0] === "members" && parts.length === 1) return { status: 200, body: world.getMembers() }
   if (method === "GET" && parts[0] === "channels" && parts.length === 1) return { status: 200, body: world.getChannels() }

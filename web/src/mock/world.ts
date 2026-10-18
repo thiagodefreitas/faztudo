@@ -311,6 +311,10 @@ export class MockWorld {
     }
   }
 
+  head(): number {
+    return this.log.reduce((max, event) => Math.max(max, event.seq), 0)
+  }
+
   health(): Health {
     return { ok: true, version: MOCK_VERSION }
   }

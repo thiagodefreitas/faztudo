@@ -122,6 +122,9 @@ describe("mock world", () => {
     expect(updated?.unread).toBe(0)
     const health = handleMock(mock, "GET", new URL("http://127.0.0.1/api/v1/health"))
     expect(health.body).toMatchObject({ ok: true, version: "0.0.0-mock" })
+    const head = handleMock(mock, "GET", new URL("http://127.0.0.1/api/v1/stream/head"))
+    expect(head.status).toBe(200)
+    expect((head.body as { seq: number }).seq).toBeGreaterThan(0)
   })
 
   it("patches channel settings and rejects a non-git repo path", () => {

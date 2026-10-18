@@ -188,6 +188,7 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/lanes/{id...}", a.laneHistory)
 	m.HandleFunc("PATCH /api/v1/lanes/{id...}", a.patchLane)
 	m.HandleFunc("POST /api/v1/lanes/{id...}", a.probe)
+	m.HandleFunc("GET /api/v1/stream/head", a.streamHead)
 	m.HandleFunc("GET /api/v1/stream", a.stream)
 	m.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "not_found", "endpoint not found") })
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1317,6 +1318,17 @@ func (a *API) watchSession(ctx context.Context, cancel context.CancelFunc, sessi
 		}
 	}
 }
+// streamHead tells a client where the event log ends, so it can subscribe
+// from there instead of replaying everything.
+func (a *API) streamHead(w http.ResponseWriter, r *http.Request) {
+	seq, err := a.Store.LastSeq(r.Context())
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	respond(w, 200, map[string]int64{"seq": seq})
+}
+
 func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	if a.isLANRequest(r) {
 		if !validLANOrigin(r) {

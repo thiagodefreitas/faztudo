@@ -59,6 +59,7 @@ export class ApiError extends Error {
 
 export interface Api {
   health: () => Promise<Health>
+  streamHead: () => Promise<{ seq: number }>
   me: () => Promise<Member>
   members: () => Promise<Member[]>
   channels: () => Promise<Channel[]>
@@ -149,6 +150,7 @@ export function createApi(options: ApiOptions = {}): Api {
 
   return {
     health: () => request("GET", "/health"),
+    streamHead: () => request("GET", "/stream/head"),
     me: () => request("GET", "/me"),
     members: () => request("GET", "/members"),
     channels: () => request("GET", "/channels"),

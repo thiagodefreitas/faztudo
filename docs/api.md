@@ -376,6 +376,12 @@ through_message_id, updated_at}`.
 
 ## Event stream
 
+`GET /api/v1/stream/head` returns `{"seq": 1234}`, the `seq` of the newest
+event (0 for an empty log). A client that keeps its state from the REST reads
+fetches the head first, loads its data, then subscribes with `after_seq` set
+to that head. Events that happen while it loads are still delivered and
+nothing older is replayed. It needs the same sign-in as the other reads.
+
 `GET /api/v1/stream` upgrades to a WebSocket. The client sends:
 
 ```json
