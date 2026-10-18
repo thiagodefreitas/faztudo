@@ -194,6 +194,26 @@ const projectRoute = createRoute({
   component: lazyRouteComponent(() => import("./components/project-home"), "ProjectHomePage"),
 })
 
+const approvalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/approvals",
+  // `a` is the approval to open, set by the notification for it.
+  validateSearch: (search: Record<string, unknown>): { a?: string } =>
+    typeof search.a === "string" && search.a ? { a: search.a } : {},
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.org, queryFn: () => api.org() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
+      ]),
+    ),
+  component: lazyRouteComponent(() => import("./components/approvals/approvals-page"), "ApprovalsPage"),
+})
+
 const organizationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/organization",
@@ -236,6 +256,7 @@ const routeTree = rootRoute.addChildren([
   office3dRoute,
   projectsRoute,
   projectRoute,
+  approvalsRoute,
   organizationRoute,
   routinesRoute,
 ])

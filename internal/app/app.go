@@ -1174,9 +1174,14 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 		if _, err := git(ctx, w.Repo, "merge", "--ff-only", w.Branch); err != nil {
 			return "", err
 		}
-		outcome = "Fast-forwarded " + w.Branch + " into the current branch."
+		// The short commit id lets the approval card say "Merged as <id>".
+		merged, err := git(ctx, w.Repo, "rev-parse", "--short", "HEAD")
+		if err != nil {
+			return "", err
+		}
+		outcome = "Fast-forwarded " + w.Branch + " into the current branch as " + merged + "."
 		if replayed {
-			outcome = "Merged " + w.Branch + " on top of changes made since the run started."
+			outcome = "Merged " + w.Branch + " on top of changes made since the run started, as " + merged + "."
 		}
 		if err := wm.Cleanup(ctx, w); err != nil {
 			outcome += " Worktree cleanup failed: " + err.Error()

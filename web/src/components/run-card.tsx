@@ -10,7 +10,7 @@ import { formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
-import { approvalForRun, useApprovals, useLanes, useMembers, useNotices, useOutput, useRuns } from "../state/queries"
+import { approvalForRun, useApprovals, useLanes, useMembers, useNotices, useOutput, useRunDiff, useRuns } from "../state/queries"
 import type { Approval, Lane, Member, OutputLine, Run, RunState } from "../types"
 import { ApprovalCard } from "./approval-card"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
@@ -52,6 +52,8 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
   const agent = members.data?.find((member) => member.id === run.agent_id) ?? null
   const lane = lanes.data?.find((item) => item.id === run.lane_id)
   const approval = approvalForRun(approvals.data, run.id)
+  const approvalDiff = useRunDiff(run.id, approval?.state === "pending" && approval.commit_message !== undefined)
+  const decider = approval?.resolution ? members.data?.find((member) => member.id === approval.resolution?.by)?.display_name : undefined
   const retryLanes = agent?.agent?.lanes ?? [run.lane_id]
   const previous = run.retry_of ? runs.data?.find((item) => item.id === run.retry_of) : undefined
   const why =
@@ -65,6 +67,8 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
       lane={lane}
       lines={output.data ?? []}
       approval={approval}
+      approvalDiff={approvalDiff.data?.diff}
+      decider={decider}
       now={now}
       retryLanes={retryLanes}
       {...(why ? { why } : {})}
@@ -112,6 +116,8 @@ export function RunCardView({
   lane,
   lines,
   approval,
+  approvalDiff,
+  decider,
   now,
   retryLanes,
   why,
@@ -126,6 +132,10 @@ export function RunCardView({
   lane: Lane | undefined
   lines: OutputLine[]
   approval: Approval | null
+  /** The diff behind a pending write approval, once loaded. */
+  approvalDiff?: string | undefined
+  /** Who decided the approval, once it is decided. */
+  decider?: string | undefined
   now: number
   retryLanes?: string[]
   /** Why this lane, for example "codex/default skipped: busy". */
@@ -215,7 +225,9 @@ export function RunCardView({
             </DropdownMenu.Root>
           )}
         </div>
-        {approval && <ApprovalCard approval={approval} onResolve={onResolve} />}
+        {approval && (
+          <ApprovalCard approval={approval} onResolve={onResolve} run={run} agentName={name} diff={approvalDiff} decider={decider} />
+        )}
         <details className="mt-2 pl-7">
           <summary className="inline-flex min-h-8 cursor-pointer items-center text-[12px] text-muted hover:text-ink">Details</summary>
           <div className="mt-1 flex flex-col gap-2">

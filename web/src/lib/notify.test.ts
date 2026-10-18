@@ -36,7 +36,8 @@ describe("notificationFor", () => {
 
   it("notifies for a pending approval but not a resolved one", () => {
     const pending = event("approval.requested", { id: "a1", channel_id: "c1", title: "Merge the change?", state: "pending", options: [] })
-    expect(notificationFor(pending, ctx())).toEqual({ title: "Approval waiting", body: "Merge the change?", channelId: "c1" })
+    // The approval id lets a click open the inbox at that item.
+    expect(notificationFor(pending, ctx())).toEqual({ title: "Approval waiting", body: "Merge the change?", channelId: "c1", approvalId: "a1" })
     const resolved = event("approval.resolved", { id: "a1", channel_id: "c1", title: "Merge the change?", state: "resolved", options: [] })
     expect(notificationFor(resolved, ctx())).toBeNull()
   })

@@ -308,7 +308,7 @@ interface NoticeAction {
 | POST | `/api/v1/runs/{id}/cancel` | cancel a run |
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
-| POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message |
+| POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message. A merge stores the short id of the new commit in `resolution.note`, which the approvals inbox shows as "Merged as <id>" |
 | GET | `/api/v1/lanes` | configured lanes (a detected-only default is hidden once lanes.toml configures that CLI) |
 | GET | `/api/v1/lanes/{id}/history?window=&since=` | usage readings for a lane; `window` is optional (`5h`, `day`, `week`, `month`), `since` is RFC3339 and defaults to 7 days ago (at most 31 days ago) |
 | GET | `/api/v1/lanes/channel-summary/{channel_id}` | latest rolling summary, or an empty summary object before the first one |

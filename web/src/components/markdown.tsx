@@ -71,6 +71,19 @@ function highlight(source: string, language: string): HastNode | null {
   return refractor.highlight(source, name) as unknown as HastNode
 }
 
+/** The highlighter's language for a file path, if it knows one. */
+export function languageOfPath(path: string): string | undefined {
+  const ext = /\.([\w]+)$/.exec(path)?.[1]?.toLowerCase()
+  return ext && ALIAS[ext] ? ext : undefined
+}
+
+/** One line of source with syntax colors; plain text for an unknown language. */
+export function HighlightedLine({ source, language }: { source: string; language: string | undefined }) {
+  const tree = language ? highlight(source, language) : null
+  if (!tree) return <>{source}</>
+  return <>{tree.children?.map((child, index) => renderHast(child, index))}</>
+}
+
 function Code({ className, children }: { className?: string; children?: ReactNode }) {
   const source = String(children ?? "").replace(/\n$/, "")
   const language = /language-([\w-]+)/.exec(className ?? "")?.[1]

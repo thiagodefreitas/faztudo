@@ -146,7 +146,7 @@ describe("WorkspaceNav", () => {
     expect(screen.getByRole("button", { name: "Expand Faztudo" })).toHaveAttribute("aria-expanded", "false")
   })
 
-  it("counts the approvals that wait for me and links to the first", async () => {
+  it("counts the approvals that wait for me and links to the approvals inbox", async () => {
     const waiting = (id: string, state: Approval["state"]): Approval => ({
       id,
       run_id: `run-${id}`,
@@ -160,8 +160,7 @@ describe("WorkspaceNav", () => {
     await setup({ approvals: [waiting("a", "pending"), waiting("b", "pending"), waiting("c", "resolved")] })
     const link = await screen.findByRole("link", { name: /Needs you/ })
     expect(within(link).getByLabelText("2 waiting")).toBeInTheDocument()
-    expect(link.getAttribute("href")).toContain("/c/c1")
-    expect(link.getAttribute("href")).toContain("run=run-a")
+    expect(link).toHaveAttribute("href", "/approvals")
   })
 
   it("shows no Needs you row when nothing waits", async () => {

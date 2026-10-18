@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
-import type { Approval } from "../types"
+import type { Approval, Run } from "../types"
 import { ApprovalCard } from "./approval-card"
 
 const approval: Approval = {
@@ -57,6 +57,157 @@ describe("ApprovalCard", () => {
   it("shows no message box without a proposal", () => {
     render(<ApprovalCard approval={approval} onResolve={() => undefined} />)
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
+
+  describe("write approval", () => {
+    const write: Approval = {
+      ...approval,
+      run_id: "01ERZ3NDEKTSV4RRFFQ69G5EE1",
+      title: "Choose what to do with branch fz/run-demo",
+      detail: "Merge fz/run-demo.",
+      commit_message: "Add the thing",
+      options: [
+        { key: "merge", label: "Merge", style: "primary" },
+        { key: "keep", label: "Keep" },
+        { key: "discard", label: "Discard", style: "danger" },
+      ],
+    }
+    const run = {
+      id: "01ERZ3NDEKTSV4RRFFQ69G5EE1",
+      diff_stat: { files: 3, insertions: 5, deletions: 1 },
+      verification: { ok: true, detail: "go test ./...\nok" },
+    } as Run
+    const diff = [
+      "diff --git a/a.go b/a.go",
+      "--- a/a.go",
+      "+++ b/a.go",
+      "@@ -1 +1,2 @@",
+      " package a",
+      "+var x = 1",
+      "diff --git a/b.ts b/b.ts",
+      "--- a/b.ts",
+      "+++ b/b.ts",
+      "@@ -1 +1 @@",
+      "-const old = 1",
+      "+const next = 2",
+      "diff --git a/c.md b/c.md",
+      "--- a/c.md",
+      "+++ b/c.md",
+      "@@ -1 +1 @@",
+      "-before",
+      "+after",
+      "",
+    ].join("\n")
+
+    function renderWrite(onResolve = vi.fn()) {
+      render(<ApprovalCard approval={write} run={run} agentName="Coder" diff={diff} onResolve={onResolve} />)
+      return onResolve
+    }
+
+    it("leads with one summary line, then files, checks and the options", () => {
+      renderWrite()
+      expect(screen.getByTestId("approval-summary")).toHaveTextContent("Merge Coder's change: 3 files, tests passed")
+      const files = within(screen.getByRole("region", { name: "Changed files" }))
+      expect(files.getByRole("button", { name: /a\.go/ })).toHaveTextContent("+1-0")
+      expect(files.getByRole("button", { name: /b\.ts/ })).toHaveTextContent("+1-1")
+      expect(screen.getByText("Checks passed")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Merge/ })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Discard/ })).toBeInTheDocument()
+    })
+
+    it("previews the first two files and folds the rest until asked", async () => {
+      const user = userEvent.setup()
+      renderWrite()
+      // Syntax colors split a line into spans, so match on the line's text.
+      const line = (text: string) => screen.queryByText((_, el) => el?.tagName === "DIV" && el.textContent === text)
+      expect(line("+var x = 1")).toBeInTheDocument()
+      expect(line("+const next = 2")).toBeInTheDocument()
+      expect(line("+after")).not.toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Show all 3 files" }))
+      expect(line("+after")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /Show all/ })).not.toBeInTheDocument()
+    })
+
+    it("opens failed checks", () => {
+      render(
+        <ApprovalCard
+          approval={write}
+          run={{ ...run, verification: { ok: false, detail: "FAIL: TestX" } } as Run}
+          agentName="Coder"
+          onResolve={() => undefined}
+        />,
+      )
+      expect(screen.getByTestId("approval-summary")).toHaveTextContent("tests failed")
+      expect(screen.getByText("FAIL: TestX")).toBeVisible()
+    })
+
+    it("merges with m and sends the edited message", async () => {
+      const user = userEvent.setup()
+      const onResolve = renderWrite()
+      const card = screen.getByRole("article", { name: /Choose what to do/ })
+      card.focus()
+      await user.keyboard("e")
+      const box = screen.getByRole("textbox", { name: "Commit message" })
+      expect(box).toHaveFocus()
+      await user.clear(box)
+      await user.type(box, "Better words")
+      await user.keyboard("{Escape}")
+      expect(card).toHaveFocus()
+      await user.keyboard("m")
+      expect(onResolve).toHaveBeenCalledWith("merge", "Better words")
+    })
+
+    it("keeps with k", async () => {
+      const user = userEvent.setup()
+      const onResolve = renderWrite()
+      screen.getByRole("article", { name: /Choose what to do/ }).focus()
+      await user.keyboard("k")
+      expect(onResolve).toHaveBeenCalledWith("keep")
+    })
+
+    it("asks before discarding, from the key and from the button", async () => {
+      const user = userEvent.setup()
+      const onResolve = renderWrite()
+      screen.getByRole("article", { name: /Choose what to do/ }).focus()
+      await user.keyboard("d")
+      expect(onResolve).not.toHaveBeenCalled()
+      expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+      await user.keyboard("{Escape}")
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: /Discard/ }))
+      expect(onResolve).not.toHaveBeenCalled()
+      await user.click(screen.getByRole("button", { name: "Cancel" }))
+      expect(onResolve).not.toHaveBeenCalled()
+      await user.click(screen.getByRole("button", { name: /Discard/ }))
+      await user.click(screen.getByRole("button", { name: /^Yes, discard/ }))
+      expect(onResolve).toHaveBeenCalledWith("discard")
+    })
+
+    it("folds to one line after the decision", () => {
+      render(
+        <ApprovalCard
+          approval={{
+            ...write,
+            state: "resolved",
+            resolution: {
+              option: "merge",
+              by: "m1",
+              at: new Date(Date.now() - 3 * 60_000).toISOString(),
+              note: "Fast-forwarded fz/run-demo into the current branch as 1a2b3c4.",
+            },
+          }}
+          decider="Thiago"
+          run={run}
+          diff={diff}
+          onResolve={() => undefined}
+        />,
+      )
+      expect(screen.getByText("Merged as 1a2b3c4")).toBeInTheDocument()
+      expect(screen.getByText("by Thiago")).toBeInTheDocument()
+      expect(screen.getByText(/\dm ago/)).toBeInTheDocument()
+      expect(screen.queryByRole("button")).not.toBeInTheDocument()
+      expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+    })
   })
 
   it("shows the chosen option after it is resolved", () => {

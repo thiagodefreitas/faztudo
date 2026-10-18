@@ -42,6 +42,11 @@ export function BottomTabs({ pathname }: { pathname: string }) {
         <Menu.Portal>
           <Menu.Content align="end" side="top" sideOffset={6} className="z-50 min-w-44 rounded-md border border-line bg-surface p-1 shadow-lg">
             <Menu.Item asChild>
+              <Link to="/approvals" className={ITEM}>
+                Needs you
+              </Link>
+            </Menu.Item>
+            <Menu.Item asChild>
               <Link to="/lanes" className={ITEM}>
                 Lanes
               </Link>

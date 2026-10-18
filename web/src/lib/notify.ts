@@ -17,6 +17,8 @@ export interface NotifyItem {
   title: string
   body: string
   channelId: string
+  /** Set for an approval, so a click opens it in the approvals inbox. */
+  approvalId?: string
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -58,7 +60,13 @@ export function notificationFor(event: StreamEvent, ctx: NotifyContext): NotifyI
     }
     case "approval.requested": {
       if (payload.state !== "pending") return null
-      return { title: "Approval waiting", body: clip(text(payload.title)) || "An agent needs your decision", channelId }
+      const approvalId = text(payload.id)
+      return {
+        title: "Approval waiting",
+        body: clip(text(payload.title)) || "An agent needs your decision",
+        channelId,
+        ...(approvalId ? { approvalId } : {}),
+      }
     }
     case "run.updated": {
       if (payload.state !== "failed") return null

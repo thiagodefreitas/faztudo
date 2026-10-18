@@ -292,7 +292,12 @@ func TestAgentCommitIsSquashedUnderHumanIdentity(t *testing.T) {
 	if err != nil || run.BaseCommit != base {
 		t.Fatalf("base commit: %+v %v", run, err)
 	}
-	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 200, nil)
+	var merged domain.Approval
+	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 200, &merged)
+	short := gitTest(t, repo, "rev-parse", "--short", "HEAD")
+	if merged.Resolution == nil || !strings.Contains(merged.Resolution.Note, " as "+short) {
+		t.Fatalf("merge note does not name the commit %s: %+v", short, merged.Resolution)
+	}
 	if got := gitTest(t, repo, "rev-list", "--count", base+"..HEAD"); got != "1" {
 		t.Fatalf("commit count %s", got)
 	}

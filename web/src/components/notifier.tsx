@@ -39,7 +39,8 @@ export function Notifier() {
         const popup = new Notification(item.title, { body: item.body, tag: event.id })
         popup.onclick = () => {
           window.focus()
-          void navigate({ to: "/c/$channelId", params: { channelId: item.channelId } })
+          if (item.approvalId) void navigate({ to: "/approvals", search: { a: item.approvalId } })
+          else void navigate({ to: "/c/$channelId", params: { channelId: item.channelId } })
           popup.close()
         }
       } catch {

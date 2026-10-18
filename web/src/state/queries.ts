@@ -98,6 +98,24 @@ export function useLastMessages(channelIds: string[]): Map<string, Message> {
   return out
 }
 
+// Every loaded top-level and thread message of the given channels, oldest
+// channel first. It shares the caches of useMessages.
+export function useAllMessages(channelIds: string[]): Message[] {
+  const qc = useQueryClient()
+  const results = useQueries({ queries: channelIds.map((id) => messagesQuery(qc, id)) })
+  return results.flatMap((result) => result.data ?? [])
+}
+
+// The diff of a run, shared with the run panel's cache. Off until `enabled`.
+export function useRunDiff(runId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.diff(runId ?? ""),
+    queryFn: () => api.diff(runId ?? ""),
+    enabled: enabled && Boolean(runId),
+    retry: false,
+  })
+}
+
 function mergeLines(server: OutputLine[], local: OutputLine[]): OutputLine[] {
   const bySeq = new Map<number, OutputLine>()
   for (const line of server) bySeq.set(line.seq, line)

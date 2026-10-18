@@ -100,7 +100,6 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const rooms = all.filter((channel) => !isDirect(channel))
   const grouped = groupChannels(rooms, org.data?.projects ?? [])
   const waiting = pendingApprovals(approvals.data ?? [])
-  const firstWaiting = waiting[0]
   const others = (members.data ?? []).filter((member) => member.id !== meId)
   const people = others.filter((member) => member.kind === "human")
   const agents = others.filter((member) => member.kind === "agent")
@@ -129,11 +128,9 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         {WORKSPACE_NAME}
       </Link>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {firstWaiting && (
+        {waiting.length > 0 && (
           <Link
-            to="/c/$channelId"
-            params={{ channelId: firstWaiting.channel_id }}
-            search={firstWaiting.run_id ? { run: firstWaiting.run_id } : {}}
+            to="/approvals"
             onClick={onNavigate}
             className={cx(ROW, "mb-2 justify-between bg-warn-soft font-medium text-warn")}
           >

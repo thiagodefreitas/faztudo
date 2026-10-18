@@ -380,7 +380,7 @@ function PinButton({ message, pinned }: { message: Message; pinned: boolean }) {
 
 // The options of an ask_human message. The answer is a thread reply from the
 // person, so it also shows for anyone else who opens the channel.
-function MessageChoices({ message, channelId }: { message: Message; channelId: string }) {
+export function MessageChoices({ message, channelId }: { message: Message; channelId: string }) {
   const qc = useQueryClient()
   const members = useMembers()
   const thread = useThread(channelId, message.id)
