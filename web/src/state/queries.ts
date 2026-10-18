@@ -33,6 +33,10 @@ export function useLanes() {
   })
 }
 
+export function useOrg() {
+  return useQuery({ queryKey: qk.org, queryFn: () => api.org() })
+}
+
 export function useRuns() {
   const qc = useQueryClient()
   return useQuery({

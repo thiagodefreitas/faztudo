@@ -218,6 +218,25 @@ func (a *App) allowedTools(id string) []string {
 	return nil
 }
 
+// instructions returns the standing instructions of the persona with this
+// handle, empty when it has none.
+func (a *App) instructions(handle string) string {
+	for _, p := range a.Config.Lanes.Persona {
+		if strings.EqualFold(p.Handle, handle) {
+			return strings.TrimSpace(p.Instructions)
+		}
+	}
+	return ""
+}
+
+// withInstructions puts a persona's standing instructions ahead of the prompt.
+func withInstructions(instructions, prompt string) string {
+	if instructions == "" {
+		return prompt
+	}
+	return "Standing instructions for this role:\n" + instructions + "\n\n" + prompt
+}
+
 func (a *App) planLimit(id string) int64 {
 	for _, l := range a.Config.Lanes.Lane {
 		if l.ID == id {
@@ -373,6 +392,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if err != nil {
 		return err
 	}
+	prompt = withInstructions(a.instructions(agent.Handle), prompt)
 	if mode == domain.RunWrite {
 		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
 	}

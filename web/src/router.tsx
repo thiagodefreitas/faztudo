@@ -11,6 +11,7 @@ import { DevicesPage, LoginPage, PairPage } from "./components/auth"
 import { ChannelPage } from "./components/channel"
 import { InboxPage } from "./components/inbox"
 import { LanesPage } from "./components/lanes"
+import { OrganizationPage } from "./components/organization"
 import { Shell } from "./components/shell"
 import { qk } from "./state/keys"
 import { queryClient } from "./state/query-client"
@@ -140,6 +141,23 @@ const officeRoute = createRoute({
   component: lazyRouteComponent(() => import("./components/office/scene"), "OfficePage"),
 })
 
+const organizationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/organization",
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.org, queryFn: () => api.org() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.lanes, queryFn: () => api.lanes() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
+      ]),
+    ),
+  component: OrganizationPage,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -148,6 +166,7 @@ const routeTree = rootRoute.addChildren([
   channelRoute,
   lanesRoute,
   officeRoute,
+  organizationRoute,
 ])
 
 export const router = createRouter({

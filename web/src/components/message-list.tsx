@@ -12,8 +12,8 @@ import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
-import { useChannels, useMe, useMembers, useMessages, useNotices, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
-import type { Member, Message, NoticeItem, Run, ThreadPage } from "../types"
+import { useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
+import type { Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
 import type { ChannelRef } from "../lib/channel-links"
 import { AgentAvatar } from "./agent-avatar"
 import { ChoiceCard } from "./choice-card"
@@ -401,16 +401,54 @@ function AgentLine({ messages, members, channels }: { messages: Message[]; membe
 
 function NoticeRow({ notice }: { notice: NoticeItem }) {
   return (
-    <p
+    <div
       className={cx(
-        "ml-[42px] text-[12px]",
+        "ml-[42px] flex flex-wrap items-center gap-2 text-[12px]",
         notice.level === "error" && "text-danger",
         notice.level === "warn" && "text-warn",
         notice.level === "info" && "text-muted",
       )}
     >
-      {notice.text}
-    </p>
+      <p>{notice.text}</p>
+      {notice.action && <AssignButton action={notice.action} />}
+    </div>
+  )
+}
+
+// The Director's button on a "not assigned to this project" notice.
+function AssignButton({ action }: { action: NoticeAction }) {
+  const qc = useQueryClient()
+  const org = useOrg()
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const project = org.data?.projects.find((item) => item.handle === action.project)
+  if (project?.specialists.some((handle) => handle.toLowerCase() === action.agent.toLowerCase())) {
+    return <span className="text-ok">Assigned</span>
+  }
+  async function assign() {
+    setBusy(true)
+    setFailed(false)
+    try {
+      await api.assign(action.project, { kind: "specialist", handle: action.agent })
+      await qc.invalidateQueries({ queryKey: qk.org })
+    } catch {
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void assign()}
+        className="min-h-10 rounded border border-line bg-surface px-2 text-[12px] text-ink hover:bg-canvas disabled:opacity-60 md:min-h-7"
+      >
+        {action.label}
+      </button>
+      {failed && <span role="alert">Could not assign. Try again.</span>}
+    </>
   )
 }
 

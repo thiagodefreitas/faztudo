@@ -179,6 +179,13 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
       <div className="border-t border-line px-2 py-2">
         <LanesGauge lanes={lanes.data ?? []} />
         <Link
+          to="/organization"
+          onClick={onNavigate}
+          className={cx(ROW, "text-ink hover:bg-canvas", pathname === "/organization" && "bg-accent-soft")}
+        >
+          Organization
+        </Link>
+        <Link
           to="/office"
           onClick={onNavigate}
           className={cx(ROW, "justify-between text-ink hover:bg-canvas", pathname === "/office" && "bg-accent-soft")}

@@ -22,6 +22,8 @@ const (
 	RunOutput         Type = "run.output"
 	ApprovalRequested Type = "approval.requested"
 	ApprovalResolved  Type = "approval.resolved"
+	DepartmentUpdated Type = "department.updated"
+	ProjectUpdated    Type = "project.updated"
 	LaneUpdated       Type = "lane.updated"
 	LaneSwitched      Type = "lane.switched"
 	Notice            Type = "notice"
@@ -79,8 +81,18 @@ type LaneSwitchedPayload struct {
 
 // NoticePayload is the payload of a notice event.
 type NoticePayload struct {
-	Level string `json:"level"` // "info", "warn", "error"
-	Text  string `json:"text"`
+	Level  string        `json:"level"` // "info", "warn", "error"
+	Text   string        `json:"text"`
+	Action *NoticeAction `json:"action,omitempty"`
+}
+
+// NoticeAction is a button on a notice. Kind "assign" asks the Director to
+// assign the specialist Agent (a handle) to the project with handle Project.
+type NoticeAction struct {
+	Kind    string `json:"kind"`
+	Label   string `json:"label"`
+	Project string `json:"project"`
+	Agent   string `json:"agent"`
 }
 
 // Appender is the narrow interface the runner and lanes code use to record

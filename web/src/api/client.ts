@@ -1,5 +1,7 @@
 import type {
   Approval,
+  AssignBody,
+  AssignKind,
   CAInfo,
   Channel,
   ChannelCreate,
@@ -14,9 +16,11 @@ import type {
   Member,
   Message,
   MessageCreate,
+  Org,
   OutputPage,
   PairBody,
   PairingTicket,
+  Project,
   ReadCursor,
   ReadResult,
   ResolveBody,
@@ -61,6 +65,9 @@ export interface Api {
   retryRun: (id: ID, body?: RetryBody) => Promise<Run>
   approvals: (state?: Approval["state"]) => Promise<Approval[]>
   resolveApproval: (id: ID, body: ResolveBody) => Promise<Approval>
+  org: () => Promise<Org>
+  assign: (project: string, body: AssignBody) => Promise<Project>
+  unassign: (project: string, kind: AssignKind, handle: string) => Promise<Project>
   lanes: () => Promise<Lane[]>
   patchLane: (id: string, body: LanePatch) => Promise<Lane>
   probeLane: (id: string) => Promise<Lane>
@@ -128,6 +135,10 @@ export function createApi(options: ApiOptions = {}): Api {
     retryRun: (id, body = {}) => request("POST", `/runs/${encodeURIComponent(id)}/retry`, body),
     approvals: (state) => request("GET", query("/approvals", { state })),
     resolveApproval: (id, body) => request("POST", `/approvals/${encodeURIComponent(id)}/resolve`, body),
+    org: () => request("GET", "/org"),
+    assign: (project, body) => request("POST", `/projects/${encodeURIComponent(project)}/assignments`, body),
+    unassign: (project, kind, handle) =>
+      request("DELETE", `/projects/${encodeURIComponent(project)}/assignments/${kind}/${encodeURIComponent(handle)}`),
     lanes: () => request("GET", "/lanes"),
     patchLane: (id, body) => request("PATCH", `/lanes/${encodeURIComponent(id)}`, body),
     probeLane: (id) => request("POST", `/lanes/${encodeURIComponent(id)}/probe`),

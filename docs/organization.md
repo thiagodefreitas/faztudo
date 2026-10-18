@@ -6,6 +6,21 @@ lead. Teams are assigned to projects, and each project has its own channels.
 You talk to a specialist, a team or the whole office, and the work finds its
 way to the right agent.
 
+## What is built
+
+| piece | state |
+| :--- | :--- |
+| Departments and projects in `lanes.toml`, personas with description and standing instructions | built, see [configuration](configuration.md) |
+| `GET /api/v1/org`, and assigning or removing a department or specialist on a project (humans only) | built, see [API](api.md) |
+| In a project's channels only assigned agents run; others get a notice with an Assign button | built |
+| `@<department>` goes to its lead, `@<project>` to the project lead | built |
+| Organization page: the Director, departments, projects, assign and unassign | built |
+| Chief of Staff, delegation by leads, budgets, routines, templates | not built |
+| Working groups, drag-to-assign, lane budgets shared across projects | not built, next pass |
+| A project's `repo_path` choosing where runs happen | not built: runs use the channel's `repo_path` |
+
+The rest of this page describes where the design is going.
+
 ## Roles
 
 | role | who | does |
@@ -112,20 +127,24 @@ lead = "techlead"
 members = ["architect", "coder", "reviewer", "tester"]
 
 [[project]]
-name = "faztudo"
+handle = "faztudo"
+name = "Faztudo"
 repo_path = "~/code/faztudo"
 channels = ["faztudo-dev", "faztudo-release"]
-assigned = ["engineering", "writer"]
+departments = ["engineering"]
+specialists = ["writer"]
 
 [[project]]
-name = "launch"
+handle = "launch"
+name = "Launch"
 lead = "chief"                 # any specialist, a department lead, or the Chief of Staff
 channels = ["launch"]
-team = ["architect", "coder", "writer", "release"]   # drawn from three departments
+specialists = ["architect", "coder", "writer", "release"]   # drawn from three departments
 
-[[project.group]]
-handle = "perf-squad"
-members = ["coder", "tester"]
+# Not built yet:
+# [[project.group]]
+# handle = "perf-squad"
+# members = ["coder", "tester"]
 
 [[persona]]
 handle = "reviewer"

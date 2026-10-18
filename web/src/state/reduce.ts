@@ -4,6 +4,7 @@ import type {
   Lane,
   Member,
   Message,
+  NoticeAction,
   NoticeItem,
   OutputLine,
   Presence,
@@ -44,6 +45,15 @@ function record(value: unknown): Record<string, unknown> | null {
 
 function text(value: unknown): string | null {
   return typeof value === "string" ? value : null
+}
+
+function noticeAction(value: unknown): NoticeAction | null {
+  const action = record(value)
+  const label = text(action?.label)
+  const project = text(action?.project)
+  const agent = text(action?.agent)
+  if (action?.kind !== "assign" || !label || !project || !agent) return null
+  return { kind: "assign", label, project, agent }
 }
 
 function outputStream(value: unknown): "stdout" | "stderr" | null {
@@ -213,6 +223,7 @@ export function reduce(state: Snapshot, event: StreamEvent): Snapshot {
       const level = payload?.level
       const body = text(payload?.text)
       if ((level !== "info" && level !== "warn" && level !== "error") || !body) return next
+      const action = noticeAction(payload?.action)
       next.notices = [
         ...state.notices,
         {
@@ -221,6 +232,7 @@ export function reduce(state: Snapshot, event: StreamEvent): Snapshot {
           ts: event.ts,
           level,
           text: body,
+          ...(action ? { action } : {}),
         },
       ]
       return next

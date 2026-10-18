@@ -53,6 +53,7 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
   if (method === "GET" && parts[0] === "members" && parts.length === 1) return { status: 200, body: world.getMembers() }
   if (method === "GET" && parts[0] === "channels" && parts.length === 1) return { status: 200, body: world.getChannels() }
   if (method === "GET" && parts[0] === "lanes" && parts.length === 1) return { status: 200, body: world.getLanes() }
+  if (method === "GET" && parts[0] === "org" && parts.length === 1) return { status: 200, body: world.getOrg() }
 
   const parsed = jsonBody(rawBody)
   if (!parsed.ok) return send(parsed)
@@ -196,6 +197,27 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     const id = parts[1]
     if (!id) return send(err(404, "not_found", "lane not found"))
     return send(world.probeLane(id))
+  }
+
+  if (parts[0] === "projects" && parts[2] === "assignments") {
+    const project = parts[1]
+    if (!project) return send(err(404, "not_found", "resource not found"))
+    if (method === "POST" && parts.length === 3) {
+      const kind = text(body.kind)
+      const handle = text(body.handle)
+      if ((kind !== "department" && kind !== "specialist") || !handle) {
+        return send(err(400, "bad_request", "kind must be department or specialist"))
+      }
+      return send(world.assign(project, { kind, handle }))
+    }
+    if (method === "DELETE" && parts.length === 5) {
+      const kind = parts[3]
+      const handle = parts[4]
+      if ((kind !== "department" && kind !== "specialist") || !handle) {
+        return send(err(400, "bad_request", "kind must be department or specialist"))
+      }
+      return send(world.unassign(project, kind, handle))
+    }
   }
 
   if (parts[0] === "auth") {

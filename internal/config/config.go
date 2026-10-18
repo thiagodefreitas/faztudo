@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -70,12 +71,39 @@ type Persona struct {
 	Handle      string   `toml:"handle"`
 	DisplayName string   `toml:"display_name"`
 	Role        string   `toml:"role"`
+	Description string   `toml:"description"`
 	Mode        string   `toml:"mode"`
 	Lanes       []string `toml:"lanes"`
+	// Instructions are standing instructions added to every run prompt.
+	Instructions string `toml:"instructions"`
+}
+
+// Department is a team of personas with a lead. Lead and Members are persona
+// handles.
+type Department struct {
+	Handle      string   `toml:"handle"`
+	DisplayName string   `toml:"display_name"`
+	Lead        string   `toml:"lead"`
+	Members     []string `toml:"members"`
+}
+
+// Project groups channels (by name) and a repository. Departments and
+// Specialists are the initial assignments; the Director changes them later in
+// the app. Lead is the handle that @<project> goes to.
+type Project struct {
+	Handle      string   `toml:"handle"`
+	Name        string   `toml:"name"`
+	RepoPath    string   `toml:"repo_path"`
+	Lead        string   `toml:"lead"`
+	Channels    []string `toml:"channels"`
+	Departments []string `toml:"departments"`
+	Specialists []string `toml:"specialists"`
 }
 type LaneConfig struct {
-	Lane    []Lane    `toml:"lane"`
-	Persona []Persona `toml:"persona"`
+	Lane       []Lane       `toml:"lane"`
+	Persona    []Persona    `toml:"persona"`
+	Department []Department `toml:"department"`
+	Project    []Project    `toml:"project"`
 }
 type Config struct {
 	Server Server     `toml:"server"`
@@ -151,6 +179,21 @@ func (c Config) Validate() error {
 		}
 		seen[l.ID] = true
 	}
+	// Agents that can be named in departments and projects: personas and the
+	// CLIs of configured lanes. Every handle that follows an @ is unique.
+	agents := map[string]bool{}
+	handles := map[string]string{}
+	claim := func(kind, handle string) error {
+		if prev, dup := handles[strings.ToLower(handle)]; dup {
+			return fmt.Errorf("%s %q: handle already used by a %s", kind, handle, prev)
+		}
+		handles[strings.ToLower(handle)] = kind
+		return nil
+	}
+	for _, l := range c.Lanes.Lane {
+		agents[l.CLI] = true
+		handles[strings.ToLower(l.CLI)] = "agent"
+	}
 	for i, p := range c.Lanes.Persona {
 		if p.Handle == "" {
 			return fmt.Errorf("persona[%d].handle: required", i)
@@ -160,9 +203,48 @@ func (c Config) Validate() error {
 				return fmt.Errorf("persona[%d].lanes: unknown lane %s", i, id)
 			}
 		}
+		agents[p.Handle] = true
+		handles[strings.ToLower(p.Handle)] = "persona"
+	}
+	for i, d := range c.Lanes.Department {
+		if !handleName.MatchString(d.Handle) {
+			return fmt.Errorf("department[%d].handle: use letters, digits, - and _", i)
+		}
+		if err := claim("department", d.Handle); err != nil {
+			return fmt.Errorf("department[%d]: %w", i, err)
+		}
+		for _, h := range append([]string{d.Lead}, d.Members...) {
+			if h != "" && !agents[h] {
+				return fmt.Errorf("department[%d]: unknown agent %s", i, h)
+			}
+		}
+	}
+	departments := map[string]bool{}
+	for _, d := range c.Lanes.Department {
+		departments[d.Handle] = true
+	}
+	for i, p := range c.Lanes.Project {
+		if !handleName.MatchString(p.Handle) {
+			return fmt.Errorf("project[%d].handle: use letters, digits, - and _", i)
+		}
+		if err := claim("project", p.Handle); err != nil {
+			return fmt.Errorf("project[%d]: %w", i, err)
+		}
+		for _, h := range append([]string{p.Lead}, p.Specialists...) {
+			if h != "" && !agents[h] {
+				return fmt.Errorf("project[%d]: unknown agent %s", i, h)
+			}
+		}
+		for _, h := range p.Departments {
+			if !departments[h] {
+				return fmt.Errorf("project[%d]: unknown department %s", i, h)
+			}
+		}
 	}
 	return nil
 }
+
+var handleName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // IsStaleDefaultLane reports whether a stored lane is a detected-only
 // default (cli/default) left over from before lanes.toml configured a lane

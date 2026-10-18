@@ -48,6 +48,15 @@ describe("reduce", () => {
     expect(state.messages[channelId]?.[0]?.body).toBe("hello")
   })
 
+  it("keeps the assign action of a notice and drops a malformed one", () => {
+    const action = { kind: "assign", label: "Assign @reviewer to Faztudo", project: "faztudo", agent: "reviewer" }
+    let state = reduce(emptySnapshot(), envelope(1, "notice", { level: "warn", text: "not assigned", action }))
+    state = reduce(state, envelope(2, "notice", { level: "warn", text: "odd", action: { kind: "assign" } }))
+    expect(state.notices[0]?.action).toEqual(action)
+    expect(state.notices[1]?.text).toBe("odd")
+    expect(state.notices[1]?.action).toBeUndefined()
+  })
+
   it("upserts messages and edits them", () => {
     let state = reduce(emptySnapshot(), envelope(1, "message.posted", message))
     state = reduce(state, envelope(2, "message.posted", message))

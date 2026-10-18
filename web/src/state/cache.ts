@@ -45,6 +45,10 @@ function writeSnapshot(qc: QueryClient, snapshot: Snapshot): void {
 }
 
 export function applyEvent(qc: QueryClient, event: StreamEvent): void {
+  // The organization is not part of the snapshot: refetch it when it changes.
+  if (event.type === "project.updated" || event.type === "department.updated") {
+    void qc.invalidateQueries({ queryKey: qk.org })
+  }
   const prev = readSnapshot(qc)
   const next = reduce(prev, event)
   if (next === prev) return

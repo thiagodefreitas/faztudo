@@ -9,6 +9,7 @@ export type Presence = "online" | "idle" | "busy" | "offline"
 export interface AgentInfo {
   lanes: string[]
   role?: string
+  description?: string
   mode?: RunMode
 }
 
@@ -218,6 +219,8 @@ export type EventType =
   | "approval.resolved"
   | "lane.updated"
   | "lane.switched"
+  | "department.updated"
+  | "project.updated"
   | "notice"
 
 export interface StreamEvent<T = unknown> {
@@ -279,12 +282,52 @@ export interface LanePatch {
   }
 }
 
+// A button on a notice: "assign" lets the Director put `agent` (a handle)
+// into `project` (a handle).
+export interface NoticeAction {
+  kind: "assign"
+  label: string
+  project: string
+  agent: string
+}
+
 export interface NoticeItem {
   id: ID
   channel_id?: ID
   ts: string
   level: "info" | "warn" | "error"
   text: string
+  action?: NoticeAction
+}
+
+export interface Department {
+  handle: string
+  display_name: string
+  lead?: string
+  members: string[]
+}
+
+export interface Project {
+  handle: string
+  name: string
+  repo_path?: string
+  lead?: string
+  channels: string[]
+  departments: string[]
+  specialists: string[]
+}
+
+export interface Org {
+  director_id: ID
+  departments: Department[]
+  projects: Project[]
+}
+
+export type AssignKind = "department" | "specialist"
+
+export interface AssignBody {
+  kind: AssignKind
+  handle: string
 }
 
 export interface Device {

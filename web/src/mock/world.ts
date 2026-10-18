@@ -3,10 +3,13 @@ import { iso } from "../lib/time"
 import { ulid } from "../lib/id"
 import type {
   Approval,
+  AssignBody,
+  AssignKind,
   CAInfo,
   Channel,
   ChannelCreate,
   ChannelPatch,
+  Department,
   Device,
   DiffPage,
   Health,
@@ -17,10 +20,12 @@ import type {
   Member,
   Message,
   MessageCreate,
+  Org,
   OutputLine,
   OutputPage,
   PairBody,
   PairingTicket,
+  Project,
   ReadCursor,
   ReadResult,
   ResolveBody,
@@ -76,6 +81,12 @@ export class MockWorld {
   private subs = new Set<Subscriber>()
   private timers = new Map<string, Array<() => void>>()
   private idempotency = new Map<string, Message>()
+  private departments: Department[] = [
+    { handle: "engineering", display_name: "Engineering", lead: "coder", members: ["coder", "reviewer"] },
+  ]
+  private projects: Project[] = [
+    { handle: "faztudo", name: "Faztudo", channels: ["faztudo-dev"], departments: ["engineering"], specialists: [] },
+  ]
 
   constructor(private readonly clock: Clock) {
     const minute = 60_000
@@ -355,6 +366,35 @@ export class MockWorld {
 
   getLanes(): Lane[] {
     return structuredClone(this.lanes)
+  }
+
+  // The mock lists the organization and keeps assignments, but does not
+  // refuse mentions in project channels the way the daemon does.
+  getOrg(): Org {
+    return structuredClone({ director_id: this.me.id, departments: this.departments, projects: this.projects })
+  }
+
+  assign(project: string, body: AssignBody): Result<Project> {
+    const found = this.projects.find((item) => item.handle === project)
+    if (!found) return err(404, "not_found", "resource not found")
+    const known =
+      body.kind === "department"
+        ? this.departments.some((item) => item.handle === body.handle)
+        : this.members.some((item) => item.kind === "agent" && item.handle === body.handle)
+    if (!known) return err(400, "bad_request", `unknown ${body.kind} ${body.handle}`)
+    const list = body.kind === "department" ? found.departments : found.specialists
+    if (!list.includes(body.handle)) list.push(body.handle)
+    this.emit("project.updated", undefined, found, `human:${this.me.id}`)
+    return ok(structuredClone(found))
+  }
+
+  unassign(project: string, kind: AssignKind, handle: string): Result<Project> {
+    const found = this.projects.find((item) => item.handle === project)
+    if (!found) return err(404, "not_found", "resource not found")
+    if (kind === "department") found.departments = found.departments.filter((item) => item !== handle)
+    else found.specialists = found.specialists.filter((item) => item !== handle)
+    this.emit("project.updated", undefined, found, `human:${this.me.id}`)
+    return ok(structuredClone(found))
   }
 
   getMessages(channelId: ID, before?: ID, limit = 50): Result<Message[]> {

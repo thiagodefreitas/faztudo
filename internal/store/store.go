@@ -88,6 +88,16 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 4 {
+		migration, err = migrations.ReadFile("migrations/004.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db: db}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
@@ -235,7 +245,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes"} {
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -365,6 +375,26 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 			return errors.New("lane id required")
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO lanes(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", l.ID, e.Payload)
+		return err
+	case events.DepartmentUpdated:
+		var d domain.Department
+		if err := json.Unmarshal(e.Payload, &d); err != nil {
+			return err
+		}
+		if d.Handle == "" {
+			return errors.New("department handle required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('department',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", d.Handle, e.Payload)
+		return err
+	case events.ProjectUpdated:
+		var p domain.Project
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		if p.Handle == "" {
+			return errors.New("project handle required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('project',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", p.Handle, e.Payload)
 		return err
 	case events.Type("channel.read"):
 		var read struct {
@@ -541,6 +571,15 @@ func (s *Store) ResolveApproval(ctx context.Context, id, option, note, by string
 		return domain.Approval{}, storeError(err)
 	}
 	return approval, tx.Commit()
+}
+func (s *Store) Departments(ctx context.Context) ([]domain.Department, error) {
+	return queryJSON[domain.Department](ctx, s.db, "SELECT data FROM org WHERE kind='department' ORDER BY handle")
+}
+func (s *Store) Projects(ctx context.Context) ([]domain.Project, error) {
+	return queryJSON[domain.Project](ctx, s.db, "SELECT data FROM org WHERE kind='project' ORDER BY handle")
+}
+func (s *Store) Project(ctx context.Context, handle string) (domain.Project, error) {
+	return oneJSON[domain.Project](ctx, s.db, "SELECT data FROM org WHERE kind='project' AND handle=?", handle)
 }
 func (s *Store) Lanes(ctx context.Context) ([]domain.Lane, error) {
 	return queryJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes ORDER BY id")

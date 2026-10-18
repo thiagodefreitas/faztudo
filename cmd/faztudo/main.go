@@ -221,7 +221,7 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 		byHandle[cli] = m
 	}
 	for _, persona := range c.Lanes.Persona {
-		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: persona.Handle, DisplayName: persona.DisplayName, Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: persona.Lanes, Role: persona.Role, Mode: domain.RunMode(persona.Mode)}}
+		m := domain.Member{ID: store.NewID(), Kind: domain.MemberAgent, Handle: persona.Handle, DisplayName: persona.DisplayName, Presence: domain.PresenceOffline, Agent: &domain.AgentInfo{Lanes: persona.Lanes, Role: persona.Role, Description: persona.Description, Mode: domain.RunMode(persona.Mode)}}
 		if existing, ok := byHandle[persona.Handle]; ok {
 			m.ID = existing.ID
 		}
@@ -231,6 +231,9 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 		if _, err = s.Append(ctx, events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: m}); err != nil {
 			return "", err
 		}
+	}
+	if err = seedOrg(ctx, s, c); err != nil {
+		return "", err
 	}
 	channels, err := s.Channels(ctx)
 	if err != nil {
@@ -244,6 +247,45 @@ func seed(ctx context.Context, s *store.Store, c config.Config) (string, error) 
 	}
 	return humanID, nil
 }
+
+// seedOrg records the departments and projects from lanes.toml. Departments
+// follow the file. For a project that already exists, the file sets its name,
+// repository, lead and channels, while the assignments the Director made in
+// the app stay.
+func seedOrg(ctx context.Context, s *store.Store, c config.Config) error {
+	for _, d := range c.Lanes.Department {
+		dept := domain.Department{Handle: d.Handle, DisplayName: d.DisplayName, Lead: d.Lead, Members: orEmpty(d.Members)}
+		if dept.DisplayName == "" {
+			dept.DisplayName = d.Handle
+		}
+		if _, err := s.Append(ctx, events.Draft{Type: events.DepartmentUpdated, Actor: events.System, Payload: dept}); err != nil {
+			return err
+		}
+	}
+	for _, p := range c.Lanes.Project {
+		proj := domain.Project{Handle: p.Handle, Name: p.Name, RepoPath: p.RepoPath, Lead: p.Lead, Channels: orEmpty(p.Channels), Departments: orEmpty(p.Departments), Specialists: orEmpty(p.Specialists)}
+		if proj.Name == "" {
+			proj.Name = p.Handle
+		}
+		if cur, err := s.Project(ctx, p.Handle); err == nil {
+			proj.Departments, proj.Specialists = cur.Departments, cur.Specialists
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if _, err := s.Append(ctx, events.Draft{Type: events.ProjectUpdated, Actor: events.System, Payload: proj}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func orEmpty(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
+}
+
 func doctor(p config.Paths) error {
 	c, err := config.Load(p)
 	if err != nil {

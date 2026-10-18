@@ -27,7 +27,9 @@ const (
 type AgentInfo struct {
 	Lanes []string `json:"lanes"`
 	Role  string   `json:"role,omitempty"`
-	Mode  RunMode  `json:"mode,omitempty"`
+	// Description says what the specialist is for, shown on the Organization page.
+	Description string  `json:"description,omitempty"`
+	Mode        RunMode `json:"mode,omitempty"`
 }
 
 type Member struct {
@@ -38,6 +40,28 @@ type Member struct {
 	Avatar      string     `json:"avatar,omitempty"`
 	Agent       *AgentInfo `json:"agent,omitempty"`
 	Presence    Presence   `json:"presence"`
+}
+
+// Department is a named team of specialists with a lead. Lead and Members are
+// agent handles.
+type Department struct {
+	Handle      string   `json:"handle"`
+	DisplayName string   `json:"display_name"`
+	Lead        string   `json:"lead,omitempty"`
+	Members     []string `json:"members"`
+}
+
+// Project groups channels and a repository. Only the departments and
+// specialists assigned to it act in its channels. Channels are channel names;
+// Lead, Departments and Specialists are handles.
+type Project struct {
+	Handle      string   `json:"handle"`
+	Name        string   `json:"name"`
+	RepoPath    string   `json:"repo_path,omitempty"`
+	Lead        string   `json:"lead,omitempty"`
+	Channels    []string `json:"channels"`
+	Departments []string `json:"departments"`
+	Specialists []string `json:"specialists"`
 }
 
 type ChannelKind string

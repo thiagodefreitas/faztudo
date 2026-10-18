@@ -90,6 +90,49 @@ lanes = ["claude/opus", "codex/default"]
 mode = "read"
 ```
 
+A persona can also have a `description` (shown on the Organization page) and
+`instructions`: standing instructions that go at the top of every prompt that
+persona runs. Instructions stay in `lanes.toml`; they are not sent to the web
+app.
+
+### Departments and projects
+
+A department is a team of agents with a lead. A project groups channels and a
+repository, and has the departments and single specialists assigned to it.
+See [organization](organization.md) for the idea.
+
+```toml
+[[department]]
+handle = "engineering"          # @engineering goes to the lead
+display_name = "Engineering"
+lead = "coder"                  # a persona handle or a lane's CLI name
+members = ["coder", "reviewer"]
+
+[[project]]
+handle = "faztudo"              # @faztudo goes to the project lead
+name = "Faztudo"
+repo_path = "~/code/faztudo"    # shown on the Organization page; runs still use the channel's repo_path
+lead = "coder"                  # optional; always allowed in the project's channels
+channels = ["faztudo-dev"]      # channel names, matched exactly
+departments = ["engineering"]   # assigned at first start
+specialists = ["claude"]        # single agents assigned at first start
+```
+
+- Handles share one namespace with personas and CLI names, so a department or
+  project cannot be called `coder`. A bad name, an unknown lead or member, or
+  an unknown department fails startup with a message that names the entry.
+- `departments` and `specialists` on a project are the assignments the first
+  time faztudo sees the project. After that the Director's changes in the app
+  win, and editing the file does not undo them. Name, repository, lead and
+  channels follow the file. A department or project removed from the file
+  stays listed.
+- In a channel listed under a project, only the project's lead, its assigned
+  specialists, and the lead and members of its assigned departments run.
+  Mentioning anyone else posts a notice with an "Assign" button, which only the
+  Director can use. Channels that no project lists behave as before.
+- `@<department>` and `@<project>` start that group's lead. A project with no
+  `lead` answers with a notice instead.
+
 Supported `cli` values: `claude`, `codex`, `grok`, `kimi`, `agy`,
 `opencode`. Kimi and Antigravity have no read-only mode, so personas that
 use them must be `mode = "write"`. OpenCode's print mode produced no answer

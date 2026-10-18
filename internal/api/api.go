@@ -69,6 +69,7 @@ type API struct {
 	Now             func() time.Time
 	actorForRequest func(*http.Request) (domain.Member, error)
 	resolveMu       sync.Mutex
+	orgMu           sync.Mutex
 	streamsMu       sync.Mutex
 	streams         map[string]map[*streamHandle]struct{}
 }
@@ -116,6 +117,9 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/auth/ca", a.caInfo)
 	m.HandleFunc("GET /api/v1/me", a.me)
 	m.HandleFunc("GET /api/v1/members", a.members)
+	m.HandleFunc("GET /api/v1/org", a.org)
+	m.HandleFunc("POST /api/v1/projects/{project}/assignments", a.assign)
+	m.HandleFunc("DELETE /api/v1/projects/{project}/assignments/{kind}/{handle}", a.unassign)
 	m.HandleFunc("GET /api/v1/channels", a.channels)
 	m.HandleFunc("POST /api/v1/channels", a.createChannel)
 	m.HandleFunc("PATCH /api/v1/channels/{id}", a.patchChannel)
@@ -457,14 +461,10 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, v)
 }
-func mentioned(body string, members []domain.Member) ([]string, []domain.Member) {
-	byHandle := map[string]domain.Member{}
-	for _, m := range members {
-		byHandle[strings.ToLower(m.Handle)] = m
-	}
-	ids := []string{}
-	agents := []domain.Member{}
-	seen := map[string]bool{}
+
+// mentionHandles lists the lowercased @handles in a message body, in order.
+func mentionHandles(body string) []string {
+	var out []string
 	for i := 0; i < len(body); i++ {
 		if body[i] != '@' || (i > 0 && (unicode.IsLetter(rune(body[i-1])) || unicode.IsDigit(rune(body[i-1])))) {
 			continue
@@ -478,14 +478,27 @@ func mentioned(body string, members []domain.Member) ([]string, []domain.Member)
 				break
 			}
 		}
-		if m, ok := byHandle[strings.ToLower(body[i+1:j])]; ok && !seen[m.ID] {
+		out = append(out, strings.ToLower(body[i+1:j]))
+		i = j - 1
+	}
+	return out
+}
+func mentioned(body string, members []domain.Member) ([]string, []domain.Member) {
+	byHandle := map[string]domain.Member{}
+	for _, m := range members {
+		byHandle[strings.ToLower(m.Handle)] = m
+	}
+	ids := []string{}
+	agents := []domain.Member{}
+	seen := map[string]bool{}
+	for _, h := range mentionHandles(body) {
+		if m, ok := byHandle[h]; ok && !seen[m.ID] {
 			seen[m.ID] = true
 			ids = append(ids, m.ID)
 			if m.Kind == domain.MemberAgent {
 				agents = append(agents, m)
 			}
 		}
-		i = j - 1
 	}
 	return ids, agents
 }
@@ -523,6 +536,18 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids, agents := mentioned(v.Body, members)
+	departments, projects, e := a.orgData(r.Context())
+	if e != nil {
+		failErr(w, e)
+		return
+	}
+	leads, problems := groupLeads(v.Body, departments, projects, members)
+	for _, lead := range leads {
+		if !slices.Contains(ids, lead.ID) {
+			ids = append(ids, lead.ID)
+			agents = append(agents, lead)
+		}
+	}
 	if len(agents) == 0 {
 		agents = directAgent(c, members)
 	}
@@ -533,6 +558,24 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 		if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {
 			agents = []domain.Member{m}
 		}
+	}
+	// In a project's channel only assigned agents act. The others get a notice
+	// with an action that lets the Director assign them.
+	var notices []events.NoticePayload
+	for _, p := range problems {
+		notices = append(notices, events.NoticePayload{Level: "warn", Text: p})
+	}
+	if project, ok := projectOfChannel(projects, c.Name); ok {
+		var allowed, refused []domain.Member
+		for _, ag := range agents {
+			if assigned(project, departments, ag.Handle) {
+				allowed = append(allowed, ag)
+			} else {
+				refused = append(refused, ag)
+			}
+		}
+		agents = allowed
+		notices = append(notices, refusals(project, refused)...)
 	}
 	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, CreatedAt: time.Now().UTC()}
 	newMessageID := m.ID
@@ -551,6 +594,11 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if newMessageID == m.ID && isCommand(m.Body, "/lane") && len(ids) == 0 {
 		a.laneCommand(r.Context(), c, members, m.Body)
+	}
+	if newMessageID == m.ID {
+		for _, n := range notices {
+			_, _ = a.Store.Append(r.Context(), events.Draft{Type: events.Notice, Actor: events.System, ChannelID: c.ID, Payload: n})
+		}
 	}
 	if newMessageID == m.ID && isCommand(m.Body, "/status") {
 		if text, err := a.statusText(r.Context(), c.ID); err == nil {

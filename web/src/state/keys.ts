@@ -9,6 +9,7 @@ export const qk = {
   diff: (id: string) => ["diff", id] as const,
   approvals: ["approvals"] as const,
   lanes: ["lanes"] as const,
+  org: ["org"] as const,
   notices: ["notices"] as const,
   seq: ["seq"] as const,
   pending: (id: string) => ["pending", id] as const,

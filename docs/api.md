@@ -62,6 +62,7 @@ interface Member {
   agent?: {
     lanes: string[];        // ordered fallback chain of lane ids
     role?: string;          // short description shown in the UI
+    description?: string;   // longer description, shown on the Organization page
     mode?: "read" | "write"; // default mode for runs this agent starts
   };
   presence: "online" | "idle" | "busy" | "offline";
@@ -157,6 +158,43 @@ interface Lane {
 }
 ```
 
+```ts
+// Departments and projects come from lanes.toml; the Director changes the
+// assignments of a project through the API. handles are agent handles.
+interface Department {
+  handle: string;           // @engineering goes to its lead
+  display_name: string;
+  lead?: string;
+  members: string[];
+}
+
+interface Project {
+  handle: string;           // @launch goes to its lead
+  name: string;
+  repo_path?: string;
+  lead?: string;            // always allowed in the project's channels
+  channels: string[];       // channel names
+  departments: string[];    // assigned departments (the lead and members may act)
+  specialists: string[];    // assigned single agents
+}
+
+interface Org {
+  director_id: ID;
+  departments: Department[];
+  projects: Project[];
+}
+
+// A button on a notice. "assign" asks the Director to assign the specialist
+// `agent` to the project `project`: POST /api/v1/projects/{project}/assignments
+// with {kind: "specialist", handle: agent}.
+interface NoticeAction {
+  kind: "assign";
+  label: string;
+  project: string;
+  agent: string;
+}
+```
+
 ## Endpoints
 
 | method | path | does |
@@ -171,12 +209,15 @@ interface Lane {
 | GET | `/ca.crt` | download the local CA certificate in PEM format (also served on the port 7459 plain-HTTP CA helper) |
 | GET | `/api/v1/me` | the signed-in member |
 | GET | `/api/v1/members` | all members, humans and agents |
+| GET | `/api/v1/org` | `Org`: the Director's member id, the departments and the projects with their assignments |
+| POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
+| DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/channels` | channels the caller can see |
 | POST | `/api/v1/channels` | create `{name, kind, visibility, topic?, repo_path?, member_ids?}` |
 | PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, default_agent_id, lane_overrides, members; a non-empty `repo_path` must be a git work tree, a non-empty `default_agent_id` must be an agent member of the channel, and every `lane_overrides` entry must name an agent and one of its lanes (400 otherwise); `lane_overrides` replaces the whole map |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of top-level messages (thread replies excluded), newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
-| POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; a reply to a reply attaches to the thread root |
+| POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; `@<department>` triggers that department's lead and `@<project>` the project's lead; in a channel that belongs to a project only agents assigned to it run, and each other mentioned agent gets a `notice` with an `assign` action; a reply to a reply attaches to the thread root |
 | POST | `/api/v1/channels/{id}/read` | mark read up to `{seq}` (the channel's `last_seq`); `{event_id}` is also accepted |
 | GET | `/api/v1/runs?channel_id=&state=` | runs |
 | GET | `/api/v1/runs/{id}` | one run |
@@ -230,7 +271,9 @@ Event types in version 1:
 | `approval.requested`, `approval.resolved` | `Approval` |
 | `lane.updated` | `Lane` |
 | `lane.switched` | `{run_id, from, to, reason}` |
-| `notice` | `{level: "info" or "warn" or "error", text}` |
+| `department.updated` | `Department` |
+| `project.updated` | `Project` (sent when the Director changes an assignment) |
+| `notice` | `{level: "info" or "warn" or "error", text, action?: NoticeAction}` |
 
 Clients keep the `seq` of the last event they saw and pass it on reconnect,
 so nothing is lost while a phone sleeps. Events with the same `seq` are the
