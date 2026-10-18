@@ -26,12 +26,27 @@ import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 </div>
 
 <figure class="fz-shot">
-  <img src="/faztudo/images/chat.png" alt="A faztudo channel: a person asks for a change, the Coder agent's run passes its checks, the Reviewer agent's run fails with the test output shown" />
+  <img src="/faztudo/images/chat.png" alt="A faztudo channel: each run card opens with one plain sentence (Coder changed 1 file, tests passed; Reviewer failed with the test output), a live strip of who is working and what waits for you, and the sidebar grouped by project" />
 </figure>
 
 <div class="fz-shots">
-  <img src="/faztudo/images/office.png" alt="The office view: eleven desks in two pods, one agent working, one waiting with a raised hand for an approval, one out of quota, the Director's desk in front" />
-  <img src="/faztudo/images/inbox-phone.png" alt="The phone inbox: channels with their members' avatars and last messages" />
+  <img src="/faztudo/images/project-home.png" alt="A project home: what needs you, active runs, channels, team, recent merges and routines" />
+  <img src="/faztudo/images/chat-phone.png" alt="A channel on a phone, with run cards and quick actions" />
+</div>
+
+## The office
+
+Every agent has a desk. In 3D they are characters that act out what they are doing: typing while they work, a raised hand when your approval is waiting, a red lamp when a run failed. This is a 20 second tour of a real faztudo office while it was building itself.
+
+<figure class="fz-shot">
+  <video controls muted loop playsinline preload="metadata" poster="/faztudo/images/office-3d.png" width="1280" height="800">
+    <source src="/faztudo/media/office-tour.mp4" type="video/mp4" />
+  </video>
+</figure>
+
+<div class="fz-shots fz-shots-even">
+  <img src="/faztudo/images/office-2d.png" alt="The 2D office: personas and agent CLIs in pods, the Director in front, one approval waiting and one failed run" />
+  <img src="/faztudo/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" />
 </div>
 
 ## Why faztudo

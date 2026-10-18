@@ -80,6 +80,18 @@ to open its detail panel with its lane, quota health and current or last run,
 jump to a pending approval in its channel, or start a direct message.
 Personas and agent CLIs sit in separate pods, with the Director in front.
 
+The 3D view (the 3D toggle on the Office page) shows the same room with
+each agent as a character built from its avatar, acting out its state.
+
+![The 2D office](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/office-2d.png)
+
+![The 3D office](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/office-3d.png)
+
+Each project also has a home page with what needs you, active runs,
+channels, team, recent merges and routines:
+
+![A project home](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/project-home.png)
+
 ## Slash commands
 
 - `@coder /lane claude/opus fix the failing test` runs that one message on a

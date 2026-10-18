@@ -6,6 +6,10 @@ the [documentation site](https://thiagodefreitas.github.io/faztudo/) and in
 
 faztudo is pre-alpha. Pages say "planned" when a feature is not built yet.
 
+![A faztudo channel with run cards that open with a plain sentence](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/chat.png)
+
+See the office in motion: [20 second tour](https://thiagodefreitas.github.io/faztudo/#the-office).
+
 ## Using faztudo
 
 - [Using faztudo](Using-faztudo): channels, mentions, personas, avatars, the

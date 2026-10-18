@@ -46,3 +46,14 @@
 @media (max-width: 640px) {
   .fz-shots { grid-template-columns: 1fr; }
 }
+
+.fz-shot video {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+}
+.fz-shots-even { grid-template-columns: 1fr 1fr; }
+@media (max-width: 640px) {
+  .fz-shots-even { grid-template-columns: 1fr; }
+}

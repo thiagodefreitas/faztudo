@@ -16,11 +16,17 @@ approval before anything is merged.
 The name is Portuguese for "does everything". It does not, yet.
 
 <p align="center">
-  <img src="docs/images/chat.png" alt="A faztudo channel: a person asks for a change, the Coder agent's run passes its checks, the Reviewer agent's run fails with the test output shown" width="860">
+  <img src="docs/images/chat.png" alt="A faztudo channel: each run card opens with one plain sentence (Coder changed 1 file, tests passed; Reviewer failed with the test output), a live strip of who is working and what waits for you, and the sidebar grouped by project" width="860">
 </p>
 <p align="center">
-  <img src="docs/images/office.png" alt="The office view: eleven desks in two pods, one agent working, one waiting with a raised hand for an approval, one out of quota, the Director's desk in front" width="620">
-  <img src="docs/images/inbox-phone.png" alt="The phone inbox: channels with their members' avatars and last messages" width="200">
+  <a href="https://thiagodefreitas.github.io/faztudo/#the-office"><img src="docs/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" width="620"></a>
+  <img src="docs/images/chat-phone.png" alt="A channel on a phone, with run cards and quick actions" width="200">
+</p>
+<p align="center">
+  <a href="https://thiagodefreitas.github.io/faztudo/#the-office">Watch the 20 second office tour</a> --
+  <a href="docs/images/project-home.png">project home</a> --
+  <a href="docs/images/office-2d.png">2D office</a> --
+  <a href="docs/images/inbox-phone.png">phone inbox</a>
 </p>
 
 > **Status: pre-alpha, developed in the open, no release yet.** The chat,
