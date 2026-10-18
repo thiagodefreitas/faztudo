@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,6 +68,12 @@ func TestCodexUsesOuterSandboxOnly(t *testing.T) {
 }
 
 func TestVerificationReusesAgentScope(t *testing.T) {
+	// sandboxLaunch resolves both programs on PATH; CI runners lack bubblewrap.
+	for _, name := range []string{"bwrap", "systemd-run"} {
+		if _, err := exec.LookPath(name); err != nil {
+			t.Skipf("%s not installed", name)
+		}
+	}
 	opts := WriteOptions{MemoryMax: "4G", TasksMax: 512, scopeUsed: true}
 	path, args, err := sandboxLaunch([]string{"--unshare-all"}, &opts)
 	if err != nil || filepath.Base(path) != "systemd-run" || !strings.Contains(strings.Join(args, " "), "--property=MemoryMax=4G") || !strings.Contains(strings.Join(args, " "), "--property=TasksMax=512") || !strings.Contains(strings.Join(args, " "), "bwrap --unshare-all") {
