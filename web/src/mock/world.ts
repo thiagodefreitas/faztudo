@@ -390,6 +390,14 @@ export class MockWorld {
     }
     this.insertRun(asking)
     this.requestApproval(asking.id)
+    // A fuller organization for screenshots: Quality and Product next to
+    // Engineering, all on the faztudo project.
+    this.departments.push(
+      { handle: "quality", display_name: "Quality", lead: "reviewer", members: ["reviewer"] },
+      { handle: "product", display_name: "Product", lead: "architect", members: ["architect", "writer"] },
+    )
+    const project = this.projects.find((item) => item.handle === "faztudo")
+    if (project) project.departments = [...new Set([...project.departments, "quality", "product"])]
     const task = (title: string, assignee: string, status: Task["status"], order: number, runIds: string[] = []): Task => ({
       id: ulid(now),
       channel_id: IDS.dev,
