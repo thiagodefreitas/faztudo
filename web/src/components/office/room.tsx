@@ -37,7 +37,20 @@ function Shelf({ x }: { x: number }) {
   )
 }
 
-export function RoomBackdrop({ height, zones, rug }: { height: number; zones: PlacedZone[]; rug: Rect | null }) {
+export function RoomBackdrop({
+  width = ROOM_W,
+  height,
+  zones,
+  rug,
+}: {
+  width?: number
+  height: number
+  zones: PlacedZone[]
+  rug: Rect | null
+}) {
+  const compact = width < 640
+  const windows = compact ? [64, 240] : [70, 230, 390, 740, 900]
+  const shelves = compact ? [154] : [560, 1060]
   return (
     <g>
       <defs>
@@ -45,20 +58,18 @@ export function RoomBackdrop({ height, zones, rug }: { height: number; zones: Pl
           <path d="M40 0H0V40" fill="none" stroke="var(--color-line)" strokeWidth="1" strokeOpacity="0.45" />
         </pattern>
       </defs>
-      <rect width={ROOM_W} height={height} fill="var(--color-canvas)" />
-      <rect width={ROOM_W} height={height} fill="url(#office-grid)" />
+      <rect width={width} height={height} fill="var(--color-canvas)" />
+      <rect width={width} height={height} fill="url(#office-grid)" />
 
-      <rect width={ROOM_W} height={WALL_H} fill="var(--color-sidebar)" />
-      <rect y={WALL_H - 3} width={ROOM_W} height="3" fill="var(--color-line)" />
-      {[70, 230, 390].map((x) => (
+      <rect width={width} height={WALL_H} fill="var(--color-sidebar)" />
+      <rect y={WALL_H - 3} width={width} height="3" fill="var(--color-line)" />
+      {windows.map((x) => (
         <Window key={x} x={x} />
       ))}
-      <Shelf x={560} />
-      {[740, 900].map((x) => (
-        <Window key={x} x={x} />
+      {shelves.map((x) => (
+        <Shelf key={x} x={x} />
       ))}
-      <Shelf x={1060} />
-      <Plant x={36} y={WALL_H - 6} size={1.1} />
+      <Plant x={compact ? 26 : 36} y={WALL_H - 6} size={1.1} />
 
       {zones.map((zone) => (
         <g key={zone.id} data-testid={`zone-${zone.id}`}>
@@ -95,8 +106,8 @@ export function RoomBackdrop({ height, zones, rug }: { height: number; zones: Pl
         </g>
       )}
 
-      <Plant x={ROOM_W - 40} y={height - 22} size={1.2} />
-      <Plant x={40} y={height - 22} size={1.2} />
+      <Plant x={width - (compact ? 26 : 40)} y={height - 22} size={1.2} />
+      <Plant x={compact ? 26 : 40} y={height - 22} size={1.2} />
     </g>
   )
 }

@@ -1,10 +1,13 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 import { identityOf } from "../../lib/avatar"
+import { plainPreview } from "../../lib/inbox"
 import { useTheme, type ThemeChoice } from "../../lib/theme"
 import { formatElapsed } from "../../lib/time"
+import { qk } from "../../state/keys"
 import { useNow } from "../../state/now"
-import { useApprovals, useChannels, useLanes, useMembers, useRuns } from "../../state/queries"
-import type { Approval, Channel, ID, Lane, Member, Run, RunState } from "../../types"
+import { useApprovals, useChannels, useLanes, useLastMessages, useMembers, useOrg, useRuns } from "../../state/queries"
+import type { Approval, Channel, Department, ID, Lane, Member, Message, Org, Run, RunState } from "../../types"
 
 export const FAIL_WINDOW_MS = 10 * 60 * 1000
 
@@ -64,6 +67,7 @@ export interface DeskInfo {
   laneId: string | undefined
   outOfQuota: boolean
   currentRun: Run | null
+  runTitle: string | undefined
   pendingApproval: Approval | null
   approvalChannelId: ID | undefined
   elapsedText: string | undefined
@@ -76,6 +80,7 @@ export interface DeriveMemberDeskInput {
   runs: Run[]
   approvals: Approval[]
   lanes: Lane[]
+  triggerMessages?: ReadonlyMap<ID, string> | undefined
   now: number
   theme?: ThemeChoice
   members?: Member[]
@@ -86,6 +91,7 @@ export interface DeriveOfficeDesksInput {
   runs: Run[]
   approvals: Approval[]
   lanes: Lane[]
+  triggerMessages?: ReadonlyMap<ID, string> | undefined
   now: number
   theme?: ThemeChoice
 }
@@ -190,11 +196,27 @@ function isFailedWithinWindow(run: Run, now: number): boolean {
   return now - at <= FAIL_WINDOW_MS
 }
 
+export function formatRunTitle(body: string | undefined, maxWords = 6, maxChars = 38): string | undefined {
+  if (!body) return undefined
+  // Strip leading @mention or /lane <cli/name> override so the task words come first.
+  const cleaned = plainPreview(body)
+    .replace(/^(?:@\S+\s+|\/lane\s+\S+\/\S+\s+)+/i, "")
+    .trim()
+  const source = cleaned || plainPreview(body)
+  if (!source) return undefined
+  const words = source.split(/\s+/)
+  const joined = words.slice(0, maxWords).join(" ")
+  const truncatedWords = words.length > maxWords ? `${joined}...` : joined
+  if (truncatedWords.length <= maxChars) return truncatedWords
+  return `${truncatedWords.slice(0, maxChars - 3).trimEnd()}...`
+}
+
 export function deriveMemberDesk({
   member,
   runs,
   approvals,
   lanes,
+  triggerMessages,
   now,
   theme = "light",
   members = [],
@@ -247,6 +269,8 @@ export function deriveMemberDesk({
   const approvalChannelId = pendingApproval?.channel_id ?? waitingRun?.channel_id
   const elapsedText =
     state === "working" && workingRun ? formatElapsed(workingRun.started_at, undefined, now) : undefined
+  const triggerBody = currentRun ? triggerMessages?.get(currentRun.trigger_message_id) : undefined
+  const runTitle = formatRunTitle(triggerBody) ?? (pendingApproval ? formatRunTitle(pendingApproval.title) : undefined)
 
   return {
     member,
@@ -261,6 +285,7 @@ export function deriveMemberDesk({
     laneId: lane?.id ?? primaryLaneId,
     outOfQuota,
     currentRun,
+    runTitle,
     pendingApproval,
     approvalChannelId,
     elapsedText,
@@ -273,6 +298,7 @@ export function deriveOfficeDesks({
   runs,
   approvals,
   lanes,
+  triggerMessages,
   now,
   theme = "light",
 }: DeriveOfficeDesksInput): DeskInfo[] {
@@ -282,6 +308,7 @@ export function deriveOfficeDesks({
       runs,
       approvals,
       lanes,
+      triggerMessages,
       now,
       theme,
       members,
@@ -309,23 +336,52 @@ export function useReducedMotion(): boolean {
 export function useOfficeDesks(): {
   desks: DeskInfo[]
   channels: Channel[]
+  org: Org | undefined
+  departments: Department[]
   isPending: boolean
   now: number
   theme: ThemeChoice
 } {
+  const qc = useQueryClient()
   const members = useMembers()
   const runs = useRuns()
   const approvals = useApprovals()
   const lanes = useLanes()
   const channels = useChannels()
+  const org = useOrg()
   const now = useNow()
   const { choice: theme } = useTheme()
 
+  const runList = runs.data ?? []
+  const activeChannelIds = [
+    ...new Set(
+      runList
+        .filter((run) => ACTIVE_STATES.has(run.state))
+        .map((run) => run.channel_id),
+    ),
+  ]
+  // Ensure active channels' messages are fetched so trigger message bodies are available.
+  useLastMessages(activeChannelIds)
+
+  const triggerMessages = new Map<ID, string>()
+  const channelIds = new Set<ID>([
+    ...(channels.data ?? []).map((c) => c.id),
+    ...runList.map((r) => r.channel_id),
+  ])
+  for (const chId of channelIds) {
+    const msgs = qc.getQueryData<Message[]>(qk.messages(chId))
+    if (!msgs) continue
+    for (const msg of msgs) {
+      triggerMessages.set(msg.id, msg.body)
+    }
+  }
+
   const desks = deriveOfficeDesks({
     members: members.data ?? [],
-    runs: runs.data ?? [],
+    runs: runList,
     approvals: approvals.data ?? [],
     lanes: lanes.data ?? [],
+    triggerMessages,
     now,
     theme,
   })
@@ -333,6 +389,8 @@ export function useOfficeDesks(): {
   return {
     desks,
     channels: channels.data ?? [],
+    org: org.data,
+    departments: org.data?.departments ?? [],
     isPending: members.isPending && (members.data ?? []).length === 0,
     now,
     theme,

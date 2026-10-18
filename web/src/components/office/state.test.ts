@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Approval, Lane, Member, Run } from "../../types"
-import { deriveMemberDesk, deriveOfficeDesks, FAIL_WINDOW_MS, laneBorrower, resolveMemberHue } from "./state"
+import { deriveMemberDesk, deriveOfficeDesks, FAIL_WINDOW_MS, formatRunTitle, laneBorrower, resolveMemberHue } from "./state"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
 
@@ -98,20 +98,35 @@ describe("deriveMemberDesk", () => {
     expect(desk.initial).toBe("C")
     expect(desk.monogram).toBe("CL")
     expect(desk.outOfQuota).toBe(false)
+    expect(desk.runTitle).toBeUndefined()
   })
 
-  it("derives working state with elapsed time when a run is running or verifying", () => {
-    const running = makeRun({ state: "running", started_at: new Date(now - 85_000).toISOString() })
+  it("derives working state with elapsed time and runTitle from the trigger message", () => {
+    const running = makeRun({
+      state: "running",
+      trigger_message_id: "msg-trigger",
+      started_at: new Date(now - 85_000).toISOString(),
+    })
+    const triggerMessages = new Map([["msg-trigger", "@claude Refactor the office layout and add tests for pods"]])
     const desk = deriveMemberDesk({
       member: claudeAgent,
       runs: [running],
       approvals: [],
       lanes: [healthyLane],
+      triggerMessages,
       now,
     })
     expect(desk.state).toBe("working")
     expect(desk.elapsedText).toBe("1m 25s")
     expect(desk.currentRun?.id).toBe(running.id)
+    expect(desk.runTitle).toBe("Refactor the office layout and add...")
+  })
+
+  it("strips leading mentions and lane commands in formatRunTitle", () => {
+    expect(formatRunTitle("@coder /lane codex/default Fix the auth race condition in login")).toBe(
+      "Fix the auth race condition in...",
+    )
+    expect(formatRunTitle("Short task")).toBe("Short task")
   })
 
   it("derives queued state when a run is queued and none are working", () => {
@@ -140,6 +155,7 @@ describe("deriveMemberDesk", () => {
     expect(desk.state).toBe("waiting_approval")
     expect(desk.approvalChannelId).toBe("ch-review")
     expect(desk.pendingApproval?.id).toBe("app-1")
+    expect(desk.runTitle).toBe("Merge feature branch")
   })
 
   it("derives failed state only when the last terminal run failed within the 10 minute window", () => {

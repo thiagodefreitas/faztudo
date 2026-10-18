@@ -1,16 +1,20 @@
 import * as Dialog from "@radix-ui/react-dialog"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { motion } from "motion/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { api } from "../../api/client"
 import { cx } from "../../lib/cx"
 import { displayPct } from "../../lib/lane-format"
 import { primaryWindow } from "../../lib/lanes"
 import { formatAge, formatElapsed } from "../../lib/time"
 import { useOpenDirect } from "../../state/direct"
-import type { Channel, Member, RunState } from "../../types"
+import { qk } from "../../state/keys"
+import { replaceById } from "../../state/merge"
+import type { Approval, Channel, Department, Member, RunState } from "../../types"
+import { AgentAvatar } from "../agent-avatar"
 import { HealthBadge } from "../lanes"
 import { WorkspaceNav } from "../sidebar"
-import { AgentAvatar } from "../agent-avatar"
 import { avatarState } from "./avatar"
 import { DeskStateBadge, RoomDesk } from "./desk"
 import { layoutRoom } from "./layout"
@@ -46,7 +50,20 @@ const LEGEND = [
   { key: "quota", label: "Out of quota", dot: "bg-faint opacity-50" },
 ]
 
-function Legend() {
+export function useCompactRoom(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      if (typeof matchMedia !== "function") return () => undefined
+      const media = matchMedia("(max-width: 639px)")
+      media.addEventListener?.("change", listener)
+      return () => media.removeEventListener?.("change", listener)
+    },
+    () => typeof matchMedia === "function" && matchMedia("(max-width: 639px)").matches,
+    () => false,
+  )
+}
+
+export function Legend() {
   return (
     <ul
       aria-label="Legend"
@@ -65,22 +82,30 @@ function Legend() {
 export interface OfficeSceneProps {
   desks: DeskInfo[]
   channels: Channel[]
+  departments?: readonly Department[]
+  compact?: boolean
   now: number
   reducedMotion?: boolean
   initialSelectedId?: string
   onOpenApproval?: (desk: DeskInfo) => void
+  onResolveApproval?: (approval: Approval, option: string, commitMessage?: string) => void | Promise<unknown>
   onMessage?: (member: Member) => void
 }
 
 export function OfficeScene({
   desks,
   channels,
+  departments,
+  compact: compactProp,
   now,
   reducedMotion = false,
   initialSelectedId,
   onOpenApproval,
+  onResolveApproval,
   onMessage,
 }: OfficeSceneProps) {
+  const compactMedia = useCompactRoom()
+  const compact = compactProp ?? compactMedia
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
 
@@ -96,7 +121,7 @@ export function OfficeScene({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [selectedDesk])
 
-  const room = useMemo(() => layoutRoom(desks), [desks])
+  const room = useMemo(() => layoutRoom(desks, { departments, compact }), [desks, departments, compact])
 
   const counts = {
     working: desks.filter((desk) => desk.state === "working").length,
@@ -119,52 +144,56 @@ export function OfficeScene({
     <div className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 p-2 sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
-              <span className="font-medium text-ink">Studio floor</span>
-              <span className="font-mono text-faint">{desks.length} desks</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] tabular-nums">
-              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-accent">
-                {counts.working} working
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
+            <span className="font-medium text-ink">Studio floor</span>
+            <span className="font-mono text-faint">{desks.length} desks</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] tabular-nums">
+            <span className="rounded bg-accent-soft px-1.5 py-0.5 text-accent">
+              {counts.working} working
+            </span>
+            {counts.waiting > 0 && (
+              <span className="rounded bg-warn-soft px-1.5 py-0.5 text-warn">
+                {counts.waiting} waiting approval
               </span>
-              {counts.waiting > 0 && (
-                <span className="rounded bg-warn-soft px-1.5 py-0.5 text-warn">
-                  {counts.waiting} waiting approval
-                </span>
-              )}
-              {counts.queued > 0 && (
-                <span className="rounded bg-sidebar px-1.5 py-0.5 text-muted">
-                  {counts.queued} queued
-                </span>
-              )}
-              {counts.failed > 0 && (
-                <span className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">
-                  {counts.failed} failed
-                </span>
-              )}
-              {counts.outOfQuota > 0 && (
-                <span className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">
-                  {counts.outOfQuota} out of quota
-                </span>
-              )}
-            </div>
+            )}
+            {counts.queued > 0 && (
+              <span className="rounded bg-sidebar px-1.5 py-0.5 text-muted">
+                {counts.queued} queued
+              </span>
+            )}
+            {counts.failed > 0 && (
+              <span className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">
+                {counts.failed} failed
+              </span>
+            )}
+            {counts.outOfQuota > 0 && (
+              <span className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">
+                {counts.outOfQuota} out of quota
+              </span>
+            )}
+          </div>
         </div>
 
         {desks.length === 0 ? (
           <p className="py-12 text-center text-[13px] text-muted">No workspace members yet.</p>
         ) : (
           <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs">
-            {/* On a phone the room keeps a readable size and pans inside this box only. */}
-            <div data-testid="office-room" className="h-full overflow-x-auto overflow-y-hidden overscroll-x-contain">
+            {/* The back wall sits flush at the top (`xMidYMin meet`). On phones, pods reflow vertically inside this box. */}
+            <div
+              data-testid="office-room"
+              data-compact={compact ? "true" : "false"}
+              className="h-full overflow-x-hidden overflow-y-auto"
+            >
               <svg
                 viewBox={`0 0 ${room.width} ${room.height}`}
-                preserveAspectRatio="xMidYMid meet"
+                preserveAspectRatio="xMidYMin meet"
                 role="group"
                 aria-label="Office floor plan"
-                className="mx-auto block h-full w-full min-w-[760px] select-none sm:min-w-0"
+                className={cx("mx-auto block w-full select-none", compact ? "h-auto" : "h-full")}
               >
-                <RoomBackdrop height={room.height} zones={room.zones} rug={room.rug} />
+                <RoomBackdrop width={room.width} height={room.height} zones={room.zones} rug={room.rug} />
                 {room.seats.map((seat) => (
                   <RoomDesk
                     key={seat.desk.member.id}
@@ -172,6 +201,7 @@ export function OfficeScene({
                     x={seat.x}
                     y={seat.y}
                     scale={seat.scale}
+                    {...(seat.facing ? { facing: seat.facing } : {})}
                     selected={selectedDesk?.member.id === seat.desk.member.id}
                     reducedMotion={reducedMotion}
                     onSelect={handleSelect}
@@ -193,6 +223,7 @@ export function OfficeScene({
           reducedMotion={reducedMotion}
           onClose={() => setSelectedId(null)}
           onOpenApproval={onOpenApproval}
+          onResolveApproval={onResolveApproval}
           onMessage={onMessage}
         />
       )}
@@ -200,13 +231,14 @@ export function OfficeScene({
   )
 }
 
-function DeskDetailPanel({
+export function DeskDetailPanel({
   desk,
   channels,
   now,
   reducedMotion,
   onClose,
   onOpenApproval,
+  onResolveApproval,
   onMessage,
 }: {
   desk: DeskInfo
@@ -214,10 +246,12 @@ function DeskDetailPanel({
   now: number
   reducedMotion: boolean
   onClose: () => void
-  onOpenApproval: ((desk: DeskInfo) => void) | undefined
-  onMessage: ((member: Member) => void) | undefined
+  onOpenApproval?: ((desk: DeskInfo) => void) | undefined
+  onResolveApproval?: ((approval: Approval, option: string, commitMessage?: string) => void | Promise<unknown>) | undefined
+  onMessage?: ((member: Member) => void) | undefined
 }) {
-  const { member, lane, laneId, outOfQuota, currentRun, pendingApproval, approvalChannelId } = desk
+  const { member, lane, laneId, outOfQuota, currentRun, runTitle, pendingApproval, approvalChannelId } = desk
+  const [resolving, setResolving] = useState(false)
   const window = lane ? primaryWindow(lane) : undefined
   const pct = window && lane ? displayPct(window, lane.health) : undefined
   const runChannel = currentRun ? channels.find((item) => item.id === currentRun.channel_id) : undefined
@@ -226,6 +260,26 @@ function DeskDetailPanel({
   const runElapsed = currentRun
     ? formatElapsed(currentRun.started_at, runLive ? undefined : currentRun.ended_at, now)
     : undefined
+
+  const approvalOptions =
+    pendingApproval && pendingApproval.options.length > 0
+      ? pendingApproval.options
+      : [
+          { key: "merge", label: "Merge", style: "primary" as const },
+          { key: "keep", label: "Keep" },
+          { key: "discard", label: "Discard", style: "danger" as const },
+        ]
+
+  async function handleMiniResolve(option: string) {
+    if (!pendingApproval || !onResolveApproval) return
+    setResolving(true)
+    try {
+      const commitMessage = option === "merge" ? pendingApproval.commit_message : undefined
+      await onResolveApproval(pendingApproval, option, commitMessage)
+    } finally {
+      setResolving(false)
+    }
+  }
 
   const content = (
     <>
@@ -269,17 +323,43 @@ function DeskDetailPanel({
           </button>
         </div>
 
-        {/* Pending approval alert */}
+        {/* Mini approval card */}
         {(pendingApproval || (desk.state === "waiting_approval" && approvalChannelId)) && (
           <section
             aria-label="Pending approval"
+            data-testid="mini-approval-card"
             className="rounded-lg border border-warn/50 bg-warn-soft/50 p-3"
           >
             <p className="text-[11px] font-semibold uppercase tracking-wide text-warn">
               Waiting for approval
             </p>
             {pendingApproval && (
-              <p className="mt-1 text-[13px] font-medium text-ink">{pendingApproval.title}</p>
+              <>
+                <p className="mt-1 text-[13px] font-medium text-ink">{pendingApproval.title}</p>
+                {pendingApproval.detail && (
+                  <p className="mt-0.5 text-[12px] text-muted">{pendingApproval.detail}</p>
+                )}
+                {pendingApproval.state === "pending" && (
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {approvalOptions.map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        disabled={resolving}
+                        onClick={() => void handleMiniResolve(option.key)}
+                        className={cx(
+                          "min-h-8 rounded-md border px-2.5 text-[12px] font-medium disabled:opacity-50",
+                          option.style === "primary" && "border-accent bg-accent text-canvas hover:opacity-95",
+                          option.style === "danger" && "border-danger bg-surface text-danger hover:bg-danger-soft",
+                          !option.style && "border-line bg-surface text-ink hover:bg-canvas",
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
             {approvalChannelId && (
               <div className="mt-2 flex items-center gap-2">
@@ -344,6 +424,7 @@ function DeskDetailPanel({
           </h3>
           {currentRun ? (
             <div className="mt-2 flex flex-col gap-2">
+              {runTitle && <p className="text-[13px] font-medium text-ink">{runTitle}</p>}
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={cx(
@@ -413,21 +494,44 @@ function DeskDetailPanel({
   )
 }
 
+export function OfficeViewToggle({ mode }: { mode: "2d" | "3d" }) {
+  return (
+    <nav aria-label="Office view mode" className="ml-auto inline-flex items-center rounded-lg border border-line bg-sidebar p-0.5 text-[12px]">
+      <Link
+        to="/office"
+        aria-current={mode === "2d" ? "page" : undefined}
+        className={cx(
+          "rounded-md px-2.5 py-1 font-medium transition-colors",
+          mode === "2d" ? "bg-surface text-ink shadow-xs" : "text-muted hover:text-ink",
+        )}
+      >
+        2D
+      </Link>
+      <Link
+        to="/office/3d"
+        aria-current={mode === "3d" ? "page" : undefined}
+        className={cx(
+          "rounded-md px-2.5 py-1 font-medium transition-colors",
+          mode === "3d" ? "bg-surface text-ink shadow-xs" : "text-muted hover:text-ink",
+        )}
+      >
+        3D
+      </Link>
+    </nav>
+  )
+}
+
 export function OfficePage() {
-  const { desks, channels, isPending, now } = useOfficeDesks()
+  const { desks, channels, departments, isPending, now } = useOfficeDesks()
   const reducedMotion = useReducedMotion()
   const openDirect = useOpenDirect()
-  const navigate = useNavigate()
+  const qc = useQueryClient()
   const [navOpen, setNavOpen] = useState(false)
 
-  function handleOpenApproval(desk: DeskInfo) {
-    const channelId = desk.approvalChannelId ?? desk.currentRun?.channel_id
-    if (!channelId) return
-    void navigate({
-      to: "/c/$channelId",
-      params: { channelId },
-      search: desk.currentRun ? { run: desk.currentRun.id } : {},
-    })
+  async function handleResolveApproval(approval: Approval, option: string, commitMessage?: string) {
+    const body = commitMessage ? { option, commit_message: commitMessage } : { option }
+    const next = await api.resolveApproval(approval.id, body)
+    qc.setQueryData<Approval[]>(qk.approvals, (list = []) => replaceById(list, next))
   }
 
   function handleMessage(member: Member) {
@@ -451,6 +555,7 @@ export function OfficePage() {
         </Dialog.Root>
         <h1 className="text-[15px] font-semibold">Office</h1>
         <p className="font-mono text-[12px] text-muted">{desks.length} desks</p>
+        <OfficeViewToggle mode="2d" />
       </header>
       {isPending ? (
         <p className="p-4 text-[13px] text-muted">Loading office</p>
@@ -458,9 +563,10 @@ export function OfficePage() {
         <OfficeScene
           desks={desks}
           channels={channels}
+          departments={departments}
           now={now}
           reducedMotion={reducedMotion}
-          onOpenApproval={handleOpenApproval}
+          onResolveApproval={handleResolveApproval}
           onMessage={handleMessage}
         />
       )}

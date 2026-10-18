@@ -125,36 +125,50 @@ const SCREEN_STROKE: Partial<Record<DeskState, string>> = {
   failed: "var(--color-danger)",
 }
 
+function seedFromId(id: string): number {
+  let hash = 0
+  for (let i = 0; i < id.length; i += 1) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
 // One compact desk of the room, drawn in a 120x108 box at (x, y). The avatar
-// sits above the desk edge and the name under the desk.
+// sits above the desk edge (or below when facing up, as the Director does) and
+// the name sits under the desk.
 export function RoomDesk({
   desk,
   x,
   y,
   scale,
+  facing = "down",
   selected,
   reducedMotion,
   onSelect,
   onOpenApproval,
-}: OfficeDeskProps & { x: number; y: number; scale: number }) {
-  const { member, state, stateLabel, outOfQuota, elapsedText } = desk
+}: OfficeDeskProps & { x: number; y: number; scale: number; facing?: "up" | "down" }) {
+  const { member, state, stateLabel, outOfQuota, elapsedText, runTitle } = desk
   const hue = hueVars(desk)
   const dimmed = state === "out_of_quota" || outOfQuota
   const animate = state === "working" && !reducedMotion
+  const idleGlance = state === "idle" && !dimmed && !reducedMotion
   const screenStroke = state === "working" ? hue.accent : (SCREEN_STROKE[state] ?? "var(--color-line)")
   const lineStroke = state === "working" ? hue.accent : (SCREEN_STROKE[state] ?? "var(--color-faint)")
   const lit = state === "working" || state === "waiting_approval" || state === "failed"
+  const faceUp = facing === "up"
+  const glanceDelay = (seedFromId(member.id) % 7) * 0.45
 
   const ariaParts = [member.display_name, stateLabel]
   if (state === "working" && elapsedText) ariaParts.push(`elapsed ${elapsedText}`)
   if (dimmed && state !== "out_of_quota") ariaParts.push("out of quota")
   const busyFor = desk.busyFor
   if (busyFor) ariaParts.push(`busy for @${busyFor.handle}`)
-  const hoverTitle = busyFor
+  const baseHover = busyFor
     ? `${member.display_name} - busy for @${busyFor.handle}`
     : state === "working" && elapsedText
       ? `${member.display_name} - working (${elapsedText})`
       : `${member.display_name} - ${stateLabel}`
+  const hoverTitle = runTitle ? `${baseHover}: ${runTitle}` : baseHover
 
   function handleApprovalClick(event: MouseEvent<SVGGElement>) {
     event.stopPropagation()
@@ -178,6 +192,7 @@ export function RoomDesk({
         data-state={state}
         data-busy-for={busyFor?.handle}
         data-director={desk.isDirector ? "true" : "false"}
+        data-facing={facing}
         data-out-of-quota={dimmed ? "true" : "false"}
         onClick={() => onSelect(desk)}
         onKeyDown={handleKeyDown}
@@ -212,19 +227,19 @@ export function RoomDesk({
 
         <g className="transition-transform duration-150 ease-out group-hover:-translate-y-[3px] motion-reduce:transition-none">
           <g opacity={dimmed ? 0.5 : 1}>
-            {/* A front lip under the top gives the slight 3/4 view. */}
-            <rect x="10" y="36" width="104" height="36" rx="8" fill="var(--color-ink)" fillOpacity="0.07" />
-            <rect x="8" y="38" width="104" height="34" rx="8" fill="var(--color-sidebar)" stroke="var(--color-line)" />
-            <rect x="8" y="32" width="104" height="34" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
-            <path d="M22 34.5H98" stroke={hue.accent} strokeWidth="2.5" strokeLinecap="round" />
-            <rect x="16" y="42" width="14" height="16" rx="2.5" fill="var(--color-canvas)" stroke="var(--color-line)" />
-            <circle cx="98" cy="50" r="5" fill={hue.soft} stroke={hue.accent} strokeWidth="1.2" />
+            {/* A front lip gives the slight 3/4 view; when facing up (Director), the desk sits near the top and faces into the room. */}
+            <rect x="10" y={faceUp ? "14" : "36"} width="104" height="36" rx="8" fill="var(--color-ink)" fillOpacity="0.07" />
+            <rect x="8" y={faceUp ? "16" : "38"} width="104" height="34" rx="8" fill="var(--color-sidebar)" stroke="var(--color-line)" />
+            <rect x="8" y={faceUp ? "10" : "32"} width="104" height="34" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
+            <path d={faceUp ? "M22 41.5H98" : "M22 34.5H98"} stroke={hue.accent} strokeWidth="2.5" strokeLinecap="round" />
+            <rect x="16" y={faceUp ? "18" : "42"} width="14" height="16" rx="2.5" fill="var(--color-canvas)" stroke="var(--color-line)" />
+            <circle cx="98" cy={faceUp ? "26" : "50"} r="5" fill={hue.soft} stroke={hue.accent} strokeWidth="1.2" />
 
             {state === "working" && (
               <motion.ellipse
                 data-testid={`monitor-glow-${member.id}`}
                 cx="60"
-                cy="50"
+                cy={faceUp ? 26 : 50}
                 rx="36"
                 ry="16"
                 fill={hue.accent}
@@ -234,10 +249,10 @@ export function RoomDesk({
               />
             )}
 
-            <rect x="56" y="54" width="8" height="3" fill="var(--color-line)" />
+            <rect x="56" y={faceUp ? "32" : "54"} width="8" height="3" fill="var(--color-line)" />
             <rect
               x="44"
-              y="39"
+              y={faceUp ? "17" : "39"}
               width="32"
               height="16"
               rx="3.5"
@@ -248,28 +263,56 @@ export function RoomDesk({
             {state === "working" ? (
               <g data-testid={`monitor-lines-${member.id}`}>
                 <motion.path
-                  d="M49 44H66"
+                  d={faceUp ? "M49 22H66" : "M49 44H66"}
                   stroke={lineStroke}
                   strokeWidth="1.8"
                   strokeLinecap="round"
                   animate={animate ? { opacity: [0.4, 1, 0.4] } : undefined}
                   transition={animate ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : undefined}
                 />
-                <path d="M49 49H60" stroke="var(--color-muted)" strokeWidth="1.5" strokeLinecap="round" />
+                <path d={faceUp ? "M49 27H60" : "M49 49H60"} stroke="var(--color-muted)" strokeWidth="1.5" strokeLinecap="round" />
               </g>
             ) : (
               <g strokeLinecap="round" strokeWidth="1.5" stroke={lineStroke} strokeOpacity="0.6">
-                <path d="M49 44H68" />
-                <path d="M49 49H60" />
+                <path d={faceUp ? "M49 22H68" : "M49 44H68"} />
+                <path d={faceUp ? "M49 27H60" : "M49 49H60"} />
               </g>
             )}
-            <rect x="47" y="59" width="26" height="5" rx="2" fill="var(--color-canvas)" stroke="var(--color-line)" />
+            <rect x="47" y={faceUp ? "35" : "59"} width="26" height="5" rx="2" fill="var(--color-canvas)" stroke="var(--color-line)" />
+
+            {/* Small progress pulse on the desk front while running. */}
+            {state === "working" && (
+              <g data-testid={`progress-pulse-${member.id}`} data-animated={animate ? "true" : "false"}>
+                <rect x="34" y={faceUp ? "12" : "66"} width="52" height="3" rx="1.5" fill={hue.soft} />
+                <motion.rect
+                  x="34"
+                  y={faceUp ? "12" : "66"}
+                  width="22"
+                  height="3"
+                  rx="1.5"
+                  fill={hue.accent}
+                  animate={animate ? { x: [34, 64, 34], opacity: [0.65, 1, 0.65] } : undefined}
+                  transition={animate ? { duration: 1.5, repeat: Infinity, ease: "easeInOut" } : undefined}
+                />
+              </g>
+            )}
           </g>
 
-          <foreignObject x="42" y="2" width="36" height="36">
-            <div style={{ width: 36, height: 36 }} className="flex items-center justify-center">
+          <foreignObject x="42" y={faceUp ? "38" : "2"} width="36" height="36">
+            <motion.div
+              data-testid={`desk-avatar-${member.id}`}
+              data-glance={idleGlance ? "true" : "false"}
+              style={{ width: 36, height: 36 }}
+              className="flex items-center justify-center"
+              animate={idleGlance ? { x: [0, 0, -1.5, 1.5, 0, 0] } : undefined}
+              transition={
+                idleGlance
+                  ? { duration: 5.2, delay: glanceDelay, repeat: Infinity, ease: "easeInOut", times: [0, 0.68, 0.76, 0.86, 0.94, 1] }
+                  : undefined
+              }
+            >
               <AgentAvatar member={member} size={36} state={avatarState(state)} decorative className="h-full w-full" />
-            </div>
+            </motion.div>
           </foreignObject>
 
           {busyFor && (
@@ -291,7 +334,7 @@ export function RoomDesk({
             <g data-testid={`typing-hands-${member.id}`} data-animated={animate ? "true" : "false"}>
               <motion.circle
                 cx="52"
-                cy="58"
+                cy={faceUp ? 36 : 58}
                 r="3"
                 fill={hue.accent}
                 animate={animate ? { y: [0, -2.5, 0] } : undefined}
@@ -299,7 +342,7 @@ export function RoomDesk({
               />
               <motion.circle
                 cx="68"
-                cy="58"
+                cy={faceUp ? 36 : 58}
                 r="3"
                 fill={hue.accent}
                 animate={animate ? { y: [-2.5, 0, -2.5] } : undefined}
@@ -349,13 +392,33 @@ export function RoomDesk({
               <path d="M-3 -3L3 3M3 -3L-3 3" stroke="var(--color-danger)" strokeWidth="1.5" strokeLinecap="round" />
             </g>
           )}
+
+          {runTitle && (
+            <g
+              data-testid={`run-title-${member.id}`}
+              className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
+            >
+              <rect
+                x="4"
+                y="90"
+                width="112"
+                height="16"
+                rx="6"
+                fill="var(--color-surface)"
+                stroke="var(--color-line)"
+              />
+              <text x="60" y="101" textAnchor="middle" fontSize="8.5" fill="var(--color-muted)">
+                {clip(runTitle, 24)}
+              </text>
+            </g>
+          )}
         </g>
 
         <text x="60" y="86" textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--color-ink)">
           {clip(member.display_name, 16)}
         </text>
         {dimmed && (
-          <g data-testid={`quota-tag-${member.id}`}>
+          <g data-testid={`quota-tag-${member.id}`} className={runTitle ? "group-hover:opacity-0" : undefined}>
             <rect x="32" y="91" width="56" height="13" rx="6.5" fill="var(--color-danger-soft)" stroke="var(--color-danger)" strokeOpacity="0.5" />
             <text x="60" y="100.5" textAnchor="middle" fontSize="8" fontWeight="600" fill="var(--color-danger)">
               out of quota

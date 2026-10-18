@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { Approval, Channel, Lane, Member, Run } from "../../types"
+import type { Approval, Channel, Department, Lane, Member, Run } from "../../types"
 import { OfficeScene, type OfficeSceneProps } from "./scene"
 import { deriveOfficeDesks } from "./state"
 
@@ -124,7 +124,12 @@ const approvals: Approval[] = [
     requested_by: "m-codex",
     title: "Approve migration commit",
     detail: "Adds office route",
-    options: [{ key: "merge", label: "Merge", style: "primary" }],
+    commit_message: "feat: add office route",
+    options: [
+      { key: "merge", label: "Merge", style: "primary" },
+      { key: "keep", label: "Keep" },
+      { key: "discard", label: "Discard", style: "danger" },
+    ],
     state: "pending",
   },
 ]
@@ -148,8 +153,13 @@ const channels: Channel[] = [
   },
 ]
 
+const triggerMessages = new Map([
+  ["msg-1", "@claude Redesign the 2D floor plan and add department pods"],
+  ["msg-2", "@codex Ship the migration commit for the office route"],
+])
+
 async function renderScene(overrides: Partial<OfficeSceneProps> = {}) {
-  const desks = deriveOfficeDesks({ members, runs, approvals, lanes, now })
+  const desks = deriveOfficeDesks({ members, runs, approvals, lanes, triggerMessages, now })
   const props: OfficeSceneProps = {
     desks,
     channels,
@@ -185,10 +195,11 @@ async function renderScene(overrides: Partial<OfficeSceneProps> = {}) {
 }
 
 describe("OfficeScene", () => {
-  it("renders accessible desk buttons, states, side panel details, and approval/DM actions", async () => {
+  it("renders accessible desk buttons, states, run titles, progress pulse, side panel mini approval card, and DM actions", async () => {
     const onOpenApproval = vi.fn()
+    const onResolveApproval = vi.fn()
     const onMessage = vi.fn()
-    await renderScene({ onOpenApproval, onMessage })
+    await renderScene({ onOpenApproval, onResolveApproval, onMessage })
 
     // Accessible desk buttons with name and state
     const directorBtn = screen.getByRole("button", { name: "Thiago Director, idle" })
@@ -197,17 +208,29 @@ describe("OfficeScene", () => {
     const grokBtn = screen.getByRole("button", { name: "Grok, out of quota" })
 
     expect(directorBtn).toHaveAttribute("data-director", "true")
+    expect(directorBtn).toHaveAttribute("data-facing", "up")
     expect(claudeBtn).toHaveAttribute("data-state", "working")
     expect(codexBtn).toHaveAttribute("data-state", "waiting_approval")
     expect(screen.getByTestId("monitor-glow-m-claude")).toBeInTheDocument()
+    expect(screen.getByTestId("progress-pulse-m-claude")).toBeInTheDocument()
+    expect(screen.getByTestId("run-title-m-claude")).toHaveTextContent("Redesign the 2D floor...")
     expect(screen.getByTestId("elapsed-m-claude")).toHaveTextContent("1m 35s")
     expect(grokBtn).toHaveAttribute("data-out-of-quota", "true")
     expect(screen.getByTestId("quota-tag-m-grok")).toHaveTextContent("out of quota")
 
-    // Clicking the raised-hand badge opens the channel at that approval
+    // Clicking the raised-hand badge opens the mini approval card in the side panel
     fireEvent.click(screen.getByTestId("raised-hand-badge-m-codex"))
     expect(onOpenApproval).toHaveBeenCalledTimes(1)
     expect(onOpenApproval.mock.calls[0]?.[0]?.approvalChannelId).toBe("ch-ship")
+
+    const miniCard = screen.getByTestId("mini-approval-card")
+    expect(miniCard).toHaveTextContent("Approve migration commit")
+    fireEvent.click(within(miniCard).getByRole("button", { name: "Merge" }))
+    expect(onResolveApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "app-ship" }),
+      "merge",
+      "feat: add office route",
+    )
 
     // Clicking a desk opens the side panel with member, lane/health, current run, and Message button
     fireEvent.click(claudeBtn)
@@ -215,6 +238,7 @@ describe("OfficeScene", () => {
     expect(panel).toHaveTextContent("claude/opus")
     expect(panel).toHaveTextContent("Available")
     expect(panel).toHaveTextContent("Running")
+    expect(panel).toHaveTextContent("Redesign the 2D floor plan and...")
     expect(panel).toHaveTextContent("Open in #build")
 
     fireEvent.click(screen.getByRole("button", { name: "Message" }))
@@ -260,6 +284,22 @@ describe("OfficeScene", () => {
 
     const order = screen.getAllByRole("button").map((button) => button.getAttribute("data-testid"))
     expect(order.slice(0, 5)).toEqual(["desk-m-coder", "desk-m-claude", "desk-m-codex", "desk-m-grok", "desk-m-director"])
+  })
+
+  it("groups desks by department when departments are provided and respects reducedMotion for subtle life", async () => {
+    const departments: Department[] = [
+      {
+        handle: "eng",
+        display_name: "Engineering",
+        lead: "claude",
+        members: ["coder", "codex"],
+      },
+    ]
+    await renderScene({ departments, reducedMotion: false })
+
+    expect(within(screen.getByTestId("zone-dept-eng")).getByText("Engineering")).toBeInTheDocument()
+    expect(screen.getByTestId("desk-avatar-m-coder")).toHaveAttribute("data-glance", "true")
+    expect(screen.getByTestId("typing-hands-m-claude")).toHaveAttribute("data-animated", "true")
   })
 
   it("selects a desk with the keyboard", async () => {

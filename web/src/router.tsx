@@ -137,12 +137,31 @@ const officeRoute = createRoute({
         context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
         context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
         context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.org, queryFn: () => api.org() }),
         context.queryClient.ensureQueryData({ queryKey: qk.lanes, queryFn: () => api.lanes() }),
         context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
         context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
       ]),
     ),
   component: lazyRouteComponent(() => import("./components/office/scene"), "OfficePage"),
+})
+
+const office3dRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/office/3d",
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.org, queryFn: () => api.org() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.lanes, queryFn: () => api.lanes() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
+      ]),
+    ),
+  component: lazyRouteComponent(() => import("./components/office/office3d/scene3d"), "Office3DPage"),
 })
 
 const organizationRoute = createRoute({
@@ -184,6 +203,7 @@ const routeTree = rootRoute.addChildren([
   channelRoute,
   lanesRoute,
   officeRoute,
+  office3dRoute,
   organizationRoute,
   routinesRoute,
 ])

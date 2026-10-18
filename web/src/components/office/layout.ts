@@ -1,15 +1,18 @@
 import { identityOf } from "../../lib/avatar"
+import type { Department } from "../../types"
 import type { DeskInfo } from "./state"
 
 // The room is one SVG. Everything here is in its user units, so the picture
 // scales with the viewport and the layout stays plain arithmetic.
 export const ROOM_W = 1200
+export const COMPACT_ROOM_W = 390
 export const WALL_H = 64
 export const DESK_W = 120
 export const DESK_H = 108
 export const DIRECTOR_SCALE = 1.2
 
 const MARGIN = 40
+const COMPACT_MARGIN = 18
 const ZONE_PAD = 20
 const ZONE_HEAD = 30
 const ZONE_GAP = 24
@@ -29,14 +32,57 @@ export interface ZoneSpec {
   desks: DeskInfo[]
 }
 
-// A zone is a named area of the floor made of pods. Personas and raw CLIs are
-// the two zones today; a team or a department can become one more ZoneSpec
-// without touching the placement code below.
-export function zonesOf(desks: DeskInfo[]): ZoneSpec[] {
+function sameHandle(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
+function departmentHandles(department: Department): string[] {
+  const lead = department.lead?.trim()
+  const members = department.members.filter((m) => !lead || !sameHandle(m, lead))
+  return [...(lead ? [lead] : []), ...members]
+}
+
+// A zone is a named area of the floor made of pods. When the org defines
+// departments, each department becomes a zone with its name on the floor,
+// followed by any unassigned Personas and Agents.
+export function zonesOf(desks: DeskInfo[], departments?: readonly Department[]): ZoneSpec[] {
   const members = desks.filter((desk) => !desk.isDirector)
-  const personas = members.filter((desk) => identityOf(desk.member).role !== null)
-  const clis = members.filter((desk) => identityOf(desk.member).role === null)
+  if (!departments || departments.length === 0) {
+    const personas = members.filter((desk) => identityOf(desk.member).role !== null)
+    const clis = members.filter((desk) => identityOf(desk.member).role === null)
+    const zones: ZoneSpec[] = [
+      { id: "personas", label: "Personas", desks: personas },
+      { id: "agents", label: "Agents", desks: clis },
+    ]
+    return zones.filter((zone) => zone.desks.length > 0)
+  }
+
+  const assignedIds = new Set<string>()
+  const deptZones: ZoneSpec[] = []
+  for (const dept of departments) {
+    const handles = departmentHandles(dept)
+    const deptDesks: DeskInfo[] = []
+    for (const handle of handles) {
+      const desk = members.find((d) => !assignedIds.has(d.member.id) && sameHandle(d.member.handle, handle))
+      if (desk) {
+        assignedIds.add(desk.member.id)
+        deptDesks.push(desk)
+      }
+    }
+    if (deptDesks.length > 0) {
+      deptZones.push({
+        id: `dept-${dept.handle.toLowerCase()}`,
+        label: dept.display_name || dept.handle,
+        desks: deptDesks,
+      })
+    }
+  }
+
+  const remaining = members.filter((desk) => !assignedIds.has(desk.member.id))
+  const personas = remaining.filter((desk) => identityOf(desk.member).role !== null)
+  const clis = remaining.filter((desk) => identityOf(desk.member).role === null)
   const zones: ZoneSpec[] = [
+    ...deptZones,
     { id: "personas", label: "Personas", desks: personas },
     { id: "agents", label: "Agents", desks: clis },
   ]
@@ -55,6 +101,7 @@ export interface Seat {
   x: number
   y: number
   scale: number
+  facing?: "up" | "down"
 }
 
 export interface PlacedZone extends Rect {
@@ -71,6 +118,11 @@ export interface RoomLayout {
   // then the Director at the front of the room.
   seats: Seat[]
   rug: Rect | null
+}
+
+export interface LayoutRoomOptions {
+  departments?: readonly Department[] | undefined
+  compact?: boolean | undefined
 }
 
 function podHeight(count: number): number {
@@ -111,11 +163,13 @@ function boxZone(spec: ZoneSpec, maxCols: number): ZoneBox {
       const pod = { x: ZONE_PAD + col * (POD_W + POD_GAP), y, w: POD_W, h: podHeight(members.length) }
       placedPods.push(pod)
       members.forEach((desk, i) => {
+        const podRow = Math.floor(i / POD_COLS)
         seats.push({
           desk,
           x: pod.x + POD_PAD + (i % POD_COLS) * (DESK_W + DESK_GAP_X),
-          y: pod.y + POD_PAD + Math.floor(i / POD_COLS) * (DESK_H + DESK_GAP_Y),
+          y: pod.y + POD_PAD + podRow * (DESK_H + DESK_GAP_Y),
           scale: 1,
+          facing: podRow === 0 ? "down" : "up",
         })
       })
     }
@@ -124,17 +178,21 @@ function boxZone(spec: ZoneSpec, maxCols: number): ZoneBox {
   return { id: spec.id, label: spec.label, x: 0, y: 0, w: width, h: height, pods: placedPods, seats }
 }
 
-export function layoutRoom(desks: DeskInfo[]): RoomLayout {
-  const specs = zonesOf(desks)
-  const maxCols = specs.length === 1 ? 3 : 2
+export function layoutRoom(desks: DeskInfo[], options?: LayoutRoomOptions): RoomLayout {
+  const compact = Boolean(options?.compact)
+  const roomWidth = compact ? COMPACT_ROOM_W : ROOM_W
+  const margin = compact ? COMPACT_MARGIN : MARGIN
+  const specs = zonesOf(desks, options?.departments)
+  const maxCols = compact ? 1 : specs.length === 1 ? 3 : 2
   const boxes = specs.map((spec) => boxZone(spec, maxCols))
 
   // Zones sit side by side and wrap to a new row when the room is full.
+  // On compact viewports, each zone and pod stacks vertically.
   const rows: ZoneBox[][] = []
   let rowWidth = 0
   for (const box of boxes) {
     const last = rows.at(-1)
-    if (last && rowWidth + ZONE_GAP + box.w <= ROOM_W - 2 * MARGIN) {
+    if (!compact && last && rowWidth + ZONE_GAP + box.w <= roomWidth - 2 * margin) {
       last.push(box)
       rowWidth += ZONE_GAP + box.w
     } else {
@@ -148,7 +206,7 @@ export function layoutRoom(desks: DeskInfo[]): RoomLayout {
   let y = WALL_H + 20
   for (const row of rows) {
     const total = row.reduce((sum, box) => sum + box.w, 0) + (row.length - 1) * ZONE_GAP
-    let x = (ROOM_W - total) / 2
+    let x = Math.max(margin, (roomWidth - total) / 2)
     let tallest = 0
     for (const box of row) {
       zones.push({ id: box.id, label: box.label, x, y, w: box.w, h: box.h, pods: box.pods.map((pod) => ({ ...pod, x: pod.x + x, y: pod.y + y })) })
@@ -162,17 +220,18 @@ export function layoutRoom(desks: DeskInfo[]): RoomLayout {
   const directors = desks.filter((desk) => desk.isDirector)
   let rug: Rect | null = null
   if (directors.length > 0) {
-    const w = DESK_W * DIRECTOR_SCALE
-    const h = DESK_H * DIRECTOR_SCALE
-    const step = Math.min(w + 48, (ROOM_W - 2 * MARGIN - 80) / directors.length)
+    const scale = compact ? 1.05 : DIRECTOR_SCALE
+    const w = DESK_W * scale
+    const h = DESK_H * scale
+    const step = Math.min(w + 48, (roomWidth - 2 * margin - 40) / directors.length)
     const span = step * (directors.length - 1) + w
-    const left = (ROOM_W - span) / 2
-    rug = { x: left - 40, y, w: span + 80, h: h + 28 }
+    const left = (roomWidth - span) / 2
+    rug = { x: Math.max(margin, left - 32), y, w: Math.min(roomWidth - 2 * margin, span + 64), h: h + 28 }
     directors.forEach((desk, i) => {
-      seats.push({ desk, x: left + i * step, y: y + 14, scale: DIRECTOR_SCALE })
+      seats.push({ desk, x: left + i * step, y: y + 14, scale, facing: "up" })
     })
     y += rug.h
   }
 
-  return { width: ROOM_W, height: y + BOTTOM, zones, seats, rug }
+  return { width: roomWidth, height: y + BOTTOM, zones, seats, rug }
 }
