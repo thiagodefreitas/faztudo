@@ -59,7 +59,7 @@ model = "opus"
 cost_class = "premium"
 capacity = 1
 conserve_at = 80
-# plan_limit_tokens = 1000000 # optional manual limit for Claude's token-based daily usage
+# plan_limit_tokens = 1000000 # optional manual limit for token-based usage (claude, grok)
 
 [[lane]]
 id = "codex/default"
@@ -99,9 +99,11 @@ in testing (opencode 1.16.2); treat that lane as experimental.
 Fresh measured usage below the threshold is available; usage at or above it
 is conserve, and 100 percent is exhausted. Measurements are fresh for less
 than 15 minutes. Missing or older percentages keep health unknown. Claude
-logs token totals without a quota percentage, so its health stays unknown
-unless `plan_limit_tokens` sets a manual daily plan limit. This produces a
-percentage estimate from local token totals.
+and Grok log token totals without a quota percentage (Grok's per-session
+ledgers under `~/.grok/sessions`), so the Lanes page shows their tokens in
+the last 5 hours and today, and their health stays unknown unless
+`plan_limit_tokens` sets a manual limit. That produces a percentage
+estimate from local token totals.
 
 Conserve lanes are a last resort. When a persona's chain holds a lane that
 is available or unknown, it is used first even if a conserve lane comes

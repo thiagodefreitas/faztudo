@@ -146,7 +146,7 @@ func (a *App) RefreshUsage(ctx context.Context) error {
 		return err
 	}
 	for _, l := range ls {
-		if l.CLI != "codex" && l.CLI != "claude" {
+		if l.CLI != "codex" && l.CLI != "claude" && l.CLI != "grok" {
 			continue
 		}
 		if _, err = a.ProbeLane(ctx, l.ID); err != nil {
@@ -170,9 +170,13 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 	switch lane.CLI {
 	case "codex":
 		windows, err = usage.ReadCodex(home, usage.Options{})
-	case "claude":
-		var result usage.ClaudeResult
-		result, err = usage.ReadClaude(home, usage.Options{PlanLimitTokens: a.planLimit(id)})
+	case "claude", "grok":
+		read := usage.ReadClaude
+		if lane.CLI == "grok" {
+			read = usage.ReadGrok
+		}
+		var result usage.TokenResult
+		result, err = read(home, usage.Options{PlanLimitTokens: a.planLimit(id)})
 		windows = result.Windows
 		if result.FiveHour.Entries > 0 || result.Day.Entries > 0 {
 			total := result.LastHour.Total()
@@ -187,7 +191,7 @@ func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
 	if err := a.Registry.UpdateUsage(ctx, id, windows); err != nil {
 		return domain.Lane{}, err
 	}
-	if lane.CLI == "claude" {
+	if lane.CLI == "claude" || lane.CLI == "grok" {
 		if err := a.Registry.SetTokensLastHour(ctx, id, tokensHour); err != nil {
 			return domain.Lane{}, err
 		}

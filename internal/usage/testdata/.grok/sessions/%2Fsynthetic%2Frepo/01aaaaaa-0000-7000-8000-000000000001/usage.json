@@ -1,0 +1,12 @@
+{
+  "sessionId": "01aaaaaa-0000-7000-8000-000000000001",
+  "updatedAt": "2026-10-18T11:50:00+00:00",
+  "session": {"inputTokens": 4400, "outputTokens": 440, "cachedReadTokens": 2200, "cacheCreationTokens": 0, "totalTokens": 4840},
+  "turns": [
+    {"turnNumber": 1, "endedAt": "2026-10-17T23:00:00+00:00", "inputTokens": 1000, "outputTokens": 100, "cachedReadTokens": 500, "cacheCreationTokens": 0, "totalTokens": 1100},
+    {"turnNumber": 2, "endedAt": "2026-10-18T06:00:00+00:00", "inputTokens": 1200, "outputTokens": 120, "cachedReadTokens": 600, "cacheCreationTokens": 0, "totalTokens": 1320},
+    {"turnNumber": 3, "endedAt": "2026-10-18T11:30:00+00:00", "inputTokens": 1000, "outputTokens": 100, "cachedReadTokens": 500, "cacheCreationTokens": 100, "totalTokens": 1100},
+    {"turnNumber": 4, "endedAt": "2026-10-18T11:50:00+00:00", "inputTokens": 1200, "outputTokens": 120, "cachedReadTokens": 600, "cacheCreationTokens": 0, "totalTokens": 1320},
+    {"turnNumber": 5, "endedAt": "2026-10-18T13:00:00+00:00", "inputTokens": 9000, "outputTokens": 900, "cachedReadTokens": 0, "cacheCreationTokens": 0, "totalTokens": 9900}
+  ]
+}

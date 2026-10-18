@@ -56,6 +56,10 @@ func printLanes(p config.Paths) error {
 				var result usage.ClaudeResult
 				result, err = usage.ReadClaude(home, usage.Options{})
 				l.Windows = result.Windows
+			case "grok":
+				var result usage.TokenResult
+				result, err = usage.ReadGrok(home, usage.Options{})
+				l.Windows = result.Windows
 			}
 			if err != nil {
 				return err
@@ -73,6 +77,10 @@ func printLanes(p config.Paths) error {
 			case "claude":
 				var result usage.ClaudeResult
 				result, err = usage.ReadClaude(home, usage.Options{})
+				l.Windows = result.Windows
+			case "grok":
+				var result usage.TokenResult
+				result, err = usage.ReadGrok(home, usage.Options{})
 				l.Windows = result.Windows
 			}
 			if err != nil {
