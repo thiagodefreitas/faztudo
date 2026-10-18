@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +12,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/config"
 )
 
-func TestOpenUsesFragmentToken(t *testing.T) {
+func TestOpenUsesOneTimeCodeNotToken(t *testing.T) {
 	dir := t.TempDir()
 	path := auth.LocalTokenPath(dir)
 	token, err := auth.EnsureLocalToken(path)
@@ -23,14 +25,25 @@ func TestOpenUsesFragmentToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if err := openLocalBrowser("127.0.0.1:7457", path); err != nil {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/auth/local/code" || r.Header.Get("Authorization") != "Bearer "+token {
+			http.Error(w, "no", 401)
+			return
+		}
+		_, _ = w.Write([]byte(`{"code":"0123456789abcdef0123456789abcdef"}`))
+	}))
+	defer srv.Close()
+	listen := strings.TrimPrefix(srv.URL, "http://")
+	if err := openLocalBrowser(listen, path); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(b); got != "http://127.0.0.1:7457/auth/local#"+token {
+	// The browser launcher's command line is readable by other local users,
+	// so it carries a single-use code, never the token.
+	if got := string(b); got != "http://"+listen+"/auth/local#0123456789abcdef0123456789abcdef" || strings.Contains(got, token) {
 		t.Fatalf("open URL: %s", strings.Split(got, "#")[0])
 	}
 }

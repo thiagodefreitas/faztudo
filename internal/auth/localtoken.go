@@ -135,3 +135,12 @@ func EqualSecret(got, want string) bool {
 	a, b := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
 	return hmac.Equal(a[:], b[:]) && len(got) == len(want)
 }
+
+// RandomHex returns n random bytes from crypto/rand, hex encoded.
+func RandomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}

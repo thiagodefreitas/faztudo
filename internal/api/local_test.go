@@ -3,11 +3,13 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
@@ -190,5 +192,49 @@ func TestLocalBearerFailuresAreLimited(t *testing.T) {
 	}
 	if a.LocalLimiter.Attempt("127.0.0.1:12345") {
 		t.Fatal("failed bearer attempts did not fill rate limit")
+	}
+}
+
+func TestStreamRefusesOtherLoopbackPorts(t *testing.T) {
+	a, token := localFixture(t)
+	cookie := &http.Cookie{Name: localCookieName, Value: auth.LocalCookieValue(token)}
+	for _, origin := range []string{"http://127.0.0.1:9999", "http://localhost:3000"} {
+		req := httptest.NewRequest("GET", "http://127.0.0.1:7457/api/v1/stream", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Origin", origin)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		a.ServeHTTP(rec, req)
+		if rec.Code != 403 {
+			t.Fatalf("stream from %s: %d, want 403", origin, rec.Code)
+		}
+	}
+}
+
+func TestOneTimeCodeSetsCookieOnce(t *testing.T) {
+	a, token := localFixture(t)
+	if rec := localRequest(a, "POST", "/api/v1/auth/local/code", "", "", nil); rec.Code != 401 {
+		t.Fatalf("code without the token: %d", rec.Code)
+	}
+	rec := localRequest(a, "POST", "/api/v1/auth/local/code", "", token, nil)
+	if rec.Code != 200 {
+		t.Fatalf("code: %d %s", rec.Code, rec.Body)
+	}
+	var out struct{ Code string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Code) != 32 {
+		t.Fatalf("code body %s", rec.Body)
+	}
+	first := localRequest(a, "POST", "/api/v1/auth/local", `{"token":"`+out.Code+`"}`, "", nil)
+	if first.Code != 200 || len(first.Result().Cookies()) == 0 {
+		t.Fatalf("exchange: %d", first.Code)
+	}
+	if again := localRequest(a, "POST", "/api/v1/auth/local", `{"token":"`+out.Code+`"}`, "", nil); again.Code != 401 {
+		t.Fatalf("a used code worked again: %d", again.Code)
+	}
+	expired := localRequest(a, "POST", "/api/v1/auth/local/code", "", token, nil)
+	_ = json.Unmarshal(expired.Body.Bytes(), &out)
+	a.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+	if late := localRequest(a, "POST", "/api/v1/auth/local", `{"token":"`+out.Code+`"}`, "", nil); late.Code != 401 {
+		t.Fatalf("an expired code worked: %d", late.Code)
 	}
 }

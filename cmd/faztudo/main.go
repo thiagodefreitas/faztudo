@@ -164,12 +164,32 @@ func run(args []string) error {
 	}
 }
 
+// openLocalBrowser opens the app with a one-time code from the daemon. The
+// browser launcher's command line is readable by other local users, so it
+// never carries the token itself.
 func openLocalBrowser(listen, tokenPath string) error {
 	token, err := auth.ReadLocalToken(tokenPath)
 	if err != nil {
 		return fmt.Errorf("read local token: %w", err)
 	}
-	return exec.Command("xdg-open", "http://"+listen+"/auth/local#"+token).Run()
+	req, err := http.NewRequest("POST", "http://"+listen+"/api/v1/auth/local/code", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := &http.Client{Timeout: 5 * time.Second}
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ask faztudo for a sign-in code (is it running?): %w", err)
+	}
+	defer res.Body.Close()
+	var out struct {
+		Code string `json:"code"`
+	}
+	if res.StatusCode != 200 || json.NewDecoder(res.Body).Decode(&out) != nil || out.Code == "" {
+		return fmt.Errorf("faztudo did not give a sign-in code (status %d)", res.StatusCode)
+	}
+	return exec.Command("xdg-open", "http://"+listen+"/auth/local#"+out.Code).Run()
 }
 
 func shouldOpenBrowser(configured, noOpen, terminal bool, display, wayland string) bool {

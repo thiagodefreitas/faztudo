@@ -75,6 +75,8 @@ type API struct {
 	actorForRequest func(*http.Request) (domain.Member, error)
 	resolveMu       sync.Mutex
 	orgMu           sync.Mutex
+	codesMu         sync.Mutex
+	codes           map[string]time.Time // one-time local sign-in codes and their expiry
 	streamsMu       sync.Mutex
 	streams         map[string]map[*streamHandle]struct{}
 }
@@ -124,6 +126,7 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/pairings", a.createPairing)
 	m.HandleFunc("GET /api/v1/auth/ca", a.caInfo)
 	m.HandleFunc("GET /api/v1/me", a.me)
+	m.HandleFunc("POST /api/v1/auth/local/code", a.localCode)
 	m.HandleFunc("GET /api/v1/members", a.members)
 	m.HandleFunc("GET /api/v1/org", a.org)
 	m.HandleFunc("POST /api/v1/projects/{project}/assignments", a.assign)
@@ -245,6 +248,11 @@ func (a *API) hostAllowed(addr string) bool {
 		}
 	}
 	return false
+}
+
+// proxyHost reports whether addr is one of the configured allowed_hosts.
+func (a *API) proxyHost(addr string) bool {
+	return !loopbackHost(addr) && a.hostAllowed(addr)
 }
 
 func loopbackHost(addr string) bool {
@@ -1018,7 +1026,9 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		if origin != "" {
 			u := strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://")
 			host := strings.Split(u, "/")[0]
-			if host != r.Host && !a.hostAllowed(host) {
+			// Exact origin only. Cookies ignore ports, so a page on another
+			// loopback port must not be able to read the stream.
+			if host != r.Host && !a.proxyHost(host) {
 				fail(w, 403, "forbidden", "invalid origin")
 				return
 			}

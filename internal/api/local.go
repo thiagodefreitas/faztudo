@@ -11,6 +11,10 @@ import (
 const localCookieName = "fz_local"
 const localCookieAge = 365 * 24 * time.Hour
 
+// localLimitKey counts every failed local token attempt together: each
+// address in 127.0.0.0/8 would otherwise get its own allowance.
+const localLimitKey = "loopback"
+
 func (a *API) localAuthenticated(r *http.Request) (bool, bool) {
 	if a.localAuthBypass {
 		return true, false
@@ -32,14 +36,52 @@ func (a *API) localAuthenticated(r *http.Request) (bool, bool) {
 	if a.LocalLimiter == nil {
 		return false, false
 	}
-	if !a.LocalLimiter.Attempt(r.RemoteAddr) {
+	if !a.LocalLimiter.Attempt(localLimitKey) {
 		return false, true
 	}
 	if !auth.EqualSecret(value, token) {
 		return false, false
 	}
-	a.LocalLimiter.Forget(r.RemoteAddr)
+	a.LocalLimiter.Forget(localLimitKey)
 	return true, false
+}
+
+// localCodeTTL is how long a one-time sign-in code from faztudo open lives.
+const localCodeTTL = time.Minute
+
+// localCode gives the CLI a single-use code to put in the browser link, so
+// the token itself never appears in a process's command line.
+func (a *API) localCode(w http.ResponseWriter, r *http.Request) {
+	code, err := auth.RandomHex(16)
+	if err != nil {
+		fail(w, 500, "internal", "internal error")
+		return
+	}
+	now := a.Now()
+	a.codesMu.Lock()
+	if a.codes == nil {
+		a.codes = map[string]time.Time{}
+	}
+	for c, exp := range a.codes {
+		if !now.Before(exp) {
+			delete(a.codes, c)
+		}
+	}
+	a.codes[code] = now.Add(localCodeTTL)
+	a.codesMu.Unlock()
+	respond(w, 200, map[string]string{"code": code})
+}
+
+// takeCode consumes a one-time code; it works once and only before expiry.
+func (a *API) takeCode(code string) bool {
+	a.codesMu.Lock()
+	defer a.codesMu.Unlock()
+	exp, ok := a.codes[code]
+	if !ok {
+		return false
+	}
+	delete(a.codes, code)
+	return a.Now().Before(exp)
 }
 
 func (a *API) localPost(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +89,7 @@ func (a *API) localPost(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "forbidden", "local origin required")
 		return
 	}
-	if a.LocalLimiter == nil || !a.LocalLimiter.Attempt(r.RemoteAddr) {
+	if a.LocalLimiter == nil || !a.LocalLimiter.Attempt(localLimitKey) {
 		fail(w, 429, "rate_limited", "too many failed token attempts")
 		return
 	}
@@ -58,11 +100,11 @@ func (a *API) localPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, err := auth.ReadLocalToken(a.LocalTokenPath)
-	if err != nil || !auth.EqualSecret(body.Token, token) {
+	if err != nil || !(auth.EqualSecret(body.Token, token) || len(body.Token) == 32 && a.takeCode(body.Token)) {
 		fail(w, 401, "unauthorized", "invalid local token")
 		return
 	}
-	a.LocalLimiter.Forget(r.RemoteAddr)
+	a.LocalLimiter.Forget(localLimitKey)
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
 		Name: localCookieName, Value: auth.LocalCookieValue(token), Path: "/",
@@ -76,7 +118,7 @@ const localPageHTML = `<!doctype html><html><head><meta charset="utf-8"><title>O
 <body><p>Opening faztudo...</p><script>
 const token = location.hash.slice(1);
 history.replaceState(null, "", "/auth/local");
-if (!/^[0-9a-f]{64}$/.test(token)) {
+if (!/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/.test(token)) {
   document.body.textContent = "Open faztudo with faztudo open";
 } else {
   fetch("/api/v1/auth/local", {method: "POST", credentials: "same-origin",
