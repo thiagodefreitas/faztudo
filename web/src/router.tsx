@@ -118,6 +118,8 @@ const channelRoute = createRoute({
 const lanesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/lanes",
+  validateSearch: (search: Record<string, unknown>): { lane?: string } =>
+    typeof search.lane === "string" && search.lane ? { lane: search.lane } : {},
   loader: ({ context }) =>
     withAuthRedirect(() =>
       context.queryClient.ensureQueryData({

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
@@ -251,7 +251,7 @@ export function LaneCardView({
   )
 }
 
-function LaneCard({ lane, now }: { lane: Lane; now: number }) {
+function LaneCard({ lane, now, focused }: { lane: Lane; now: number; focused: boolean }) {
   const qc = useQueryClient()
   const [probing, setProbing] = useState(false)
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
@@ -280,11 +280,22 @@ function LaneCard({ lane, now }: { lane: Lane; now: number }) {
     )
   }
 
-  return <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} />
+  return (
+    <div
+      ref={(el) => {
+        if (focused && el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center" })
+      }}
+      data-focused={focused || undefined}
+      className={cx("rounded-md", focused && "ring-2 ring-accent")}
+    >
+      <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} />
+    </div>
+  )
 }
 
 export function LanesPage() {
   const lanes = useLanes()
+  const focus = useSearch({ strict: false }).lane
   const now = useNow()
   useLanesShortcut()
   const list = (lanes.data ?? []).slice().sort((a, b) => a.id.localeCompare(b.id))
@@ -303,7 +314,7 @@ export function LanesPage() {
         ) : (
           <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {list.map((lane) => (
-              <LaneCard key={lane.id} lane={lane} now={now} />
+              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} />
             ))}
           </div>
         )}

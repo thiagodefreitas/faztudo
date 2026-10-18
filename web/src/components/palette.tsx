@@ -1,10 +1,14 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { Command } from "cmdk"
 import { useEffect, useState, type ReactNode } from "react"
+import { cx } from "../lib/cx"
 import { isDirect } from "../lib/direct"
 import { useTheme } from "../lib/theme"
 import { useOpenDirect } from "../state/direct"
-import { useChannels, useMe, useMembers } from "../state/queries"
+import { laneGauge } from "../lib/lane-gauge"
+import { useNow } from "../state/now"
+import { useChannels, useLanes, useMe, useMembers } from "../state/queries"
+import { healthDotClass } from "./lane-chip"
 import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { OPEN_SEARCH_EVENT } from "./search-dialog"
@@ -29,6 +33,8 @@ export function CommandPalette() {
   const me = useMe()
   const theme = useTheme()
   const openDirect = useOpenDirect()
+  const lanes = useLanes()
+  const now = useNow()
   const inChannel = pathname.startsWith("/c/")
 
   useEffect(() => {
@@ -100,6 +106,25 @@ export function CommandPalette() {
                 Message {member.display_name}
               </Command.Item>
             ))}
+          </Group>
+          <Group heading="Lanes">
+            {(lanes.data ?? []).map((lane) => {
+              const gauge = laneGauge(lane, now)
+              return (
+                <Command.Item
+                  key={lane.id}
+                  value={`lane ${lane.id} ${lane.health}`}
+                  className={itemClass}
+                  onSelect={() => run(() => void navigate({ to: "/lanes", search: gauge.href }))}
+                >
+                  <span className={cx("h-1.5 w-1.5 shrink-0 rounded-full", healthDotClass(gauge.health))} aria-hidden />
+                  <span className="font-mono">{gauge.id}</span>
+                  <span className="ml-auto font-mono text-[12px] tabular-nums text-muted" title={gauge.tooltip.join("\n")}>
+                    {gauge.text}
+                  </span>
+                </Command.Item>
+              )
+            })}
           </Group>
           <Group heading="Actions">
             <Command.Item

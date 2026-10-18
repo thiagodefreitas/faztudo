@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
 import { qk } from "../state/keys"
-import type { Channel, Member } from "../types"
+import type { Channel, Lane, Member } from "../types"
 import { CommandPalette, OPEN_SETTINGS_EVENT } from "./palette"
 
 const ada: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA1", kind: "human", handle: "ada", display_name: "Ada", presence: "online" }
@@ -14,16 +14,21 @@ const dev: Channel = { id: "chan-dev", name: "faztudo-dev", kind: "team", visibi
 
 afterEach(() => vi.restoreAllMocks())
 
-async function setup(channels: Channel[] = [dev]) {
+async function setup(channels: Channel[] = [dev], lanes: Lane[] = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.members, [ada, coder])
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.channels, channels)
+  client.setQueryData(qk.lanes, lanes)
   const rootRoute = createRootRoute({ component: CommandPalette })
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       createRoute({ getParentRoute: () => rootRoute, path: "/c/$channelId" }),
-      createRoute({ getParentRoute: () => rootRoute, path: "/lanes" }),
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/lanes",
+        validateSearch: (q: Record<string, unknown>) => ({ lane: typeof q.lane === "string" ? q.lane : undefined }),
+      }),
     ]),
     history: createMemoryHistory({ initialEntries: ["/c/chan-dev"] }),
   })
@@ -36,7 +41,29 @@ async function setup(channels: Channel[] = [dev]) {
   return router
 }
 
+const claude: Lane = {
+  id: "claude/sonnet",
+  cli: "claude",
+  cost_class: "premium",
+  capacity: 1,
+  running: 0,
+  health: "conserve",
+  windows: [{ name: "5h", used_pct: 83, source: "cli-log", measured_at: new Date().toISOString() }],
+  runs_today: 0,
+}
+
 describe("CommandPalette", () => {
+  it("lists lanes with their main window and opens the Lanes page at the lane", async () => {
+    const user = userEvent.setup()
+    const router = await setup([dev], [claude])
+    await user.keyboard("{Control>}k{/Control}")
+    const option = await screen.findByRole("option", { name: /claude\/sonnet/ })
+    expect(option).toHaveTextContent("83%")
+    await user.keyboard("claude/sonnet{Enter}")
+    await waitFor(() => expect(router.state.location.pathname).toBe("/lanes"))
+    expect(router.state.location.search).toEqual({ lane: "claude/sonnet" })
+  })
+
   it("opens with Ctrl+K, filters, and jumps to a channel from the keyboard", async () => {
     const user = userEvent.setup()
     const other: Channel = { ...dev, id: "chan-ops", name: "ops" }
