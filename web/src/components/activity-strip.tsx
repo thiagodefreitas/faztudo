@@ -10,8 +10,17 @@ import { healthDotClass } from "./lane-chip"
 
 // The top of a channel: what is going on right now, and, when the channel was
 // opened with unread messages, one line of catch-up from the stored summary.
-// Key it by channel so the unread count is read once per visit.
-export function ActivityStrip({ channel, onOpenRun }: { channel: Channel; onOpenRun: (runId: string) => void }) {
+// Key it by channel so the unread count is read once per visit. A page that
+// shows its own catch-up card passes catchUp={false}.
+export function ActivityStrip({
+  channel,
+  onOpenRun,
+  catchUp: showCatchUp = true,
+}: {
+  channel: Channel
+  onOpenRun: (runId: string) => void
+  catchUp?: boolean
+}) {
   const now = useNow()
   const runs = useRuns()
   const approvals = useApprovals()
@@ -20,7 +29,7 @@ export function ActivityStrip({ channel, onOpenRun }: { channel: Channel; onOpen
   const messages = useMessages(channel.id)
   const [unreadAtOpen] = useState(channel.unread)
   const [dismissed, setDismissed] = useState(false)
-  const summary = useChannelSummary(channel.id, unreadAtOpen > 0)
+  const summary = useChannelSummary(channel.id, showCatchUp && unreadAtOpen > 0)
 
   const activity = channelActivity({
     channelId: channel.id,
@@ -31,7 +40,7 @@ export function ActivityStrip({ channel, onOpenRun }: { channel: Channel; onOpen
     members: members.data ?? [],
     messages: messages.data ?? [],
   })
-  const catchUp = dismissed
+  const catchUp = dismissed || !showCatchUp
     ? null
     : catchUpLine({ unread: unreadAtOpen, ...(summary.data?.text ? { summary: summary.data.text } : {}), waiting: activity.waiting.length })
   if (!catchUp && isQuiet(activity)) return null

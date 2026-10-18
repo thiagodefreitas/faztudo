@@ -24,6 +24,9 @@ import { ThreadPanel } from "./thread-panel"
 import { OPEN_SETTINGS_EVENT } from "./palette"
 import { PinsDialog } from "./pins-dialog"
 import { OPEN_SEARCH_EVENT } from "./search-dialog"
+import type { ChatFilter } from "./chat/filters"
+import { FilterChips } from "./chat/filter-chips"
+import { ThreadsPanel } from "./chat/threads-panel"
 
 const TaskBuilder = lazy(() => import("./tasks/task-builder").then((module) => ({ default: module.TaskBuilder })))
 
@@ -62,6 +65,14 @@ export function ChannelPage() {
   const [taskTitle, setTaskTitle] = useState<string | null>(null)
   const notify = useNotifyPrefs()
   const muted = notify.muted.includes(channelId)
+  const [threadsOpen, setThreadsOpen] = useState(false)
+  // Opening a channel marks it read at once, so what was unread then is kept
+  // here for the catch-up card and the New divider until it is dismissed.
+  const [seen, setSeen] = useState<{ id: string; unread: number } | null>(null)
+  if (channel && seen?.id !== channelId) setSeen({ id: channelId, unread: channel.unread })
+  const unreadAtOpen = seen?.id === channelId ? seen.unread : 0
+  const [filterState, setFilterState] = useState<{ id: string; value: ChatFilter }>({ id: channelId, value: "all" })
+  const filter = filterState.id === channelId ? filterState.value : "all"
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -127,7 +138,13 @@ export function ChannelPage() {
   }
 
   function openThread(message: Message) {
+    setThreadsOpen(false)
     void navigate({ to: "/c/$channelId", params: { channelId }, search: { thread: message.id } })
+  }
+
+  function markRead() {
+    setSeen({ id: channelId, unread: 0 })
+    if (channel?.last_seq) void api.markRead(channelId, { seq: channel.last_seq })
   }
 
   if (channels.isPending) return <p className="p-4 text-[13px] text-muted">Loading channel</p>
@@ -216,6 +233,18 @@ export function ChannelPage() {
                 <path d="m13 13 4 4" />
               </svg>
             </button>
+            <button
+              type="button"
+              aria-label="Threads"
+              aria-pressed={threadsOpen}
+              title="Threads"
+              onClick={() => setThreadsOpen((open) => !open)}
+              className={HEADER_ICON}
+            >
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5h12v7H9l-3 3v-3H4z" />
+              </svg>
+            </button>
             <button type="button" aria-label="Pinned messages" title="Pinned messages" onClick={() => setPinsOpen(true)} className={HEADER_ICON}>
               <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m12 3 5 5-2 1-2.5 3.5.5 2.5-1 1-3-3-4.5 4.5M7 8l-1-1 1-1 1.5 1.5" />
@@ -260,6 +289,9 @@ export function ChannelPage() {
                 <Menu.Item onSelect={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))} className={MENU_ITEM}>
                   Search messages
                 </Menu.Item>
+                <Menu.Item onSelect={() => setThreadsOpen(true)} className={MENU_ITEM}>
+                  Threads
+                </Menu.Item>
                 <Menu.Item onSelect={() => setPinsOpen(true)} className={MENU_ITEM}>
                   Pinned messages
                 </Menu.Item>
@@ -290,9 +322,11 @@ export function ChannelPage() {
           <ChannelSettingsDialog channel={channel} agents={agents} open={settingsOpen} onOpenChange={setSettingsOpen} />
           <MembersPanel channel={channel} open={membersOpen} onOpenChange={setMembersOpen} />
         </header>
+        <FilterChips value={filter} onChange={(value) => setFilterState({ id: channelId, value })} />
         <ActivityStrip
           key={channelId}
           channel={channel}
+          catchUp={false}
           onOpenRun={(runId) => void navigate({ to: "/c/$channelId", params: { channelId }, search: { run: runId } })}
         />
         <MessageList
@@ -301,6 +335,9 @@ export function ChannelPage() {
           {...(search.m ? { focusId: search.m } : {})}
           onRetry={(item) => send(item.body, item.attachments, item.key)}
           onOpenThread={openThread}
+          filter={filter}
+          unread={unreadAtOpen}
+          onMarkRead={markRead}
         />
         <Composer
           members={members.data ?? []}
@@ -325,6 +362,8 @@ export function ChannelPage() {
       </section>
       {search.thread ? (
         <ThreadPanel key={search.thread} channelId={channelId} rootId={search.thread} />
+      ) : threadsOpen ? (
+        <ThreadsPanel channelId={channelId} unread={unreadAtOpen} onOpen={openThread} onClose={() => setThreadsOpen(false)} />
       ) : (
         search.run && <RunPanel channelId={channelId} runId={search.run} view={search.view} />
       )}

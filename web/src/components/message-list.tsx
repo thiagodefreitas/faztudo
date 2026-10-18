@@ -2,9 +2,8 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useQueryClient } from "@tanstack/react-query"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api/client"
-import { collapseAgentChat, participants } from "../lib/agent-chat"
+import { participants } from "../lib/agent-chat"
 import { answeredChoice, choiceBody } from "../lib/choices"
-import { continuesGroup } from "../lib/group"
 import { ulid } from "../lib/id"
 import { formatClock } from "../lib/time"
 import { cx } from "../lib/cx"
@@ -13,7 +12,7 @@ import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
-import { useChannelPins, useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
+import { useApprovals, useChannelPins, useChannelSummary, useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
 import type { Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
 import type { ChannelRef } from "../lib/channel-links"
 import { AgentAvatar } from "./agent-avatar"
@@ -21,26 +20,31 @@ import { AnswerActions } from "./answer-actions"
 import { AnswerBody } from "./answer-body"
 import { AttachmentList } from "./attachments"
 import { ChoiceCard } from "./choice-card"
+import { buildCatchUp } from "./chat/catch-up"
+import { CatchUpCard } from "./chat/catch-up-card"
+import { filterContext, type ChatFilter } from "./chat/filters"
+import { buildRows, unreadIds } from "./chat/rows"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
-
-type Row =
-  | { kind: "message"; key: string; at: string; message: Message }
-  | { kind: "agents"; key: string; at: string; messages: Message[] }
-  | { kind: "notice"; key: string; at: string; notice: NoticeItem }
-  | { kind: "pending"; key: string; at: string; pending: PendingMessage }
 
 export function MessageList({
   channelId,
   focusId,
   onRetry,
   onOpenThread,
+  filter = "all",
+  unread = 0,
+  onMarkRead,
 }: {
   channelId: string
   /** A message to scroll to and flash, from a search result. */
   focusId?: string
   onRetry: (item: PendingMessage) => void
   onOpenThread?: (message: Message) => void
+  filter?: ChatFilter
+  /** How many messages were unread when the channel was opened; 0 hides the markers. */
+  unread?: number
+  onMarkRead?: () => void
 }) {
   const qc = useQueryClient()
   const messagesQuery = useMessages(channelId)
@@ -61,6 +65,7 @@ export function MessageList({
   const innerRef = useRef<HTMLDivElement>(null)
   const stuckRef = useRef(true)
   const preserveRef = useRef<{ height: number; top: number } | null>(null)
+  const anchorRef = useRef("")
   const [unstuck, setUnstuck] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
 
@@ -71,22 +76,22 @@ export function MessageList({
     return !messages.some((message) => message.author_id === mine && message.body === item.body)
   })
 
-  const rows: Row[] = [
-    ...collapseAgentChat(messages, members.data ?? []).map((segment) =>
-      segment.kind === "message"
-        ? { kind: "message" as const, key: segment.message.id, at: segment.message.created_at, message: segment.message }
-        : {
-            kind: "agents" as const,
-            key: `agents:${segment.messages[0]?.id}`,
-            at: segment.messages[0]?.created_at ?? "",
-            messages: segment.messages,
-          },
-    ),
-    ...(notices.data ?? [])
-      .filter((notice) => notice.channel_id === channelId)
-      .map((notice) => ({ kind: "notice" as const, key: notice.id, at: notice.ts, notice })),
-    ...visiblePending.map((item) => ({ kind: "pending" as const, key: `pending:${item.key}`, at: item.createdAt, pending: item })),
-  ].sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key))
+  const approvals = useApprovals()
+  const summary = useChannelSummary(channelId, unread > 0)
+  const unreadSet = useMemo(() => unreadIds(messagesQuery.data ?? [], unread, me.data?.id), [messagesQuery.data, unread, me.data?.id])
+  const showCatchUp = unread > 0 && filter === "all" && !!onMarkRead
+  const rows = buildRows({
+    messages,
+    members: members.data ?? [],
+    notices: (notices.data ?? []).filter((notice) => notice.channel_id === channelId),
+    pending: visiblePending,
+    filter,
+    context: filterContext(me.data?.id, approvals.data ?? []),
+    unread: unreadSet,
+    catchUp: showCatchUp,
+    now,
+  })
+  const newIndex = rows.findIndex((row) => row.kind === "new")
 
   // TanStack Virtual returns functions the React compiler cannot memoize.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -101,13 +106,20 @@ export function MessageList({
 
   // Jump to the message a search result named, then flash it for a moment.
   const focusIndex = focusId ? rows.findIndex((row) => row.key === focusId) : -1
+  const flashTimer = useRef(0)
+  function jumpTo(id: string) {
+    const index = rows.findIndex((row) => row.key === id)
+    if (index < 0) return
+    stuckRef.current = false
+    virtualizer.scrollToIndex(index, { align: "center" })
+    setFlash(id)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlash(null), 2200)
+  }
+  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
   useEffect(() => {
     if (!focusId || focusIndex < 0) return
-    stuckRef.current = false
-    virtualizer.scrollToIndex(focusIndex, { align: "center" })
-    setFlash(focusId)
-    const timer = window.setTimeout(() => setFlash(null), 2200)
-    return () => window.clearTimeout(timer)
+    jumpTo(focusId)
     // The index moves while rows load; the target is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, focusIndex >= 0])
@@ -139,7 +151,29 @@ export function MessageList({
     const stuck = distance < 48
     stuckRef.current = stuck
     setUnstuck((current) => (current === !stuck ? current : !stuck))
+    // Remember what is at the top, so a filter change can keep the reader there.
+    const top = virtualizer.getVirtualItems().find((item) => item.end > el.scrollTop)
+    const row = top ? rows[top.index] : undefined
+    anchorRef.current = row ? row.at : ""
   }
+
+  // After a filter change, scroll to the first row at or after the time the
+  // reader was looking at. At the bottom, the stuck scroll already holds.
+  useLayoutEffect(() => {
+    if (stuckRef.current || !anchorRef.current) return
+    const index = rows.findIndex((row) => row.at >= anchorRef.current)
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: "start" })
+    // Only a filter change re-anchors.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter])
+
+  function jumpFirstUnread() {
+    if (newIndex < 0) return
+    stuckRef.current = false
+    virtualizer.scrollToIndex(newIndex, { align: "start" })
+  }
+  const range = virtualizer.range
+  const newOffscreen = newIndex >= 0 && !!range && (newIndex < range.startIndex || newIndex > range.endIndex)
 
   function jumpLatest() {
     const el = parentRef.current
@@ -188,17 +222,15 @@ export function MessageList({
             {virtualizer.getVirtualItems().map((item) => {
               const row = rows[item.index]
               if (!row) return null
-              const before = rows[item.index - 1]
-              const grouped = row.kind === "message" && before?.kind === "message" && continuesGroup(before.message, row.message)
-              const after = rows[item.index + 1]
-              const lastInGroup = !(row.kind === "message" && after?.kind === "message" && continuesGroup(row.message, after.message))
+              const grouped = row.kind === "message" && row.grouped
+              const lastInGroup = row.kind === "message" && row.lastInGroup
               const author = row.kind === "message" ? members.data?.find((member) => member.id === row.message.author_id) : undefined
               return (
                 <div
                   key={row.key}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
-                  className={cx("absolute left-0 top-0 w-full px-3 md:px-4", grouped ? "py-0.5" : "pb-0.5 pt-3")}
+                  className={cx("absolute left-0 top-0 w-full px-3 md:px-4", grouped ? "py-0.5" : row.kind === "day" || row.kind === "new" ? "py-1" : "pb-0.5 pt-3")}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
                   {row.kind === "message" && (
@@ -218,6 +250,23 @@ export function MessageList({
                       onOpenThread={onOpenThread}
                     />
                   )}
+                  {row.kind === "day" && <Divider label={row.label} />}
+                  {row.kind === "new" && <Divider label="New" tone="accent" />}
+                  {row.kind === "catchup" && onMarkRead && (
+                    <CatchUpCard
+                      data={buildCatchUp({
+                        channelId,
+                        unread: (messagesQuery.data ?? []).filter((message) => unreadSet.has(message.id)),
+                        all: messagesQuery.data ?? [],
+                        members: members.data ?? [],
+                        runs: runs.data ?? [],
+                        approvals: approvals.data ?? [],
+                        ...(summary.data?.text ? { summary: summary.data.text } : {}),
+                      })}
+                      onJump={jumpTo}
+                      onMarkRead={onMarkRead}
+                    />
+                  )}
                   {row.kind === "agents" && <AgentLine messages={row.messages} members={members.data ?? []} channels={channelRefs} />}
                   {row.kind === "notice" && <NoticeRow notice={row.notice} />}
                   {row.kind === "pending" && <PendingRow item={row.pending} onRetry={onRetry} />}
@@ -227,6 +276,15 @@ export function MessageList({
           </div>
         )}
       </div>
+      {newOffscreen && (
+        <button
+          type="button"
+          onClick={jumpFirstUnread}
+          className="absolute left-1/2 top-3 z-10 min-h-8 -translate-x-1/2 rounded-full border border-accent bg-surface px-3 text-[12px] text-accent shadow"
+        >
+          Jump to first unread
+        </button>
+      )}
       {unstuck && (
         <button
           type="button"
@@ -236,6 +294,16 @@ export function MessageList({
           Latest
         </button>
       )}
+    </div>
+  )
+}
+
+function Divider({ label, tone }: { label: string; tone?: "accent" }) {
+  return (
+    <div role="separator" aria-label={label} className={cx("flex items-center gap-3 text-[11px] font-medium", tone === "accent" ? "text-accent" : "text-faint")}>
+      <span className={cx("h-px flex-1", tone === "accent" ? "bg-accent" : "bg-line")} />
+      <span>{label}</span>
+      <span className={cx("h-px flex-1", tone === "accent" ? "bg-accent" : "bg-line")} />
     </div>
   )
 }
