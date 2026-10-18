@@ -19,11 +19,12 @@ hero:
 import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 <div class="fz-status">
-  <strong>Alpha, version 0.1.0.</strong> Chat, runs, approvals, tasks,
-  projects, the Lanes dashboard, the Office and phone access over your LAN
-  work today. Install it from the
+  <strong>Alpha, version 0.1.2.</strong> Chat, runs, approvals, tasks,
+  projects, compare mode, the Lanes dashboard, the 2D and 3D office and phone
+  access over your LAN work today. Install it from the
   <a href="https://github.com/thiagodefreitas/faztudo/releases">releases page</a>.
-  Signal, Discord and agent computers are planned. See the <a href="/faztudo/roadmap/">roadmap</a>.
+  Signal is in progress and a desktop app is next. See the
+  <a href="/faztudo/roadmap/">roadmap</a>.
 </div>
 
 <figure class="fz-shot">
@@ -55,6 +56,20 @@ Every agent has a desk. In 3D they are characters that act out what they are doi
   <img src="/faztudo/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" />
 </div>
 
+## What is new in 0.1.2
+
+- **Compare mode.** Mention a write persona with `x2` and the same request
+  runs on two lanes. One card shows both results; merge one, discard both or
+  ask for a combined third run.
+- **A worked organization.** A Chief of Staff, departments with leads,
+  specialists and a project with dev, review, docs and release channels, as
+  a [config you can copy](https://github.com/thiagodefreitas/faztudo/blob/main/docs/examples/organization.toml).
+- **Sandbox on Ubuntu 24.04.** The package gives user namespaces to
+  bubblewrap only, so write runs work there and everything else stays under
+  the system restriction.
+- **Faster, clearer runs.** Timeouts end runs, memory kills and quota limits
+  say why, and the approvals inbox only shows what is really waiting.
+
 ## Why faztudo
 
 <CardGrid>
@@ -80,6 +95,15 @@ Every agent has a desk. In 3D they are characters that act out what they are doi
   <Card title="You approve" icon="approve-check">
     Write runs work in their own git worktree. You read the diff, then Merge,
     Keep or Discard. An agent cannot approve for you.
+  </Card>
+  <Card title="Sandboxed write runs" icon="seti:lock">
+    Write runs run inside bubblewrap: the worktree is writable, the rest of your
+    home is hidden, and a run refuses to start without the sandbox unless you
+    choose otherwise.
+  </Card>
+  <Card title="An organization, not a list of bots" icon="seti:folder">
+    A Chief of Staff routes requests, department leads split the work across
+    specialists, and projects keep each team to its own channels.
   </Card>
   <Card title="Local by default" icon="laptop">
     One binary, one SQLite file, no cloud service and no telemetry.

@@ -4,6 +4,25 @@ Milestones are tracked on GitHub. Each one ends with something you can use,
 not just something that compiles. Order can change as we learn; the reasons
 for a change are written in the milestone's tracking issue.
 
+## Where things stand
+
+As of 2026-10-18, release 0.1.2:
+
+| milestone | state |
+| :--- | :--- |
+| M0 Foundation | done |
+| M1 First dogfood, M1b Team chat and Lanes | done; faztudo is built inside faztudo |
+| M2 Usable alpha | done; released as 0.1.0, then 0.1.1 and 0.1.2 |
+| M3 Signal | in progress: the bridge protocol and the daemon side are in 0.1.2 (off by default); the signal-cli program is next |
+| M4 2D office | the office is done; agent computers are not started |
+| M5 Discord and extensions | the bridge protocol is documented; Discord and custom adapters are not started |
+| M6 3D office and desktop app | a first 3D office ships; the desktop app is in progress (`faztudo connect`, ADR-0005, a working test window) |
+| M7 Teams and federation | not started |
+
+Also shipped along the way: tasks with a board, an approvals inbox, project
+settings and digests, compare mode (one request on two lanes), and a
+fail-closed sandbox that works on Ubuntu 24.04.
+
 ## M0 Foundation
 
 License, contribution rules, security policy, design documents, decision
@@ -51,7 +70,7 @@ result are visible in the chat.
   the rest of your home is hidden, the agent CLI sees only the login files it
   needs, memory and process limits where systemd allows them.
 - Security review, clean install test, complete docs, first release packages
-  (tarball, deb, AppImage).
+  (tarball and deb; an AppImage comes with the desktop app).
 - Organization, part two: the Chief of Staff routes unaddressed requests,
   leads split team requests across their specialists (one level of
   delegation, every handoff visible, run budgets), routines on a schedule or
