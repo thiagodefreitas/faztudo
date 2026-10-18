@@ -14,7 +14,9 @@ import (
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
+	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
@@ -27,6 +29,7 @@ type Trigger interface {
 
 // Handler serves streamable HTTP MCP. It accepts loopback clients only.
 type Handler struct {
+	PostAs  func(context.Context, events.Actor, domain.Member, api.PostInput) (domain.Message, bool, error)
 	store   *store.Store
 	tokens  *tokens
 	trigger Trigger

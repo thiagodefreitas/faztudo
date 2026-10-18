@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/files"
@@ -179,6 +180,14 @@ func (h *Handler) postMessage(ctx context.Context, grant Grant, body, threadID s
 	}
 	if len(body) > maxBodyBytes {
 		return domain.Message{}, errors.New("body too long")
+	}
+	if h.PostAs != nil {
+		author, err := h.store.Member(ctx, grant.AgentID)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		msg, _, err := h.PostAs(ctx, events.Agent(grant.AgentID), author, api.PostInput{ChannelID: grant.ChannelID, Body: body, ThreadID: threadID, Options: choices, RunID: grant.RunID, Handoff: handoff, AgentMessage: true, Fanout: fanout})
+		return msg, err
 	}
 	channel, err := h.store.Channel(ctx, grant.ChannelID)
 	if err != nil {

@@ -260,12 +260,12 @@ func (a *API) setPin(pin bool) http.HandlerFunc {
 		}
 		p := domain.Pin{ChannelID: m.ChannelID, MessageID: m.ID, PinnedBy: current(r).ID, PinnedAt: time.Now().UTC()}
 		if pin && !has {
-			if _, ok := a.append(w, r, events.MessagePinned, m.ChannelID, "", p); !ok {
+			if _, ok := a.append(w, r, events.Human(current(r).ID), events.MessagePinned, m.ChannelID, "", p); !ok {
 				return
 			}
 		}
 		if !pin && has {
-			if _, ok := a.append(w, r, events.MessageUnpinned, m.ChannelID, "", p); !ok {
+			if _, ok := a.append(w, r, events.Human(current(r).ID), events.MessageUnpinned, m.ChannelID, "", p); !ok {
 				return
 			}
 		}

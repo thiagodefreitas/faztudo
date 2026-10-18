@@ -1,7 +1,8 @@
 # API
 
-The web app, the desktop app and bridges all use the same HTTP and WebSocket
-API served by the daemon. This page is the contract. Version 1 lives under
+The web app and phone app use the HTTP and WebSocket API served by the daemon.
+Bridges use the separate JSON-RPC stdio protocol in
+[bridge-protocol.md](bridge-protocol.md). This page is the HTTP contract. Version 1 lives under
 `/api/v1`. Fields marked "later" are reserved and may be absent.
 
 All bodies are JSON. Times are RFC 3339 strings in UTC. IDs are ULIDs, as

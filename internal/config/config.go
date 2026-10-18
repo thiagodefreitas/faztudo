@@ -163,7 +163,22 @@ type Config struct {
 	LAN      LAN        `toml:"lan"`
 	Runs     Runs       `toml:"runs"`
 	Routines Routines   `toml:"routines"`
+	Bridges  Bridges    `toml:"bridges"`
 	Lanes    LaneConfig `toml:"-"`
+}
+
+type Bridges struct {
+	Signal SignalBridge `toml:"signal"`
+}
+
+type SignalBridge struct {
+	Enabled   bool              `toml:"enabled"`
+	Account   string            `toml:"account"`
+	SignalCLI string            `toml:"signal_cli"`
+	Allow     []string          `toml:"allow"`
+	Bind      map[string]string `toml:"bind"`
+	Approvals bool              `toml:"approvals"`
+	Alerts    string            `toml:"alerts"`
 }
 
 func Defaults() Config {
@@ -189,6 +204,9 @@ func Load(p Paths) (Config, error) {
 	return c, nil
 }
 func (c Config) Validate() error {
+	if err := c.Bridges.Signal.Validate(); err != nil {
+		return err
+	}
 	if _, _, err := net.SplitHostPort(c.Server.Listen); err != nil {
 		return fmt.Errorf("server.listen: %w", err)
 	}

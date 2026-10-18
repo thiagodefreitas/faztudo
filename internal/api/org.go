@@ -77,7 +77,7 @@ func (a *API) assignment(w http.ResponseWriter, r *http.Request, kind, handle st
 	} else {
 		*list = slices.DeleteFunc(*list, func(h string) bool { return strings.EqualFold(h, handle) })
 	}
-	if _, ok := a.append(w, r, events.ProjectUpdated, "", "", p); ok {
+	if _, ok := a.append(w, r, events.Human(current(r).ID), events.ProjectUpdated, "", "", p); ok {
 		respond(w, 200, p)
 	}
 }
@@ -221,7 +221,7 @@ func (a *API) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", msg)
 		return
 	}
-	if _, ok := a.append(w, r, events.ProjectUpdated, "", "", p); ok {
+	if _, ok := a.append(w, r, events.Human(current(r).ID), events.ProjectUpdated, "", "", p); ok {
 		respond(w, 201, p)
 	}
 }
@@ -259,7 +259,7 @@ func (a *API) patchProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", msg)
 		return
 	}
-	if _, ok := a.append(w, r, events.ProjectUpdated, "", "", p); ok {
+	if _, ok := a.append(w, r, events.Human(current(r).ID), events.ProjectUpdated, "", "", p); ok {
 		respond(w, 200, p)
 	}
 }

@@ -255,6 +255,9 @@ func (a *App) requestLimits() org.Limits {
 
 func (a *App) Bind(h *api.API) {
 	h.Trigger = a
+	if a.MCP != nil {
+		a.MCP.PostAs = h.PostAs
+	}
 	h.Chief = a.chiefFor
 	h.Routines = a.routines
 	h.ResolveApproval = a.ResolveApproval

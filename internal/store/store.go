@@ -139,6 +139,16 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 9 {
+		migration, err = migrations.ReadFile("migrations/009.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	// Search is optional: if this SQLite build has no FTS5 the table is not
 	// created and Search falls back to LIKE.
 	setupSearch(db)

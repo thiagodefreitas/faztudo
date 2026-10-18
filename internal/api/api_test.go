@@ -305,7 +305,7 @@ func TestAppendStoreErrorIsInternal(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/channels", nil)
 	req = req.WithContext(context.WithValue(req.Context(), actorKey{}, domain.Member{ID: "human", Kind: domain.MemberHuman}))
 	rec := httptest.NewRecorder()
-	h.append(rec, req, events.Notice, "", "", events.NoticePayload{Level: "info", Text: "synthetic"})
+	h.append(rec, req, events.Human("human"), events.Notice, "", "", events.NoticePayload{Level: "info", Text: "synthetic"})
 	if rec.Code != 500 || strings.Contains(rec.Body.String(), "closed") {
 		t.Fatalf("store error response: %d %q", rec.Code, rec.Body.String())
 	}

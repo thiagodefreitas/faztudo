@@ -351,8 +351,8 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	}
 	return true
 }
-func (a *API) append(w http.ResponseWriter, r *http.Request, typ events.Type, channel, key string, v any) (events.Event, bool) {
-	e, err := a.Store.Append(r.Context(), events.Draft{Type: typ, Actor: events.Human(current(r).ID), ChannelID: channel, IdempotencyKey: key, Payload: v})
+func (a *API) append(w http.ResponseWriter, r *http.Request, actor events.Actor, typ events.Type, channel, key string, v any) (events.Event, bool) {
+	e, err := a.Store.Append(r.Context(), events.Draft{Type: typ, Actor: actor, ChannelID: channel, IdempotencyKey: key, Payload: v})
 	if err != nil {
 		failErr(w, err)
 		return e, false
@@ -428,7 +428,7 @@ func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", err.Error())
 		return
 	}
-	if _, ok := a.append(w, r, events.ChannelCreated, c.ID, "", c); ok {
+	if _, ok := a.append(w, r, events.Human(current(r).ID), events.ChannelCreated, c.ID, "", c); ok {
 		respond(w, 201, c)
 	}
 }
@@ -510,7 +510,7 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", err.Error())
 		return
 	}
-	if _, ok := a.append(w, r, events.ChannelUpdated, c.ID, "", c); ok {
+	if _, ok := a.append(w, r, events.Human(current(r).ID), events.ChannelUpdated, c.ID, "", c); ok {
 		respond(w, 200, c)
 	}
 }
@@ -598,10 +598,140 @@ func mentioned(body string, members []domain.Member) ([]string, []domain.Member)
 	}
 	return ids, agents
 }
+
+// PostInput is shared by the HTTP API, MCP, and local bridges. Callers supply
+// a server-derived actor and author; neither is accepted from wire data.
+type PostInput struct {
+	ChannelID      string
+	Body           string
+	ThreadID       string
+	IdempotencyKey string
+	Attachments    []domain.Attachment
+	Options        []string
+	RunID          string
+	Handoff        *domain.Handoff
+	AgentMessage   bool
+	Fanout         bool
+	AfterStored    func(domain.Message) // HTTP writes its 201 before routing work
+}
+
+type PostError struct {
+	Code    string
+	Message string
+}
+
+func (e PostError) Error() string { return e.Message }
+
+// PostAs applies the same mention, project, thread, and idempotency rules to
+// posts from every trusted transport. The returned bool is false on redelivery.
+func (a *API) PostAs(ctx context.Context, actor events.Actor, author domain.Member, in PostInput) (domain.Message, bool, error) {
+	c, err := a.Store.Channel(ctx, in.ChannelID)
+	if err != nil {
+		return domain.Message{}, false, err
+	}
+	if strings.TrimSpace(in.Body) == "" && len(in.Attachments) == 0 {
+		return domain.Message{}, false, PostError{"bad_request", "body required"}
+	}
+	if in.ThreadID != "" {
+		root, err := a.Store.Message(ctx, in.ThreadID)
+		if err != nil || root.ChannelID != c.ID {
+			return domain.Message{}, false, PostError{"bad_request", "invalid thread_id"}
+		}
+		if root.ThreadID != "" {
+			in.ThreadID = root.ThreadID
+		}
+	}
+	members, err := a.Store.Members(ctx)
+	if err != nil {
+		return domain.Message{}, false, err
+	}
+	ids, agents := mentioned(in.Body, members)
+	departments, projects, err := a.orgData(ctx)
+	if err != nil {
+		return domain.Message{}, false, err
+	}
+	var notices []events.NoticePayload
+	if in.AgentMessage {
+		if !in.Fanout {
+			agents = nil
+		}
+	} else {
+		leads, problems := groupLeads(in.Body, departments, projects, members)
+		for _, lead := range leads {
+			if !slices.Contains(ids, lead.ID) {
+				ids = append(ids, lead.ID)
+				agents = append(agents, lead)
+			}
+		}
+		if len(agents) == 0 {
+			agents = directAgent(c, members)
+		}
+		if isCommand(in.Body, "/lane") {
+			agents = nil
+		}
+		if len(agents) == 0 && len(ids) == 0 && len(problems) == 0 && in.ThreadID == "" && author.Kind == domain.MemberHuman && !strings.HasPrefix(strings.TrimSpace(in.Body), "/") {
+			if m, ok := a.chiefOfStaff(c, members); ok {
+				agents = []domain.Member{m}
+			}
+		}
+		if len(agents) == 0 && len(ids) == 0 && len(problems) == 0 && !strings.HasPrefix(strings.TrimSpace(in.Body), "/") {
+			if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {
+				agents = []domain.Member{m}
+			}
+		}
+		for _, p := range problems {
+			notices = append(notices, events.NoticePayload{Level: "warn", Text: p})
+		}
+	}
+	agents, refusals := org.Gate(projects, departments, c.Name, agents)
+	notices = append(notices, refusals...)
+	if in.AgentMessage {
+		filtered := agents[:0]
+		for _, agent := range agents {
+			if agent.ID != author.ID {
+				filtered = append(filtered, agent)
+			}
+		}
+		agents = filtered
+	}
+	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: in.ThreadID, AuthorID: author.ID, Body: in.Body, Mentions: ids, Options: in.Options, Attachments: in.Attachments, RunID: in.RunID, Handoff: in.Handoff, CreatedAt: time.Now().UTC()}
+	freshID := m.ID
+	evt, err := a.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: actor, ChannelID: c.ID, IdempotencyKey: in.IdempotencyKey, Payload: m})
+	if err != nil {
+		return domain.Message{}, false, err
+	}
+	if evt.ChannelID != c.ID {
+		return domain.Message{}, false, store.ErrConflict
+	}
+	if err := json.Unmarshal(evt.Payload, &m); err != nil {
+		return domain.Message{}, false, err
+	}
+	fresh := freshID == m.ID
+	if in.AfterStored != nil {
+		in.AfterStored(m)
+	}
+	if fresh && len(agents) > 0 {
+		a.Trigger.OnMessage(ctx, m, agents)
+	}
+	if fresh && !in.AgentMessage && isCommand(m.Body, "/lane") {
+		a.laneCommand(ctx, c, members, m.Body)
+	}
+	if fresh {
+		for _, n := range notices {
+			_, _ = a.Store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: c.ID, Payload: n})
+		}
+		if !in.AgentMessage && isCommand(m.Body, "/status") {
+			if text, err := a.statusText(ctx, c.ID); err == nil {
+				_, _ = a.Store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: c.ID, Payload: events.NoticePayload{Level: "info", Text: text}})
+			}
+		}
+	}
+	return m, fresh, nil
+}
+
 func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
-	c, e := a.Store.Channel(r.Context(), r.PathValue("id"))
-	if e != nil {
-		failErr(w, e)
+	if _, err := a.Store.Channel(r.Context(), r.PathValue("id")); err != nil {
+		failErr(w, err)
 		return
 	}
 	var v struct {
@@ -617,92 +747,20 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "bad_request", "body required")
 		return
 	}
-	attachments, aerr := a.attachmentsFor(v.Attachments)
-	if aerr != nil {
-		fail(w, 400, "bad_request", aerr.Error())
+	attachments, err := a.attachmentsFor(v.Attachments)
+	if err != nil {
+		fail(w, 400, "bad_request", err.Error())
 		return
 	}
-	if v.ThreadID != "" {
-		root, e := a.Store.Message(r.Context(), v.ThreadID)
-		if e != nil || root.ChannelID != c.ID {
-			fail(w, 400, "bad_request", "invalid thread_id")
-			return
+	_, _, err = a.PostAs(r.Context(), events.Human(current(r).ID), current(r), PostInput{ChannelID: r.PathValue("id"), Body: v.Body, ThreadID: v.ThreadID, IdempotencyKey: v.IdempotencyKey, Attachments: attachments, Fanout: true, AfterStored: func(m domain.Message) { respond(w, 201, m) }})
+	if err != nil {
+		var postErr PostError
+		if errors.As(err, &postErr) {
+			fail(w, 400, postErr.Code, postErr.Message)
+		} else {
+			failErr(w, err)
 		}
-		if root.ThreadID != "" {
-			v.ThreadID = root.ThreadID // replies attach to the root, one level deep
-		}
-	}
-	members, e := a.Store.Members(r.Context())
-	if e != nil {
-		failErr(w, e)
 		return
-	}
-	ids, agents := mentioned(v.Body, members)
-	departments, projects, e := a.orgData(r.Context())
-	if e != nil {
-		failErr(w, e)
-		return
-	}
-	leads, problems := groupLeads(v.Body, departments, projects, members)
-	for _, lead := range leads {
-		if !slices.Contains(ids, lead.ID) {
-			ids = append(ids, lead.ID)
-			agents = append(agents, lead)
-		}
-	}
-	if len(agents) == 0 {
-		agents = directAgent(c, members)
-	}
-	if isCommand(v.Body, "/lane") {
-		agents = nil // a channel command, even in a direct channel
-	}
-	// A request nobody is addressed in goes to the Chief of Staff, in the
-	// channels that opted in. Replies in a thread and commands do not.
-	if len(agents) == 0 && len(ids) == 0 && len(problems) == 0 && v.ThreadID == "" && current(r).Kind == domain.MemberHuman && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
-		if m, ok := a.chiefOfStaff(c, members); ok {
-			agents = []domain.Member{m}
-		}
-	}
-	if len(agents) == 0 && len(ids) == 0 && len(problems) == 0 && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
-		if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {
-			agents = []domain.Member{m}
-		}
-	}
-	// In a project's channel only assigned agents act. The others get a notice
-	// with an action that lets the Director assign them.
-	var notices []events.NoticePayload
-	for _, p := range problems {
-		notices = append(notices, events.NoticePayload{Level: "warn", Text: p})
-	}
-	agents, refusals := org.Gate(projects, departments, c.Name, agents)
-	notices = append(notices, refusals...)
-	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, Attachments: attachments, CreatedAt: time.Now().UTC()}
-	newMessageID := m.ID
-	evt, ok := a.append(w, r, events.MessagePosted, c.ID, v.IdempotencyKey, m)
-	if !ok {
-		return
-	}
-	if evt.ChannelID != c.ID {
-		fail(w, 409, "conflict", "idempotency key belongs to another channel")
-		return
-	}
-	_ = json.Unmarshal(evt.Payload, &m)
-	respond(w, 201, m)
-	if newMessageID == m.ID && len(agents) > 0 {
-		a.Trigger.OnMessage(r.Context(), m, agents)
-	}
-	if newMessageID == m.ID && isCommand(m.Body, "/lane") {
-		a.laneCommand(r.Context(), c, members, m.Body)
-	}
-	if newMessageID == m.ID {
-		for _, n := range notices {
-			_, _ = a.Store.Append(r.Context(), events.Draft{Type: events.Notice, Actor: events.System, ChannelID: c.ID, Payload: n})
-		}
-	}
-	if newMessageID == m.ID && isCommand(m.Body, "/status") {
-		if text, err := a.statusText(r.Context(), c.ID); err == nil {
-			_, _ = a.Store.Append(r.Context(), events.Draft{Type: events.Notice, Actor: events.System, ChannelID: c.ID, Payload: events.NoticePayload{Level: "info", Text: text}})
-		}
 	}
 }
 
@@ -957,20 +1015,63 @@ func (a *API) approvals(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, v)
 }
-func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
+
+// ResolveAs is the approval path shared by HTTP and trusted local bridges.
+func (a *API) ResolveAs(ctx context.Context, human domain.Member, approvalID, option, commitMessage string) (domain.Approval, error) {
+	return a.resolveAs(ctx, human, approvalID, option, commitMessage, false)
+}
+
+// ResolveBridgeAs enforces the Signal policy even if its process forwards a
+// merge request. Signal transport and reply parsing arrive in a later step.
+func (a *API) ResolveBridgeAs(ctx context.Context, human domain.Member, approvalID, option string) (domain.Approval, error) {
+	return a.resolveAs(ctx, human, approvalID, option, "", true)
+}
+
+func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, option, commitMessage string, bridge bool) (domain.Approval, error) {
 	a.resolveMu.Lock()
 	defer a.resolveMu.Unlock()
-	if current(r).Kind != domain.MemberHuman {
-		fail(w, 403, "forbidden", "human approval required")
-		return
+	if human.Kind != domain.MemberHuman {
+		return domain.Approval{}, PostError{"forbidden", "human approval required"}
 	}
-	v, e := a.Store.Approval(r.Context(), r.PathValue("id"))
-	if e != nil {
-		failErr(w, e)
-		return
+	if bridge && option != "keep" && option != "discard" {
+		return domain.Approval{}, PostError{"forbidden", "Signal may only keep or discard"}
+	}
+	v, err := a.Store.Approval(ctx, approvalID)
+	if err != nil {
+		return domain.Approval{}, err
 	}
 	if v.State != domain.ApprovalPending {
-		fail(w, 409, "conflict", "approval is not pending")
+		return domain.Approval{}, store.ErrConflict
+	}
+	valid := false
+	for _, o := range v.Options {
+		if o.Key == option {
+			valid = true
+		}
+	}
+	if !valid {
+		return domain.Approval{}, store.ErrInvalidOption
+	}
+	note := ""
+	if a.ResolveApproval != nil && v.RunID != "" {
+		note, err = a.ResolveApproval(ctx, v, option, commitMessage)
+		if err != nil {
+			return domain.Approval{}, err
+		}
+	}
+	v, err = a.Store.ResolveApproval(ctx, v.ID, option, note, human.ID)
+	if err != nil {
+		return domain.Approval{}, err
+	}
+	if a.OnApproval != nil {
+		a.OnApproval(ctx, v)
+	}
+	return v, nil
+}
+
+func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
+	if current(r).Kind != domain.MemberHuman {
+		fail(w, 403, "forbidden", "human approval required")
 		return
 	}
 	var req struct {
@@ -981,46 +1082,28 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	valid := false
-	for _, o := range v.Options {
-		if o.Key == req.Option {
-			valid = true
-		}
-	}
-	if !valid {
-		fail(w, 400, "bad_request", "invalid option")
-		return
-	}
-	if a.ResolveApproval != nil && v.RunID != "" {
-		outcome, err := a.ResolveApproval(r.Context(), v, req.Option, req.CommitMessage)
-		if err != nil {
-			slog.Error("resolve approval", "approval", v.ID, "run", v.RunID, "err", err)
-			var userErr domain.UserError
-			if errors.As(err, &userErr) {
-				fail(w, 409, "conflict", userErr.Message)
-			} else {
-				fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
-			}
-			return
-		}
-		req.Note = outcome
-	}
-	v, e = a.Store.ResolveApproval(r.Context(), v.ID, req.Option, req.Note, current(r).ID)
-	if e != nil {
-		if errors.Is(e, store.ErrConflict) {
+	v, err := a.ResolveAs(r.Context(), current(r), r.PathValue("id"), req.Option, req.CommitMessage)
+	if err != nil {
+		var postErr PostError
+		var userErr domain.UserError
+		switch {
+		case errors.As(err, &postErr):
+			fail(w, 403, postErr.Code, postErr.Message)
+		case errors.Is(err, store.ErrConflict):
 			fail(w, 409, "conflict", "approval is not pending")
-		} else if errors.Is(e, store.ErrInvalidOption) {
+		case errors.Is(err, store.ErrInvalidOption):
 			fail(w, 400, "bad_request", "invalid option")
-		} else {
-			failErr(w, e)
+		case errors.As(err, &userErr):
+			fail(w, 409, "conflict", userErr.Message)
+		default:
+			slog.Error("resolve approval", "approval", r.PathValue("id"), "err", err)
+			fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
 		}
 		return
-	}
-	if a.OnApproval != nil {
-		a.OnApproval(r.Context(), v)
 	}
 	respond(w, 200, v)
 }
+
 func (a *API) listLanes(ctx context.Context) ([]domain.Lane, error) {
 	all, err := a.Store.Lanes(ctx)
 	if err != nil || a.HideLane == nil {
@@ -1152,7 +1235,7 @@ func (a *API) patchLane(w http.ResponseWriter, r *http.Request) {
 		req.ManualWindow.Source = domain.SourceManual
 		v.Windows = append(v.Windows, *req.ManualWindow)
 	}
-	if _, ok := a.append(w, r, events.LaneUpdated, "", "", v); ok {
+	if _, ok := a.append(w, r, events.Human(current(r).ID), events.LaneUpdated, "", "", v); ok {
 		if req.ManualWindow != nil {
 			_, err := a.Store.Append(r.Context(), events.Draft{Type: events.LaneUsageRead, Actor: events.Human(current(r).ID), Payload: store.LaneUsageReading{LaneID: v.ID, Window: *req.ManualWindow, ReadAt: time.Now().UTC()}})
 			if err != nil {

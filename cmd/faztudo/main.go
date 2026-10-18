@@ -21,6 +21,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/app"
 	"github.com/thiagodefreitas/faztudo/internal/auth"
+	"github.com/thiagodefreitas/faztudo/internal/bridge"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -42,6 +43,11 @@ func run(args []string) error {
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
+	case "bridge":
+		if len(args) != 2 || args[1] != "signal" {
+			return fmt.Errorf("usage: faztudo bridge signal")
+		}
+		return fmt.Errorf("Signal transport is not installed in this protocol-only build")
 	case "version", "--version", "-v":
 		if len(args) > 1 && args[1] == "--json" {
 			return json.NewEncoder(os.Stdout).Encode(version.Get())
@@ -139,6 +145,36 @@ func run(args []string) error {
 			handler.MaxUploadBytes = int64(c.Server.MaxUploadMB) << 20
 		}
 		application.Bind(handler)
+		bridgeCtx, stopBridge := context.WithCancel(context.Background())
+		defer stopBridge()
+		bridgeDone := make(chan struct{})
+		if c.Bridges.Signal.Enabled {
+			human, err := s.Member(context.Background(), humanID)
+			if err != nil {
+				return err
+			}
+			self, err := os.Executable()
+			if err != nil {
+				return err
+			}
+			bridgeHandler := &bridge.Handler{Config: c.Bridges.Signal, API: handler, Store: s, Human: human, FilesDir: p.FilesDir, MaxUpload: handler.MaxUploadBytes}
+			if _, err := bridgeHandler.Hello(context.Background(), bridge.Hello{Protocol: "1", Bridge: "signal", Version: "1"}); err != nil {
+				return err
+			}
+			if _, err := s.EnsureBridgeCursor(context.Background(), "signal"); err != nil {
+				return err
+			}
+			supervisor := bridge.Supervisor{Command: []string{self, "bridge", "signal"}, Handler: bridgeHandler}
+			go func() {
+				defer close(bridgeDone)
+				if err := supervisor.Run(bridgeCtx); err != nil {
+					logger.Error("signal bridge", "error", err)
+				}
+			}()
+		} else {
+			close(bridgeDone)
+		}
+		defer func() { stopBridge(); <-bridgeDone }()
 		listener, err := net.Listen("tcp", c.Server.Listen)
 		if err != nil {
 			return err
@@ -396,6 +432,18 @@ func doctor(p config.Paths) error {
 		fmt.Println("bubblewrap:", path)
 	} else {
 		fmt.Println("bubblewrap: unavailable")
+	}
+	if err == nil && c.Bridges.Signal.Enabled {
+		if path, e := exec.LookPath(c.Bridges.Signal.SignalCLI); e == nil {
+			fmt.Println("signal-cli:", path)
+		} else {
+			fmt.Println("signal-cli: unavailable", e)
+		}
+		if path, e := exec.LookPath("java"); e == nil {
+			fmt.Println("Java:", path)
+		} else {
+			fmt.Println("Java: unavailable", e)
+		}
 	}
 	if e := sandbox.Probe(ctx, true); e == nil {
 		fmt.Println("unprivileged user namespaces: available")
