@@ -102,7 +102,8 @@ HTTPS.
 
 Without LAN mode, Tailscale gives you an HTTPS address that only your own
 devices can open, from anywhere. With LAN mode on, these requests also need
-a login:
+a login (faztudo recognizes them by the forwarding headers `tailscale serve`
+adds, even when they arrive from 127.0.0.1):
 
 1. Log in to Tailscale on this machine and on the phone (same account).
 2. Enable Serve for your tailnet when Tailscale asks, and allow your user

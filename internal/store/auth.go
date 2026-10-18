@@ -158,18 +158,16 @@ func (s *Store) CreatePairing(ctx context.Context, tokenHash string, now, expire
 	return id, storeError(err)
 }
 
-// ConsumePairing deletes the pairing row on first lookup and returns ErrNotFound
-// if it did not exist or had already expired.
+// ConsumePairing deletes the pairing row and returns ErrNotFound if it did
+// not exist or had already expired. A single DELETE ... RETURNING decides the
+// winner, so concurrent callers cannot both consume one token.
 func (s *Store) ConsumePairing(ctx context.Context, tokenHash string, now time.Time) error {
 	var expiresRaw string
-	err := s.db.QueryRowContext(ctx, "SELECT expires_at FROM pairings WHERE token_hash=?", tokenHash).Scan(&expiresRaw)
+	err := s.db.QueryRowContext(ctx, "DELETE FROM pairings WHERE token_hash=? RETURNING expires_at", tokenHash).Scan(&expiresRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
-		return err
-	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM pairings WHERE token_hash=?", tokenHash); err != nil {
 		return err
 	}
 	expiresAt, err := time.Parse(time.RFC3339Nano, expiresRaw)
@@ -177,4 +175,27 @@ func (s *Store) ConsumePairing(ctx context.Context, tokenHash string, now time.T
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DeleteAllSessions revokes every signed-in device.
+func (s *Store) DeleteAllSessions(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM sessions")
+	return err
+}
+
+// SessionActive reports whether the session row still exists and has not expired.
+func (s *Store) SessionActive(ctx context.Context, id string, now time.Time) (bool, error) {
+	var expiresRaw string
+	err := s.db.QueryRowContext(ctx, "SELECT expires_at FROM sessions WHERE id=?", id).Scan(&expiresRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, expiresRaw)
+	if err != nil {
+		return false, err
+	}
+	return now.Before(expiresAt), nil
 }

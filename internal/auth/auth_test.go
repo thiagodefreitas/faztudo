@@ -215,19 +215,62 @@ func TestPasswordHashAndTokensAndRateLimit(t *testing.T) {
 	limiter := NewLoginRateLimiter()
 	limiter.Now = func() time.Time { return now }
 	for i := range 5 {
-		if !limiter.Allowed("192.168.1.50:54321") {
+		if !limiter.Attempt("192.168.1.50:54321") {
 			t.Fatalf("attempt %d should be allowed", i+1)
 		}
-		limiter.RecordFailure("192.168.1.50:54321")
 	}
-	if limiter.Allowed("192.168.1.50:11111") {
+	if limiter.Attempt("192.168.1.50:11111") {
 		t.Fatal("6th attempt from same IP should be rate limited")
 	}
-	if !limiter.Allowed("192.168.1.51:54321") {
+	if !limiter.Attempt("192.168.1.51:54321") {
 		t.Fatal("another IP should not be rate limited")
 	}
 	now = now.Add(15*time.Minute + time.Second)
-	if !limiter.Allowed("192.168.1.50:54321") {
+	if !limiter.Attempt("192.168.1.50:54321") {
 		t.Fatal("rate limit should expire after 15 minutes")
+	}
+	limiter.Forget("192.168.1.50:1")
+	for i := range 5 {
+		if !limiter.Attempt("192.168.1.50:2") {
+			t.Fatalf("attempt %d after Forget should be allowed", i+1)
+		}
+	}
+}
+
+// Finding 5: every check runs a bcrypt comparison, so an unset or empty
+// password cannot be told apart by timing.
+func TestCheckPasswordAlwaysRunsComparison(t *testing.T) {
+	calls := 0
+	orig := compareHash
+	compareHash = func(h, p []byte) error { calls++; return orig(h, p) }
+	t.Cleanup(func() { compareHash = orig })
+
+	hash, err := HashPassword("correct-horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		hash []byte
+		pw   string
+		want bool
+	}{
+		{"no hash", nil, "anything", false},
+		{"no hash empty pw", nil, "", false},
+		{"empty pw", hash, "", false},
+		{"wrong pw", hash, "wrong", false},
+		{"right pw", hash, "correct-horse", true},
+	}
+	for _, tc := range cases {
+		calls = 0
+		if got := CheckPassword(tc.hash, tc.pw); got != tc.want {
+			t.Fatalf("%s: got %t, want %t", tc.name, got, tc.want)
+		}
+		if calls != 1 {
+			t.Fatalf("%s: bcrypt comparison ran %d times, want 1", tc.name, calls)
+		}
+	}
+	if cost, err := bcrypt.Cost([]byte(dummyHash)); err != nil || cost != BcryptCost {
+		t.Fatalf("dummy hash cost %d (%v), want %d", cost, err, BcryptCost)
 	}
 }

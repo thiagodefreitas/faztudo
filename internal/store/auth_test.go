@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -98,5 +99,65 @@ func TestPasswordHashAndSessionsAndPairings(t *testing.T) {
 	}
 	if err := s.ConsumePairing(ctx, "pair-hash-expired", pairExpires.Add(time.Second)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expired pairing should fail: %v", err)
+	}
+}
+
+// Finding 4: a pairing token is consumed by exactly one caller.
+func TestConsumePairingConcurrentSingleWinner(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	if _, err := s.CreatePairing(ctx, "race-token", now, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	const n = 32
+	results := make([]error, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results[i] = s.ConsumePairing(ctx, "race-token", now)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	wins := 0
+	for _, err := range results {
+		if err == nil {
+			wins++
+		} else if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d consumers succeeded, want exactly 1", wins)
+	}
+}
+
+func TestDeleteAllSessions(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UTC()
+	for _, h := range []string{"a", "b"} {
+		if _, err := s.CreateSession(ctx, h, "m", "Phone", "ua", now, now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteAllSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if devs, err := s.Devices(ctx, now); err != nil || len(devs) != 0 {
+		t.Fatalf("devices after delete all: %v %v", devs, err)
 	}
 }

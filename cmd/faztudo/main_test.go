@@ -138,6 +138,12 @@ func TestPasswdAndLANStartup(t *testing.T) {
 		t.Fatal("expected mismatched passwords to fail")
 	}
 
+	// A session that exists before a password change must not survive it.
+	now := time.Now().UTC()
+	if _, err := s.CreateSession(context.Background(), "old-session", humanID, "Phone", "ua", now, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
 	// Valid runPasswd stores bcrypt hash in DB.
 	out.Reset()
 	if err := runPasswd(p, strings.NewReader("synthetic-lan-secret\nsynthetic-lan-secret\n"), &out); err != nil {
@@ -146,6 +152,9 @@ func TestPasswdAndLANStartup(t *testing.T) {
 	hash, err := s.PasswordHash(context.Background())
 	if err != nil || !auth.CheckPassword(hash, "synthetic-lan-secret") {
 		t.Fatalf("stored password hash invalid: %v", err)
+	}
+	if devs, err := s.Devices(context.Background(), time.Now().UTC()); err != nil || len(devs) != 0 {
+		t.Fatalf("sessions survived passwd: %v %v", devs, err)
 	}
 
 	// Now startLAN succeeds, prints LAN URLs, and serves HTTPS + CA helper.

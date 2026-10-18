@@ -27,8 +27,10 @@ design assumes that agents make mistakes and that messages from outside
 - **No anonymous LAN access.** LAN mode refuses to start if no password has
   been set with `faztudo passwd` and no device is paired. Passwords are stored
   only as `bcrypt` hashes (cost 12) in SQLite and are never logged. Login is
-  rate-limited to 5 failed attempts per 15 minutes per remote address (HTTP
-  429). Pairing tokens (`POST /api/v1/auth/pairings`, callable from loopback
+  rate-limited to 5 attempts per 15 minutes per remote address, counted before
+  the password is checked and cleared by a correct login (HTTP 429).
+  `faztudo passwd` signs out every device. `GET /api/v1/health` returns only
+  `{"ok":true}` on the LAN listener. Pairing tokens (`POST /api/v1/auth/pairings`, callable from loopback
   only) are 128-bit random values, stored as SHA-256 hashes, valid for 5
   minutes, and burned on first use whether pairing succeeds or not. Sessions
   use 32-byte random tokens stored as SHA-256 hashes in the `sessions` table

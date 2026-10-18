@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -84,5 +85,27 @@ func TestLANConfig(t *testing.T) {
 	}
 	if _, err := Load(p); err == nil {
 		t.Fatal("expected error for invalid lan.listen")
+	}
+}
+
+// Finding 7: the CA helper has a real default listen address.
+func TestCAListenDefault(t *testing.T) {
+	if got := Defaults().LAN.CAListen; got != "0.0.0.0:7459" {
+		t.Fatalf("Defaults ca_listen = %q, want 0.0.0.0:7459", got)
+	}
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	p := PathsFromEnv()
+	if err := WriteDefaults(p); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(p.ConfigFile)
+	if err != nil || !strings.Contains(string(body), `ca_listen = "0.0.0.0:7459"`) {
+		t.Fatalf("written defaults lack ca_listen: %v %s", err, body)
+	}
+	c, err := Load(p)
+	if err != nil || c.LAN.CAListen != "0.0.0.0:7459" {
+		t.Fatalf("loaded ca_listen = %q (%v)", c.LAN.CAListen, err)
 	}
 }

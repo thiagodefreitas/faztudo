@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -47,15 +48,18 @@ type API struct {
 	ProbeLane       func(context.Context, string) (domain.Lane, error)
 	// HideLane drops lanes that must not be listed, such as a detected-only
 	// default once lanes.toml configures the CLI.
-	HideLane        func(domain.Lane) bool
-	MCP             http.Handler
-	LANEnabled      bool
-	LANListen       string
-	CACertPEM       []byte
-	CAFingerprint   string
-	CAHTTPURL       string
-	LANURLs         []string
-	Limiter         *auth.LoginRateLimiter
+	HideLane      func(domain.Lane) bool
+	MCP           http.Handler
+	LANEnabled    bool
+	LANListen     string
+	CACertPEM     []byte
+	CAFingerprint string
+	CAHTTPURL     string
+	LANURLs       []string
+	Limiter       *auth.LoginRateLimiter
+	// SessionRecheck is how often an open stream re-reads its session row.
+	// Zero means 10 seconds.
+	SessionRecheck  time.Duration
 	Now             func() time.Time
 	actorForRequest func(*http.Request) (domain.Member, error)
 	resolveMu       sync.Mutex
@@ -82,6 +86,11 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) routes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		if a.isLANRequest(r) {
+			// The LAN listener is reachable by anyone on the network: no version string.
+			respond(w, 200, map[string]any{"ok": true})
+			return
+		}
 		respond(w, 200, map[string]any{"ok": true, "version": a.Version, "api": "v1"})
 	})
 	m.HandleFunc("GET /ca.crt", a.serveCACert)
@@ -785,7 +794,8 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	if a.ResolveApproval != nil && v.RunID != "" {
 		outcome, err := a.ResolveApproval(r.Context(), v, req.Option, req.CommitMessage)
 		if err != nil {
-			fail(w, 409, "conflict", err.Error())
+			slog.Error("resolve approval", "approval", v.ID, "run", v.RunID, "err", err)
+			fail(w, 409, "conflict", "approval could not be applied; see the daemon log")
 			return
 		}
 		req.Note = outcome
@@ -881,6 +891,26 @@ func (a *API) probe(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, lane)
 }
+func (a *API) watchSession(ctx context.Context, cancel context.CancelFunc, sessionID string) {
+	every := a.SessionRecheck
+	if every <= 0 {
+		every = 10 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			ok, err := a.Store.SessionActive(ctx, sessionID, a.now())
+			if err == nil && !ok {
+				cancel()
+				return
+			}
+		}
+	}
+}
 func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	if a.isLANRequest(r) {
 		if !validLANOrigin(r) {
@@ -944,6 +974,11 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	ch, err := a.Store.Subscribe(streamCtx, sub.AfterSeq)
 	if err != nil {
 		return
+	}
+	if sessID != "" {
+		// A password change or a deleted row from another process never reaches
+		// closeDeviceStreams, so re-read the session row on a timer.
+		go a.watchSession(streamCtx, cancel, sessID)
 	}
 	for evt := range ch {
 		b, _ := json.Marshal(evt)

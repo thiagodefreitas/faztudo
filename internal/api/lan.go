@@ -69,10 +69,22 @@ func (a *API) isLANRequest(r *http.Request) bool {
 	if !a.LANEnabled {
 		return false
 	}
-	if r.TLS != nil {
+	if r.TLS != nil || hasForwardingHeaders(r) {
 		return true
 	}
 	return !isLoopbackAddr(r.RemoteAddr) || !loopbackHost(r.Host)
+}
+
+// hasForwardingHeaders reports whether a reverse proxy (for example
+// tailscale serve) put its marks on the request. A loopback peer that carries
+// them is a relayed remote client, not the desktop user.
+func hasForwardingHeaders(r *http.Request) bool {
+	for _, h := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded"} {
+		if r.Header.Get(h) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func validLANOrigin(r *http.Request) bool {
@@ -185,7 +197,8 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if a.Limiter == nil {
 		a.Limiter = auth.NewLoginRateLimiter()
 	}
-	if !a.Limiter.Allowed(r.RemoteAddr) {
+	// Count the attempt before the slow bcrypt check so parallel requests cannot all pass.
+	if !a.Limiter.Attempt(r.RemoteAddr) {
 		fail(w, 429, "rate_limited", "too many failed login attempts")
 		return
 	}
@@ -196,12 +209,13 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	hash, err := a.Store.PasswordHash(r.Context())
-	if err != nil || !auth.CheckPassword(hash, req.Password) {
-		a.Limiter.RecordFailure(r.RemoteAddr)
+	// CheckPassword runs bcrypt even with no password set, so timing matches a wrong password.
+	hash, _ := a.Store.PasswordHash(r.Context())
+	if !auth.CheckPassword(hash, req.Password) {
 		fail(w, 401, "unauthorized", "invalid password")
 		return
 	}
+	a.Limiter.Forget(r.RemoteAddr)
 	token, err := auth.NewSessionToken()
 	if err != nil {
 		fail(w, 500, "internal", "internal error")

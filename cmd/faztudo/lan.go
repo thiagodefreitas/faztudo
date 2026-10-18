@@ -43,7 +43,11 @@ func runPasswd(p config.Paths, in io.Reader, out io.Writer) error {
 	if err := s.SetPasswordHash(context.Background(), hash); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "password updated")
+	// A new password revokes every existing session. Open streams notice on their next recheck.
+	if err := s.DeleteAllSessions(context.Background()); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "password updated; all devices signed out")
 	return nil
 }
 

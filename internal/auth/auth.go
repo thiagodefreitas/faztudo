@@ -15,6 +15,9 @@ import (
 
 const BcryptCost = 12
 
+// compareHash is bcrypt's comparison; tests replace it to count calls.
+var compareHash = bcrypt.CompareHashAndPassword
+
 // HashPassword hashes a plaintext password with bcrypt at cost 12.
 func HashPassword(password string) ([]byte, error) {
 	if strings.TrimSpace(password) == "" {
@@ -23,12 +26,21 @@ func HashPassword(password string) ([]byte, error) {
 	return bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 }
 
-// CheckPassword reports whether password matches the bcrypt hash.
+// dummyHash is a valid cost-12 bcrypt hash of a password nobody knows. It is
+// compared against when no password is set so that an unset password costs
+// the same time as a wrong one.
+const dummyHash = "$2a$12$nSQUiT8ya5/PdRVWFkh3dOUN0M7Hm84..p3DX/81vPQBnSKqlgZUy"
+
+// CheckPassword reports whether password matches the bcrypt hash. A bcrypt
+// comparison always runs: against a fixed dummy hash when hash is empty, and
+// for an empty password too, so timing does not reveal either condition.
 func CheckPassword(hash []byte, password string) bool {
-	if len(hash) == 0 || password == "" {
-		return false
+	unset := len(hash) == 0
+	if unset {
+		hash = []byte(dummyHash)
 	}
-	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
+	err := compareHash(hash, []byte(password))
+	return err == nil && !unset && password != ""
 }
 
 // NewSessionToken returns a random 32-byte token encoded as 64 hex characters.
@@ -60,7 +72,7 @@ const (
 	rateLimitWindow      = 15 * time.Minute
 )
 
-// LoginRateLimiter enforces at most 5 failed login attempts per 15 minutes per remote IP.
+// LoginRateLimiter enforces at most 5 login attempts that do not end in success per 15 minutes per remote IP.
 type LoginRateLimiter struct {
 	Now      func() time.Time
 	mu       sync.Mutex
@@ -74,12 +86,25 @@ func NewLoginRateLimiter() *LoginRateLimiter {
 	}
 }
 
+// remoteKey reduces a remote address to one canonical host string so that
+// textual aliases (IPv6 spellings, IPv4-mapped IPv6, ports) share a bucket.
 func remoteKey(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		return strings.TrimSpace(remoteAddr)
+		host = strings.TrimSpace(remoteAddr)
 	}
-	return host
+	host = strings.Trim(host, "[]")
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.String()
 }
 
 func (l *LoginRateLimiter) prune(key string, now time.Time) []time.Time {
@@ -99,19 +124,27 @@ func (l *LoginRateLimiter) prune(key string, now time.Time) []time.Time {
 	return kept
 }
 
-func (l *LoginRateLimiter) Allowed(remoteAddr string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := l.Now()
-	key := remoteKey(remoteAddr)
-	return len(l.prune(key, now)) < rateLimitMaxFailures
-}
-
-func (l *LoginRateLimiter) RecordFailure(remoteAddr string) {
+// Attempt records a login attempt for remoteAddr and reports whether it may
+// proceed. Pruning, the limit check and the recording happen under one lock,
+// and callers invoke it before the slow password check, so a burst of
+// parallel requests cannot all observe an empty window.
+func (l *LoginRateLimiter) Attempt(remoteAddr string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.Now()
 	key := remoteKey(remoteAddr)
 	kept := l.prune(key, now)
+	if len(kept) >= rateLimitMaxFailures {
+		return false
+	}
 	l.failures[key] = append(kept, now)
+	return true
+}
+
+// Forget clears the recorded attempts for remoteAddr. Login calls it after a
+// correct password so a legitimate user is not locked out by earlier typos.
+func (l *LoginRateLimiter) Forget(remoteAddr string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.failures, remoteKey(remoteAddr))
 }

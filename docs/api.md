@@ -17,7 +17,9 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403),
 ## Authentication
 
 On `127.0.0.1` (`server.listen`), the single local user is signed in
-automatically. On the LAN HTTPS listener (`lan.listen`, default
+automatically. With LAN mode on, a loopback request that carries a proxy
+header (`X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or
+`Forwarded`) is treated as a LAN request and needs a session. On the LAN HTTPS listener (`lan.listen`, default
 `0.0.0.0:7458`), every API request (except `GET /api/v1/health`,
 `GET /ca.crt`, `POST /api/v1/auth/login`, and `POST /api/v1/auth/pair`)
 requires the `fz_session` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`,
@@ -183,7 +185,7 @@ interface Lane {
 | GET | `/api/v1/lanes` | all lanes |
 | PATCH | `/api/v1/lanes/{id}` | set `{capacity?, health_override?, manual_window?}` |
 | POST | `/api/v1/lanes/{id}/probe` | refresh this lane's usage now |
-| GET | `/api/v1/health` | `{ok, version}` without auth |
+| GET | `/api/v1/health` | `{ok, version, api}` without auth on loopback; `{ok}` only on the LAN listener |
 
 ## Event stream
 
