@@ -32,7 +32,7 @@ export function ZoomControls({
       aria-label="Zoom"
       data-testid="office-zoom-controls"
       className={cx(
-        "absolute right-2 top-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-lg border border-line bg-surface/90 p-1 shadow-xs",
+        "absolute bottom-2 right-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-lg border border-line bg-surface/90 p-1 shadow-xs",
         className,
       )}
     >
