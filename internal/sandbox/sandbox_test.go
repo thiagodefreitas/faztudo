@@ -134,3 +134,23 @@ func TestSandboxCannotReadUnboundHome(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeArgsAreAcceptedBySystemd(t *testing.T) {
+	args := ScopeArgs("64M", 16, []string{"/bin/true"})
+	for _, flag := range []string{"--wait", "--pipe", "--pty"} {
+		for _, a := range args {
+			if a == flag {
+				t.Fatalf("%s is rejected by systemd-run in --scope mode: %v", flag, args)
+			}
+		}
+	}
+	if _, err := exec.LookPath("systemd-run"); err != nil {
+		t.Skip("systemd-run not installed")
+	}
+	if out, err := exec.Command("systemd-run", args...).CombinedOutput(); err != nil {
+		t.Skipf("no systemd user manager here (%v: %s)", err, out)
+	}
+	if !ScopeAvailable(context.Background(), "64M", 16) {
+		t.Fatal("scope runs from the shell but ScopeAvailable says no")
+	}
+}

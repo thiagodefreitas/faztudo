@@ -188,7 +188,9 @@ func Check(ctx context.Context, args []string) error {
 // ScopeArgs retains the bwrap command as a child of systemd-run, so the
 // runner can still wait for and signal its process group.
 func ScopeArgs(memory string, tasks int, command []string) []string {
-	args := []string{"--user", "--scope", "--wait", "--pipe", "--quiet", "--collect", "--property=MemoryMax=" + memory, fmt.Sprintf("--property=TasksMax=%d", tasks), "--"}
+	// A scope runs the command in the foreground with its own stdin and
+	// stdout; systemd-run rejects --wait and --pipe with --scope.
+	args := []string{"--user", "--scope", "--quiet", "--collect", "--property=MemoryMax=" + memory, fmt.Sprintf("--property=TasksMax=%d", tasks), "--"}
 	return append(args, command...)
 }
 
