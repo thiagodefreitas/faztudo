@@ -9,7 +9,8 @@ import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { sortMessages } from "../state/reduce"
 import { useChannels, useMe, useMembers, type PendingMessage } from "../state/queries"
-import type { Channel, Message } from "../types"
+import { toggleChannelMute, useNotifyPrefs } from "../lib/notify-prefs"
+import type { Attachment, Channel, Message } from "../types"
 import { Composer } from "./composer"
 import { MessageList } from "./message-list"
 import { RunPanel } from "./run-panel"
@@ -18,10 +19,14 @@ import { AgentAvatar } from "./agent-avatar"
 import { TeamIcon } from "./team-icon"
 import { ThreadPanel } from "./thread-panel"
 import { OPEN_SETTINGS_EVENT } from "./palette"
+import { PinsDialog } from "./pins-dialog"
+import { OPEN_SEARCH_EVENT } from "./search-dialog"
 
 const channelApi = getRouteApi("/c/$channelId")
 
 const MENU_ITEM = "flex min-h-10 cursor-default items-center rounded px-2 text-[13px] text-ink outline-none data-[highlighted]:bg-accent-soft"
+
+const HEADER_ICON = "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink aria-pressed:text-accent"
 
 // The header shows the folder name only, so screenshots do not leak home paths.
 export function repoName(path: string): string {
@@ -45,6 +50,9 @@ export function ChannelPage() {
   const navigate = useNavigate()
   const channel = channels.data?.find((item) => item.id === channelId)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pinsOpen, setPinsOpen] = useState(false)
+  const notify = useNotifyPrefs()
+  const muted = notify.muted.includes(channelId)
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -94,15 +102,17 @@ export function ChannelPage() {
     qc.setQueryData<PendingMessage[]>(qk.pending(channelId), (list = []) => list.filter((item) => item.key !== key))
   }
 
-  function send(body: string, key = ulid()) {
-    remember({ key, body, createdAt: new Date().toISOString() })
-    void api.postMessage(channelId, { body, idempotency_key: key }).then(
+  function send(body: string, attachments?: Attachment[], key = ulid()) {
+    const files = attachments && attachments.length > 0 ? attachments : undefined
+    remember({ key, body, ...(files ? { attachments: files } : {}), createdAt: new Date().toISOString() })
+    const refs = files?.map(({ id, name }) => ({ id, name }))
+    void api.postMessage(channelId, { body, ...(refs ? { attachments: refs } : {}), idempotency_key: key }).then(
       (message) => {
         qc.setQueryData<Message[]>(qk.messages(channelId), (list = []) => sortMessages(mergeById([message], list)))
         dropPending(key)
       },
       (error: unknown) => {
-        remember({ key, body, createdAt: new Date().toISOString(), error: errorText(error) })
+        remember({ key, body, ...(files ? { attachments: files } : {}), createdAt: new Date().toISOString(), error: errorText(error) })
       },
     )
   }
@@ -160,6 +170,32 @@ export function ChannelPage() {
               {repoName(channel.repo_path)}
             </p>
           )}
+          <div className="hidden shrink-0 items-center gap-1 md:flex">
+            <button type="button" aria-label="Search messages" title="Search messages (Ctrl+Shift+F)" onClick={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))} className={HEADER_ICON}>
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+                <circle cx="9" cy="9" r="5" />
+                <path d="m13 13 4 4" />
+              </svg>
+            </button>
+            <button type="button" aria-label="Pinned messages" title="Pinned messages" onClick={() => setPinsOpen(true)} className={HEADER_ICON}>
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m12 3 5 5-2 1-2.5 3.5.5 2.5-1 1-3-3-4.5 4.5M7 8l-1-1 1-1 1.5 1.5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label={muted ? "Unmute channel" : "Mute channel"}
+              aria-pressed={muted}
+              title={muted ? "Unmute notifications for this channel" : "Mute notifications for this channel"}
+              onClick={() => toggleChannelMute(channelId)}
+              className={HEADER_ICON}
+            >
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 14V9a5 5 0 0 1 10 0v5l1 1H4zM8.5 17.5h3" />
+                {muted && <path d="m3 3 14 14" />}
+              </svg>
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
@@ -182,6 +218,15 @@ export function ChannelPage() {
             </Menu.Trigger>
             <Menu.Portal>
               <Menu.Content align="end" sideOffset={6} className="z-50 min-w-44 rounded-md border border-line bg-surface p-1 shadow-lg">
+                <Menu.Item onSelect={() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT))} className={MENU_ITEM}>
+                  Search messages
+                </Menu.Item>
+                <Menu.Item onSelect={() => setPinsOpen(true)} className={MENU_ITEM}>
+                  Pinned messages
+                </Menu.Item>
+                <Menu.Item onSelect={() => toggleChannelMute(channelId)} className={MENU_ITEM}>
+                  {muted ? "Unmute channel" : "Mute channel"}
+                </Menu.Item>
                 <Menu.Item onSelect={() => setSettingsOpen(true)} className={MENU_ITEM}>
                   Settings
                 </Menu.Item>
@@ -201,15 +246,18 @@ export function ChannelPage() {
         <MessageList
           key={channelId}
           channelId={channelId}
-          onRetry={(item) => send(item.body, item.key)}
+          {...(search.m ? { focusId: search.m } : {})}
+          onRetry={(item) => send(item.body, item.attachments, item.key)}
           onOpenThread={openThread}
         />
         <Composer
           members={members.data ?? []}
           channelName={channel.name}
+          attach
           {...(direct ? { placeholder: `Message ${title}` } : {})}
-          onSend={(body) => send(body)}
+          onSend={(body, attachments) => send(body, attachments)}
         />
+        <PinsDialog channelId={channelId} open={pinsOpen} onOpenChange={setPinsOpen} />
       </section>
       {search.thread ? (
         <ThreadPanel key={search.thread} channelId={channelId} rootId={search.thread} />

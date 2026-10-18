@@ -103,19 +103,50 @@ type Channel struct {
 }
 
 type Message struct {
-	ID         ID         `json:"id"`
-	ChannelID  ID         `json:"channel_id"`
-	ThreadID   ID         `json:"thread_id,omitempty"`
-	AuthorID   ID         `json:"author_id"`
-	Body       string     `json:"body"`
-	Mentions   []ID       `json:"mentions"`
-	Options    []string   `json:"options,omitempty"`
-	RunID      ID         `json:"run_id,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	EditedAt   *time.Time `json:"edited_at,omitempty"`
-	ReplyCount int        `json:"reply_count,omitempty"`
-	Handoff    *Handoff   `json:"handoff,omitempty"` // set when an agent posted it with the delegate tool
-	Routine    string     `json:"routine,omitempty"` // handle of the routine that posted it
+	ID          ID           `json:"id"`
+	ChannelID   ID           `json:"channel_id"`
+	ThreadID    ID           `json:"thread_id,omitempty"`
+	AuthorID    ID           `json:"author_id"`
+	Body        string       `json:"body"`
+	Mentions    []ID         `json:"mentions"`
+	Options     []string     `json:"options,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"` // uploaded files, by content hash
+	RunID       ID           `json:"run_id,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	EditedAt    *time.Time   `json:"edited_at,omitempty"`
+	ReplyCount  int          `json:"reply_count,omitempty"`
+	Handoff     *Handoff     `json:"handoff,omitempty"` // set when an agent posted it with the delegate tool
+	Routine     string       `json:"routine,omitempty"` // handle of the routine that posted it
+}
+
+// Attachment describes a file stored by content hash. ContentType is what the
+// server sniffed from the bytes, not what the uploader claimed.
+type Attachment struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+}
+
+// Pin marks a message as pinned in its channel.
+type Pin struct {
+	ChannelID string    `json:"channel_id"`
+	MessageID ID        `json:"message_id"`
+	PinnedBy  ID        `json:"pinned_by"`
+	PinnedAt  time.Time `json:"pinned_at"`
+}
+
+// PinnedMessage is a pin with the message it points at.
+type PinnedMessage struct {
+	Pin
+	Message Message `json:"message"`
+}
+
+// SearchHit is one message found by a search. Snippet wraps each match in
+// U+0001 and U+0002 so a client can highlight without trusting HTML.
+type SearchHit struct {
+	Message Message `json:"message"`
+	Snippet string  `json:"snippet"`
 }
 
 type RunMode string

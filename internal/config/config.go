@@ -15,7 +15,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/cron"
 )
 
-type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir, TLSDir string }
+type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir, TLSDir, FilesDir string }
 
 var memoryLimitPattern = regexp.MustCompile(`^[1-9][0-9]*[KMGT]?$`)
 
@@ -41,6 +41,7 @@ func PathsFromEnv() Paths {
 		WorktreesDir: filepath.Join(data, "worktrees"),
 		RunsDir:      filepath.Join(data, "runs"),
 		TLSDir:       filepath.Join(data, "tls"),
+		FilesDir:     filepath.Join(data, "files"),
 	}
 }
 
@@ -48,6 +49,8 @@ type Server struct {
 	Listen       string   `toml:"listen"`
 	OpenBrowser  bool     `toml:"open_browser"`
 	AllowedHosts []string `toml:"allowed_hosts"`
+	// MaxUploadMB caps one attached file. Zero or less means the default, 25.
+	MaxUploadMB int `toml:"max_upload_mb"`
 }
 type LAN struct {
 	Enabled  bool   `toml:"enabled"`
@@ -162,7 +165,7 @@ type Config struct {
 
 func Defaults() Config {
 	return Config{
-		Server:   Server{Listen: "127.0.0.1:7457", OpenBrowser: true},
+		Server:   Server{Listen: "127.0.0.1:7457", OpenBrowser: true, MaxUploadMB: 25},
 		LAN:      LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
 		Runs:     Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "off", SandboxMemoryMax: "4G", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
 		Routines: Routines{MaxPerDay: 20},

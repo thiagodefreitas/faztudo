@@ -21,6 +21,7 @@ faztudo follows the XDG directory layout:
 [server]
 listen = "127.0.0.1:7457"
 open_browser = true
+max_upload_mb = 25          # largest attached file
 
 [lan]
 enabled = false
@@ -43,6 +44,13 @@ request_max_premium_runs = 2  # of those, runs on a premium lane
 timezone = ""     # IANA name such as "Europe/Berlin"; empty uses this machine's zone
 max_per_day = 20  # routine runs started per local day, all routines together
 ```
+
+`max_upload_mb` (under `[server]`) caps one attached file. Files are stored
+under `files/` in the data directory, named by the SHA-256 of their content,
+mode 0400, and are served with a type sniffed from the bytes. Only PNG, JPEG,
+GIF and WebP show inline; every other file downloads. An agent sees the text
+of small (64 KB or less) plain-text attachments of the message that started
+its run through `read_context`; other files are listed by name and size.
 
 `allowed_hosts` (under `[server]`) lists extra host names accepted from a
 reverse proxy running on this machine, for example

@@ -108,6 +108,19 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 6 {
+		migration, err = migrations.ReadFile("migrations/006.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	// Search is optional: if this SQLite build has no FTS5 the table is not
+	// created and Search falls back to LIKE.
+	setupSearch(db)
 	return &Store{db: db}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
@@ -262,10 +275,13 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org", "lane_usage_history", "channel_summaries"} {
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org", "lane_usage_history", "channel_summaries", "pins"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
+	}
+	if err = clearIndex(ctx, tx); err != nil {
+		return err
 	}
 	rows, err := tx.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events ORDER BY seq")
 	if err != nil {
@@ -351,7 +367,30 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 				return err
 			}
 		}
+		if err = indexMessage(ctx, tx, m.ID, m.ChannelID, m.Body); err != nil {
+			return err
+		}
 		return updateChannelSeq(ctx, tx, m.ChannelID, e.Seq)
+	case events.MessagePinned:
+		var p domain.Pin
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		if p.ChannelID == "" || p.MessageID == "" || p.PinnedBy == "" {
+			return errors.New("pin needs channel, message and pinned_by")
+		}
+		if p.PinnedAt.IsZero() {
+			p.PinnedAt = e.TS
+		}
+		_, err := tx.ExecContext(ctx, "INSERT OR REPLACE INTO pins(channel_id,message_id,pinned_by,pinned_at) VALUES(?,?,?,?)", p.ChannelID, p.MessageID, p.PinnedBy, p.PinnedAt.Format(time.RFC3339Nano))
+		return err
+	case events.MessageUnpinned:
+		var p domain.Pin
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM pins WHERE channel_id=? AND message_id=?", p.ChannelID, p.MessageID)
+		return err
 	case events.MessageEdited:
 		var m struct {
 			ID       string    `json:"id"`
@@ -362,7 +401,10 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE messages SET data=json_set(data,'$.body',?,'$.edited_at',?) WHERE id=?", m.Body, m.EditedAt.Format(time.RFC3339Nano), m.ID)
-		return err
+		if err != nil {
+			return err
+		}
+		return reindexMessage(ctx, tx, m.ID, m.Body)
 	case events.RunCreated, events.RunUpdated:
 		var r domain.Run
 		if err := json.Unmarshal(e.Payload, &r); err != nil {

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import { qk } from "../state/keys"
 import type { Member, Message } from "../types"
 import { MessageList } from "./message-list"
@@ -12,6 +13,7 @@ vi.mock("@tanstack/react-virtual", () => ({
     getTotalSize: () => count * 88,
     getVirtualItems: () => Array.from({ length: count }, (_, index) => ({ index, key: getItemKey(index), start: index * 88 })),
     measureElement: () => undefined,
+    scrollToIndex: () => undefined,
   }),
 }))
 
@@ -44,11 +46,25 @@ const reviewer: Member = {
   agent: { lanes: ["codex/default"] },
 }
 
-function renderList(messages: Message[] = [], replies: Message[] = []) {
+function renderList(
+  messages: Message[] = [],
+  replies: Message[] = [],
+  extra: { pinned?: string[]; focusId?: string; onOpenThread?: (message: Message) => void } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
   client.setQueryData(qk.messages("c1"), messages)
+  client.setQueryData(
+    qk.messagePins("c1"),
+    (extra.pinned ?? []).map((id) => ({
+      channel_id: "c1",
+      message_id: id,
+      pinned_by: ada.id,
+      pinned_at: "2026-10-18T11:00:00.000Z",
+      message: messages.find((item) => item.id === id),
+    })),
+  )
   for (const root of messages.filter((item) => item.options)) {
     client.setQueryData(qk.thread(root.id), { root, replies })
   }
@@ -60,9 +76,15 @@ function renderList(messages: Message[] = [], replies: Message[] = []) {
   client.setQueryData(qk.pending("c1"), [])
   render(
     <QueryClientProvider client={client}>
-      <MessageList channelId="c1" onRetry={() => undefined} />
+      <MessageList
+        channelId="c1"
+        onRetry={() => undefined}
+        {...(extra.focusId ? { focusId: extra.focusId } : {})}
+        {...(extra.onOpenThread ? { onOpenThread: extra.onOpenThread } : {})}
+      />
     </QueryClientProvider>,
   )
+  return client
 }
 
 describe("MessageList", () => {
@@ -117,5 +139,40 @@ describe("MessageList", () => {
     renderList([ask], [answer])
     expect(screen.getByRole("button", { name: /B\s*safe/ })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: /A\s*fast/ })).toBeDisabled()
+  })
+
+  it("shows attachments: an image inline and another file as a card", () => {
+    const withFiles: Message = {
+      ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", ada, "2026-10-18T10:00:00.000Z", ""),
+      attachments: [
+        { id: "a".repeat(64), name: "shot.png", content_type: "image/png", size: 10 },
+        { id: "b".repeat(64), name: "notes.txt", content_type: "application/octet-stream", size: 20 },
+      ],
+    }
+    renderList([withFiles])
+    expect(screen.getByRole("img", { name: "shot.png" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /notes\.txt/ })).toBeInTheDocument()
+  })
+
+  it("pins and unpins from the message row", async () => {
+    const user = userEvent.setup()
+    const pin = vi.spyOn(api, "pinMessage").mockResolvedValue({ pinned: true })
+    const unpin = vi.spyOn(api, "unpinMessage").mockResolvedValue({ pinned: false })
+    const first = message("01CRZ3NDEKTSV4RRFFQ69G5CC1", ada, "2026-10-18T10:00:00.000Z", "plan A")
+    const second = message("01CRZ3NDEKTSV4RRFFQ69G5CC2", ada, "2026-10-18T11:00:00.000Z", "plan B")
+    renderList([first, second], [], { pinned: [second.id], onOpenThread: () => undefined })
+    expect(screen.getAllByText("Pinned")).toHaveLength(1)
+    await user.click(screen.getByRole("button", { name: "Pin" }))
+    expect(pin).toHaveBeenCalledWith(first.id)
+    await user.click(screen.getByRole("button", { name: "Unpin" }))
+    expect(unpin).toHaveBeenCalledWith(second.id)
+  })
+
+  it("flashes the message a search result pointed at", () => {
+    const first = message("01CRZ3NDEKTSV4RRFFQ69G5CC1", ada, "2026-10-18T10:00:00.000Z", "plan A")
+    const second = message("01CRZ3NDEKTSV4RRFFQ69G5CC2", ada, "2026-10-18T11:00:00.000Z", "plan B")
+    renderList([first, second], [], { focusId: second.id })
+    expect(document.getElementById(`msg-${second.id}`)).toHaveClass("bg-accent-soft")
+    expect(document.getElementById(`msg-${first.id}`)).not.toHaveClass("bg-accent-soft")
   })
 })

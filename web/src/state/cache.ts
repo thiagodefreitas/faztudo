@@ -53,6 +53,10 @@ export function applyEvent(qc: QueryClient, event: StreamEvent): void {
   if (event.type === "routine.updated") {
     void qc.invalidateQueries({ queryKey: qk.routines })
   }
+  // Pins are fetched per channel and not part of the snapshot.
+  if ((event.type === "message.pinned" || event.type === "message.unpinned") && event.channel_id) {
+    void qc.invalidateQueries({ queryKey: qk.messagePins(event.channel_id) })
+  }
   const prev = readSnapshot(qc)
   const next = reduce(prev, event)
   if (next === prev) return

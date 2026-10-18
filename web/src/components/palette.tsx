@@ -7,6 +7,7 @@ import { useOpenDirect } from "../state/direct"
 import { useChannels, useMe, useMembers } from "../state/queries"
 import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
+import { OPEN_SEARCH_EVENT } from "./search-dialog"
 
 // The channel page listens for this to open its settings dialog.
 export const OPEN_SETTINGS_EVENT = "faztudo:open-settings"
@@ -101,6 +102,13 @@ export function CommandPalette() {
             ))}
           </Group>
           <Group heading="Actions">
+            <Command.Item
+              value="search messages"
+              className={itemClass}
+              onSelect={() => run(() => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT)))}
+            >
+              Search messages
+            </Command.Item>
             <Command.Item
               value="open lanes page"
               className={itemClass}

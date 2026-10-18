@@ -32,6 +32,9 @@ type Handler struct {
 	trigger Trigger
 	http    http.Handler
 	ledger  *org.Ledger
+	// FilesDir is where uploads live. read_context returns small text
+	// attachments of the run's trigger message from here.
+	FilesDir string
 	// Policy is set by the app before the first request.
 	Policy Policy
 }

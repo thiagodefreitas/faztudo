@@ -13,6 +13,8 @@ type Type string
 const (
 	MessagePosted     Type = "message.posted"
 	MessageEdited     Type = "message.edited"
+	MessagePinned     Type = "message.pinned"
+	MessageUnpinned   Type = "message.unpinned"
 	ChannelCreated    Type = "channel.created"
 	ChannelUpdated    Type = "channel.updated"
 	MemberUpdated     Type = "member.updated"

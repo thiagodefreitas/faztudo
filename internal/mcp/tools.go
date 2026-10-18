@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/files"
 	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
@@ -19,6 +21,8 @@ const (
 	maxBodyBytes = 65536
 	maxContext   = 50
 	maxOptions   = 8
+
+	maxAttachmentText = 64 << 10
 
 	minChoices     = 2
 	maxChoices     = 5
@@ -64,6 +68,19 @@ type messageOut struct {
 	Mentions  []string `json:"mentions"`
 	Options   []string `json:"options,omitempty"`
 	RunID     string   `json:"run_id,omitempty"`
+	// Attachments are set only on the message that started this run.
+	Attachments []attachmentOut `json:"attachments,omitempty"`
+}
+
+// attachmentOut is a file attached to the trigger message. Small plain text
+// files come with their content; anything else is described only, because
+// the sandbox cannot see the upload directory.
+type attachmentOut struct {
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	Text        string `json:"text,omitempty"`
+	Note        string `json:"note,omitempty"`
 }
 
 type messagesOut struct {
@@ -122,7 +139,7 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "read_context",
-		Description: "Read recent messages from this run's channel. Limit must be from 1 to 50.",
+		Description: "Read recent messages from this run's channel. Limit must be from 1 to 50. The message that started this run lists its attached files, with the text of small plain-text ones.",
 		Annotations: hints,
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in contextIn) (*sdkmcp.CallToolResult, messagesOut, error) {
 		out, err := h.readContext(ctx, grant, in.Limit)
@@ -372,11 +389,49 @@ func (h *Handler) readContext(ctx context.Context, grant Grant, limit int) (mess
 	if err != nil {
 		return messagesOut{}, err
 	}
+	trigger := ""
+	if run, err := h.store.Run(ctx, grant.RunID); err == nil {
+		trigger = run.TriggerMessageID
+	}
 	out := messagesOut{Messages: make([]messageOut, 0, len(msgs))}
 	for _, msg := range msgs {
-		out.Messages = append(out.Messages, messageView(msg))
+		view := messageView(msg)
+		if trigger != "" && msg.ID == trigger {
+			view.Attachments = h.attachmentViews(msg.Attachments)
+		}
+		out.Messages = append(out.Messages, view)
 	}
 	return out, nil
+}
+
+// attachmentViews describes the trigger message's files. It reads only ids
+// that the message itself lists, and only as files in the upload directory.
+func (h *Handler) attachmentViews(list []domain.Attachment) []attachmentOut {
+	var out []attachmentOut
+	for _, att := range list {
+		view := attachmentOut{Name: att.Name, ContentType: att.ContentType, Size: att.Size}
+		switch {
+		case h.FilesDir == "":
+			view.Note = "uploads are not available"
+		case att.Size > maxAttachmentText:
+			view.Note = "too large to show here"
+		default:
+			f, err := files.Store{Dir: h.FilesDir}.Open(att.ID)
+			if err != nil {
+				view.Note = "file is missing"
+				break
+			}
+			data, err := io.ReadAll(io.LimitReader(f, maxAttachmentText+1))
+			f.Close()
+			if err == nil && int64(len(data)) <= maxAttachmentText && files.IsText(data) {
+				view.Text = string(data)
+			} else {
+				view.Note = "not plain text, so not shown"
+			}
+		}
+		out = append(out, view)
+	}
+	return out
 }
 
 func (h *Handler) listMembers(ctx context.Context) (membersOut, error) {

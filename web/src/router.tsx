@@ -25,6 +25,8 @@ export interface RouterContext {
 export interface ChannelSearch {
   run?: string
   thread?: string
+  /** A message to scroll to, set by search results. */
+  m?: string
   view?: "diff"
 }
 
@@ -32,6 +34,7 @@ function validateSearch(search: Record<string, unknown>): ChannelSearch {
   const result: ChannelSearch = {}
   if (typeof search.run === "string" && search.run) result.run = search.run
   if (typeof search.thread === "string" && search.thread) result.thread = search.thread
+  if (typeof search.m === "string" && search.m) result.m = search.m
   if (search.view === "diff") result.view = "diff"
   return result
 }

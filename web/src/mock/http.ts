@@ -56,6 +56,19 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
   if (method === "GET" && parts[0] === "org" && parts.length === 1) return { status: 200, body: world.getOrg() }
   if (method === "GET" && parts[0] === "routines" && parts.length === 1) return { status: 200, body: world.getRoutines() }
 
+  if (method === "GET" && parts[0] === "search" && parts.length === 1) {
+    return send(world.search(url.searchParams.get("q") ?? "", url.searchParams.get("channel_id") ?? undefined))
+  }
+  if (method === "GET" && parts[0] === "channels" && parts[2] === "pins" && parts.length === 3) {
+    return send(world.getPins(parts[1] ?? ""))
+  }
+  if (parts[0] === "messages" && parts[2] === "pin" && parts.length === 3 && (method === "POST" || method === "DELETE")) {
+    return send(world.setPin(parts[1] ?? "", method === "POST"))
+  }
+  if (parts[0] === "files" && method === "POST") {
+    return send(err(503, "unavailable", "file uploads are not available in the mock"))
+  }
+
   const parsed = jsonBody(rawBody)
   if (!parsed.ok) return send(parsed)
   const body = asRecord(parsed.data)

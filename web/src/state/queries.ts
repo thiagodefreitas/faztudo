@@ -1,6 +1,6 @@
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
-import type { Approval, Message, NoticeItem, OutputLine, ThreadPage } from "../types"
+import type { Approval, Attachment, Message, NoticeItem, OutputLine, ThreadPage } from "../types"
 import { qk } from "./keys"
 import { mergeById } from "./merge"
 import { sortMessages } from "./reduce"
@@ -124,8 +124,15 @@ export function usePending(channelId: string) {
 export interface PendingMessage {
   key: string
   body: string
+  /** Files already uploaded, kept so a retry sends them again. */
+  attachments?: Attachment[]
   createdAt: string
   error?: string
+}
+
+// Pinned messages of a channel. Not the pinned agents of the inbox (lib/pins).
+export function useChannelPins(channelId: string) {
+  return useQuery({ queryKey: qk.messagePins(channelId), queryFn: () => api.pins(channelId) })
 }
 
 export function approvalForRun(approvals: Approval[] | undefined, runId: string): Approval | null {

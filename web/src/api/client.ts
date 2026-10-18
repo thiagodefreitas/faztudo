@@ -1,5 +1,6 @@
 import type {
   Approval,
+  Attachment,
   AssignBody,
   AssignKind,
   CAInfo,
@@ -20,6 +21,7 @@ import type {
   OutputPage,
   PairBody,
   PairingTicket,
+  Pin,
   Project,
   ReadCursor,
   ReadResult,
@@ -28,6 +30,7 @@ import type {
   Routine,
   Run,
   RunState,
+  SearchHit,
   ThreadPage,
 } from "../types"
 
@@ -58,6 +61,11 @@ export interface Api {
   thread: (messageId: ID) => Promise<ThreadPage>
   postMessage: (channelId: ID, body: MessageCreate) => Promise<Message>
   markRead: (channelId: ID, body: ReadCursor) => Promise<ReadResult>
+  search: (query: { q: string; channel_id?: ID; limit?: number }) => Promise<SearchHit[]>
+  pins: (channelId: ID) => Promise<Pin[]>
+  pinMessage: (messageId: ID) => Promise<{ pinned: boolean }>
+  unpinMessage: (messageId: ID) => Promise<{ pinned: boolean }>
+  uploadFile: (file: File) => Promise<Attachment>
   runs: (query?: { channel_id?: ID; state?: RunState }) => Promise<Run[]>
   run: (id: ID) => Promise<Run>
   output: (id: ID, after?: number) => Promise<OutputPage>
@@ -93,12 +101,14 @@ export function createApi(options: ApiOptions = {}): Api {
   const doFetch = options.fetch ?? globalThis.fetch.bind(globalThis)
   const base = options.base ?? "/api/v1"
 
+  // A FormData body is sent as is: the browser sets the multipart boundary.
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const form = typeof FormData !== "undefined" && body instanceof FormData
     const response = await doFetch(`${base}${path}`, {
       method,
       credentials: "same-origin",
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined || form ? undefined : { "content-type": "application/json" },
+      body: body === undefined ? undefined : form ? (body as FormData) : JSON.stringify(body),
     })
     const text = await response.text()
     const data: unknown = text ? JSON.parse(text) : null
@@ -132,6 +142,15 @@ export function createApi(options: ApiOptions = {}): Api {
     thread: (messageId) => request("GET", `/messages/${encodeURIComponent(messageId)}/thread`),
     postMessage: (channelId, body) => request("POST", `/channels/${encodeURIComponent(channelId)}/messages`, body),
     markRead: (channelId, body) => request("POST", `/channels/${encodeURIComponent(channelId)}/read`, body),
+    search: (params) => request("GET", query("/search", params)),
+    pins: (channelId) => request("GET", `/channels/${encodeURIComponent(channelId)}/pins`),
+    pinMessage: (messageId) => request("POST", `/messages/${encodeURIComponent(messageId)}/pin`),
+    unpinMessage: (messageId) => request("DELETE", `/messages/${encodeURIComponent(messageId)}/pin`),
+    uploadFile: (file) => {
+      const form = new FormData()
+      form.append("file", file, file.name)
+      return request("POST", "/files", form)
+    },
     runs: (params = {}) => request("GET", query("/runs", params)),
     run: (id) => request("GET", `/runs/${encodeURIComponent(id)}`),
     output: (id, after) => request("GET", query(`/runs/${encodeURIComponent(id)}/output`, { after })),
@@ -158,6 +177,11 @@ export function createApi(options: ApiOptions = {}): Api {
     pairDevice: (body) => request("POST", "/auth/pair", body),
     caInfo: () => request("GET", "/auth/ca"),
   }
+}
+
+/** The URL of a stored file. The name only sets the download file name. */
+export function fileUrl(attachment: Pick<Attachment, "id" | "name">): string {
+  return `/api/v1/files/${encodeURIComponent(attachment.id)}?name=${encodeURIComponent(attachment.name)}`
 }
 
 export const api = createApi()

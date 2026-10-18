@@ -10,6 +10,7 @@ import { useMembers, useThread } from "../state/queries"
 import type { Member, Message, ThreadPage } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { Composer } from "./composer"
+import { AttachmentList } from "./attachments"
 import { Markdown } from "./markdown"
 
 export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: string }) {
@@ -85,6 +86,7 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
                   </header>
                   <div className="mt-1 text-[14px]">
                     <Markdown text={message.body} />
+                    <AttachmentList attachments={message.attachments} />
                   </div>
                 </article>
               </li>

@@ -44,6 +44,15 @@ export interface Channel {
   last_seq?: number
 }
 
+/** An uploaded file, addressed by the SHA-256 of its content. */
+export interface Attachment {
+  id: string
+  name: string
+  /** Sniffed by the server from the bytes. */
+  content_type: string
+  size: number
+}
+
 export interface Message {
   id: ID
   channel_id: ID
@@ -52,6 +61,7 @@ export interface Message {
   body: string
   mentions: ID[]
   options?: string[]
+  attachments?: Attachment[]
   run_id?: ID
   /** Set when an agent handed work to another agent with the delegate tool. */
   handoff?: Handoff
@@ -68,6 +78,20 @@ export interface Handoff {
   to: string
   /** 1 for the first handoff of a request, 2 for a lead splitting it. */
   depth: number
+}
+
+export interface Pin {
+  channel_id: ID
+  message_id: ID
+  pinned_by: ID
+  pinned_at: string
+  message: Message
+}
+
+/** A search result. In snippet each match sits between U+0001 and U+0002. */
+export interface SearchHit {
+  message: Message
+  snippet: string
 }
 
 export type RunState =
@@ -230,6 +254,8 @@ export interface ApiErrorBody {
 export type EventType =
   | "message.posted"
   | "message.edited"
+  | "message.pinned"
+  | "message.unpinned"
   | "channel.created"
   | "channel.updated"
   | "member.updated"
@@ -276,8 +302,14 @@ export interface ChannelPatch {
   member_ids?: ID[]
 }
 
+export interface AttachmentRef {
+  id: string
+  name: string
+}
+
 export interface MessageCreate {
   body: string
+  attachments?: AttachmentRef[]
   thread_id?: ID
   idempotency_key?: string
 }

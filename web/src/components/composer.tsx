@@ -1,22 +1,45 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react"
+import { ApiError, api } from "../api/client"
+import { formatSize } from "../lib/files"
 import { applyMention, filterMembers, mentionQuery } from "../lib/mentions"
-import type { Member } from "../types"
+import type { Attachment, Member } from "../types"
+
+interface Upload {
+  key: string
+  name: string
+  size: number
+  attachment?: Attachment
+  error?: string
+}
+
+function uploadError(error: unknown): string {
+  if (error instanceof ApiError) return error.message
+  return "Upload failed"
+}
 
 export function Composer({
   members,
   channelName,
   placeholder,
   label = "Message",
+  attach = false,
   onSend,
 }: {
   members: Member[]
   channelName: string
   placeholder?: string
   label?: string
-  onSend: (body: string) => void
+  /** Show the attach button and accept pasted or dropped files. */
+  attach?: boolean
+  onSend: (body: string, attachments?: Attachment[]) => void
 }) {
   const listId = useId()
   const [text, setText] = useState("")
+  const [uploads, setUploads] = useState<Upload[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
+  const counter = useRef(0)
+  const uploading = uploads.some((item) => !item.attachment && !item.error)
+  const ready = uploads.flatMap((item) => (item.attachment ? [item.attachment] : []))
   const [cursor, setCursor] = useState(0)
   const [active, setActive] = useState(0)
   const [suppressed, setSuppressed] = useState<string | null>(null)
@@ -57,16 +80,42 @@ export function Composer({
     setSuppressed(null)
   }
 
+  function addFiles(list: FileList | File[] | null | undefined) {
+    if (!attach || !list) return
+    for (const file of Array.from(list)) {
+      const key = `u${++counter.current}`
+      setUploads((current) => [...current, { key, name: file.name, size: file.size }])
+      api.uploadFile(file).then(
+        (attachment) => setUploads((current) => current.map((item) => (item.key === key ? { ...item, attachment } : item))),
+        (error: unknown) => setUploads((current) => current.map((item) => (item.key === key ? { ...item, error: uploadError(error) } : item))),
+      )
+    }
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!attach || event.clipboardData.files.length === 0) return
+    event.preventDefault()
+    addFiles(event.clipboardData.files)
+  }
+
+  function onDrop(event: DragEvent<HTMLElement>) {
+    if (!attach || event.dataTransfer.files.length === 0) return
+    event.preventDefault()
+    addFiles(event.dataTransfer.files)
+  }
+
   function send() {
     if (menuOpen && selected) {
       pick(selected)
       return
     }
     const body = text.trim()
-    if (!body) return
-    onSend(body)
+    if ((!body && ready.length === 0) || uploading) return
+    if (ready.length > 0) onSend(body, ready)
+    else onSend(body)
     setText("")
     setCursor(0)
+    setUploads((current) => current.filter((item) => item.error))
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -106,6 +155,10 @@ export function Composer({
         event.preventDefault()
         send()
       }}
+      onDragOver={(event) => {
+        if (attach && event.dataTransfer.types.includes("Files")) event.preventDefault()
+      }}
+      onDrop={onDrop}
     >
       <div className="relative">
         {menuOpen && (
@@ -134,18 +187,56 @@ export function Composer({
             ))}
           </ul>
         )}
+        {uploads.length > 0 && (
+          <ul className="mb-1.5 flex flex-wrap gap-1.5 px-1" aria-label="Files to send">
+            {uploads.map((item) => (
+              <li
+                key={item.key}
+                className={`flex min-h-8 max-w-56 items-center gap-1.5 rounded-full border px-2.5 text-[12px] ${item.error ? "border-danger text-danger" : "border-line bg-surface text-ink"}`}
+              >
+                <span className="truncate">{item.name}</span>
+                <span className="shrink-0 text-faint">
+                  {item.error ?? (item.attachment ? formatSize(item.size) : "Uploading")}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${item.name}`}
+                  onClick={() => setUploads((current) => current.filter((entry) => entry.key !== item.key))}
+                  className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted hover:text-ink"
+                >
+                  <span aria-hidden="true">x</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface p-1.5 pl-3 transition-colors duration-150 focus-within:border-accent max-md:rounded-3xl max-md:pl-1.5 max-md:shadow-lg md:bg-canvas">
-        <button
-          type="button"
-          disabled
-          aria-label="Attachments soon"
-          title="Attachments soon"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-faint md:hidden"
-        >
-          <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            <path d="M10 4v12M4 10h12" />
-          </svg>
-        </button>
+        {attach && (
+          <>
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              hidden
+              data-testid="file-input"
+              onChange={(event) => {
+                addFiles(event.target.files)
+                event.target.value = ""
+              }}
+            />
+            <button
+              type="button"
+              aria-label="Attach a file"
+              title="Attach a file"
+              onClick={() => fileInput.current?.click()}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink md:h-8 md:w-8"
+            >
+              <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 9.5 9.6 15.9a3.7 3.7 0 0 1-5.2-5.2l7-7a2.5 2.5 0 0 1 3.5 3.5l-7 7a1.2 1.2 0 0 1-1.7-1.7l6.3-6.3" />
+              </svg>
+            </button>
+          </>
+        )}
         <label className="block min-w-0 flex-1">
           <span className="sr-only">{label}</span>
           <textarea
@@ -165,6 +256,7 @@ export function Composer({
               setActive(0)
             }}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             onKeyUp={(event) => sync(event.currentTarget)}
             onClick={(event) => sync(event.currentTarget)}
             onSelect={(event) => sync(event.currentTarget)}

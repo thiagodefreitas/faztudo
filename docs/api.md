@@ -110,6 +110,7 @@ interface Message {
   body: string;             // markdown
   mentions: ID[];
   options?: string[];       // 2 to 5 short answers an agent offers with ask_human
+  attachments?: Attachment[]; // uploaded files
   run_id?: ID;              // set when the message is an agent run's output
   handoff?: Handoff;        // set when an agent handed work over with the delegate tool
   routine?: string;         // handle of the routine that posted this message
@@ -137,6 +138,26 @@ interface Routine {
   enabled: boolean;
   next_run?: string;        // scheduled routines that are on
   last?: { at: string; status: "ok" | "failed" | "skipped"; detail?: string; run_id?: ID };
+}
+
+interface Attachment {
+  id: string;               // SHA-256 of the content, 64 hex characters
+  name: string;             // base name only, at most 120 bytes
+  content_type: string;     // sniffed from the bytes, never taken from the upload
+  size: number;
+}
+
+interface Pin {
+  channel_id: ID;
+  message_id: ID;
+  pinned_by: ID;
+  pinned_at: string;
+  message: Message;
+}
+
+interface SearchHit {
+  message: Message;         // may be a thread reply: open thread_id
+  snippet: string;          // text with each match between U+0001 and U+0002
 }
 
 type RunState = "queued" | "running" | "waiting_approval" | "verifying"
@@ -265,7 +286,13 @@ interface NoticeAction {
 | PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, default_agent_id, lane_overrides, members; a non-empty `repo_path` must be a git work tree, a non-empty `default_agent_id` must be an agent member of the channel, and every `lane_overrides` entry must name an agent and one of its lanes (400 otherwise); `lane_overrides` replaces the whole map |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of top-level messages (thread replies excluded), newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
-| POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; `@<department>` triggers that department's lead and `@<project>` the project's lead; in a channel that belongs to a project only agents assigned to it run, and each other mentioned agent gets a `notice` with an `assign` action; a reply to a reply attaches to the thread root; a top-level message from a person that names no one goes to the Chief of Staff in channels that opted in |
+| POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?, attachments?}` where `attachments` is up to 10 `{id, name}` from `POST /api/v1/files` (type and size come from the stored file; `body` may be empty when there is an attachment); mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; `@<department>` triggers that department's lead and `@<project>` the project's lead; in a channel that belongs to a project only agents assigned to it run, and each other mentioned agent gets a `notice` with an `assign` action; a reply to a reply attaches to the thread root |
+| GET | `/api/v1/search?q=&channel_id=&limit=` | `SearchHit[]` over message bodies in channels the caller can read, best match first (FTS5 with bm25; the last word matches as a prefix). Without FTS5 in the SQLite build it falls back to a substring scan, newest first. `limit` defaults to 30, max 100; a `channel_id` the caller cannot read is 404 |
+| GET | `/api/v1/channels/{id}/pins` | `Pin[]`, newest pin first |
+| POST | `/api/v1/messages/{id}/pin` | pin the message in its channel; humans only (403 for an agent); repeating it adds no event; emits `message.pinned`; returns `{pinned: true}` |
+| DELETE | `/api/v1/messages/{id}/pin` | unpin; humans only; emits `message.unpinned`; returns `{pinned: false}` |
+| POST | `/api/v1/files` | upload one file as `multipart/form-data` field `file`; stored by content hash; returns an `Attachment` (201). 413 when it is over `server.max_upload_mb` (default 25), 503 when uploads are not configured. The server sniffs the type; the name is cleaned to a base name |
+| GET | `/api/v1/files/{id}?name=` | the stored bytes. Only PNG, JPEG, GIF and WebP are served `inline`; everything else, including HTML and SVG, is `application/octet-stream` with `Content-Disposition: attachment`. Always sent with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`. `{id}` must be 64 lowercase hex characters |
 | POST | `/api/v1/channels/{id}/read` | mark read up to `{seq}` (the channel's `last_seq`); `{event_id}` is also accepted |
 | GET | `/api/v1/runs?channel_id=&state=` | runs |
 | GET | `/api/v1/runs/{id}` | one run |
@@ -322,6 +349,8 @@ Event types in version 1:
 | :--- | :--- |
 | `message.posted` | `Message` |
 | `message.edited` | `{id, body, edited_at}` |
+| `message.pinned` | `{channel_id, message_id, pinned_by, pinned_at}` |
+| `message.unpinned` | `{channel_id, message_id, pinned_by, pinned_at}` |
 | `channel.created`, `channel.updated` | `Channel` |
 | `member.updated` | `Member` |
 | `presence.changed` | `{member_id, presence}` |

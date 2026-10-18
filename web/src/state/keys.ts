@@ -4,6 +4,7 @@ export const qk = {
   channels: ["channels"] as const,
   messages: (id: string) => ["messages", id] as const,
   thread: (rootId: string) => ["thread", rootId] as const,
+  messagePins: (channelId: string) => ["pins", channelId] as const,
   runs: ["runs"] as const,
   output: (id: string) => ["output", id] as const,
   diff: (id: string) => ["diff", id] as const,

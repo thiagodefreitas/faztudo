@@ -8,6 +8,7 @@ import { qk } from "../state/keys"
 import { useNow } from "../state/now"
 import type { Device, PairingTicket } from "../types"
 import { WORKSPACE_NAME } from "../types"
+import { NotificationSettings } from "./notifier"
 import { WorkspaceNav } from "./sidebar"
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -393,6 +394,7 @@ export function DevicesPage() {
         <div className="max-w-2xl">
           <DevicesPanel />
         </div>
+        <NotificationSettings />
       </div>
     </section>
   )

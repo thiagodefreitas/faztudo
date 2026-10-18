@@ -134,6 +134,10 @@ func run(args []string) error {
 		handler := api.New(s, humanID, version.Get().Version)
 		handler.AllowedHosts = c.Server.AllowedHosts
 		handler.LocalTokenPath = localTokenPath
+		handler.FilesDir = p.FilesDir
+		if c.Server.MaxUploadMB > 0 {
+			handler.MaxUploadBytes = int64(c.Server.MaxUploadMB) << 20
+		}
 		application.Bind(handler)
 		listener, err := net.Listen("tcp", c.Server.Listen)
 		if err != nil {

@@ -42,7 +42,11 @@ type API struct {
 	// tailscale serve. With LAN mode on, such requests need a session.
 	AllowedHosts []string
 	// LocalTokenPath is the persistent token file. Serve fails closed if unset.
-	LocalTokenPath  string
+	LocalTokenPath string
+	// FilesDir holds uploaded attachments by content hash; empty disables
+	// uploads. MaxUploadBytes caps one file (zero means 25 MB).
+	FilesDir        string
+	MaxUploadBytes  int64
 	LocalLimiter    *auth.LoginRateLimiter
 	localAuthBypass bool // used only by legacy in-package tests
 	Trigger         RunTrigger
@@ -148,6 +152,12 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("POST /api/v1/channels/{id}/messages", a.postMessage)
 	m.HandleFunc("POST /api/v1/channels/{id}/read", a.read)
 	m.HandleFunc("GET /api/v1/messages/{id}/thread", a.thread)
+	m.HandleFunc("POST /api/v1/messages/{id}/pin", a.setPin(true))
+	m.HandleFunc("DELETE /api/v1/messages/{id}/pin", a.setPin(false))
+	m.HandleFunc("GET /api/v1/channels/{id}/pins", a.pins)
+	m.HandleFunc("GET /api/v1/search", a.search)
+	m.HandleFunc("POST /api/v1/files", a.upload)
+	m.HandleFunc("GET /api/v1/files/{id}", a.serveFile)
 	m.HandleFunc("GET /api/v1/runs", a.runs)
 	m.HandleFunc("GET /api/v1/runs/{id}", a.run)
 	m.HandleFunc("GET /api/v1/runs/{id}/output", a.output)
@@ -547,15 +557,21 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var v struct {
-		Body           string `json:"body"`
-		ThreadID       string `json:"thread_id"`
-		IdempotencyKey string `json:"idempotency_key"`
+		Body           string         `json:"body"`
+		ThreadID       string         `json:"thread_id"`
+		IdempotencyKey string         `json:"idempotency_key"`
+		Attachments    []attachmentIn `json:"attachments"`
 	}
 	if !decode(w, r, &v) {
 		return
 	}
-	if strings.TrimSpace(v.Body) == "" {
+	if strings.TrimSpace(v.Body) == "" && len(v.Attachments) == 0 {
 		fail(w, 400, "bad_request", "body required")
+		return
+	}
+	attachments, aerr := a.attachmentsFor(v.Attachments)
+	if aerr != nil {
+		fail(w, 400, "bad_request", aerr.Error())
 		return
 	}
 	if v.ThreadID != "" {
@@ -612,7 +628,7 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	agents, refusals := org.Gate(projects, departments, c.Name, agents)
 	notices = append(notices, refusals...)
-	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, CreatedAt: time.Now().UTC()}
+	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, Attachments: attachments, CreatedAt: time.Now().UTC()}
 	newMessageID := m.ID
 	evt, ok := a.append(w, r, events.MessagePosted, c.ID, v.IdempotencyKey, m)
 	if !ok {

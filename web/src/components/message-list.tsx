@@ -12,10 +12,11 @@ import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
-import { useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
+import { useChannelPins, useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
 import type { Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
 import type { ChannelRef } from "../lib/channel-links"
 import { AgentAvatar } from "./agent-avatar"
+import { AttachmentList } from "./attachments"
 import { ChoiceCard } from "./choice-card"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
@@ -28,15 +29,21 @@ type Row =
 
 export function MessageList({
   channelId,
+  focusId,
   onRetry,
   onOpenThread,
 }: {
   channelId: string
+  /** A message to scroll to and flash, from a search result. */
+  focusId?: string
   onRetry: (item: PendingMessage) => void
   onOpenThread?: (message: Message) => void
 }) {
   const qc = useQueryClient()
   const messagesQuery = useMessages(channelId)
+  const pins = useChannelPins(channelId)
+  const pinnedIds = useMemo(() => new Set((pins.data ?? []).map((pin) => pin.message_id)), [pins.data])
+  const [flash, setFlash] = useState<string | null>(null)
   const members = useMembers()
   const channelList = useChannels()
   const channelRefs = useMemo(() => channelList.data?.map(({ id, name }) => ({ id, name })), [channelList.data])
@@ -88,6 +95,19 @@ export function MessageList({
     getItemKey: (index) => rows[index]?.key ?? index,
     measureElement: (element) => element.getBoundingClientRect().height,
   })
+
+  // Jump to the message a search result named, then flash it for a moment.
+  const focusIndex = focusId ? rows.findIndex((row) => row.key === focusId) : -1
+  useEffect(() => {
+    if (!focusId || focusIndex < 0) return
+    stuckRef.current = false
+    virtualizer.scrollToIndex(focusIndex, { align: "center" })
+    setFlash(focusId)
+    const timer = window.setTimeout(() => setFlash(null), 2200)
+    return () => window.clearTimeout(timer)
+    // The index moves while rows load; the target is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, focusIndex >= 0])
 
   useEffect(() => {
     const parent = parentRef.current
@@ -186,6 +206,8 @@ export function MessageList({
                       grouped={grouped}
                       lastInGroup={lastInGroup}
                       mine={row.message.author_id === me.data?.id}
+                      pinned={pinnedIds.has(row.message.id)}
+                      flash={flash === row.message.id}
                       channels={channelRefs}
                       fresh={now - Date.parse(row.message.created_at) < 8000}
                       run={runs.data?.find((entry) => entry.id === row.message.run_id)}
@@ -221,6 +243,8 @@ function MessageRow({
   grouped,
   lastInGroup,
   mine,
+  pinned,
+  flash,
   channels,
   fresh,
   run,
@@ -232,6 +256,8 @@ function MessageRow({
   grouped: boolean
   lastInGroup: boolean
   mine: boolean
+  pinned: boolean
+  flash: boolean
   channels: ChannelRef[] | undefined
   fresh: boolean
   run: Run | undefined
@@ -243,7 +269,15 @@ function MessageRow({
   // Below 640px messages are bubbles: mine on the right, the others on the
   // left with the avatar at the bottom of the group and the name above it.
   return (
-    <article className={cx("group/msg flex gap-2.5 max-sm:items-end", mine && "max-sm:flex-row-reverse", fresh && "fz-rise")}>
+    <article
+      id={`msg-${message.id}`}
+      className={cx(
+        "group/msg flex gap-2.5 rounded-md transition-colors duration-500 max-sm:items-end",
+        mine && "max-sm:flex-row-reverse",
+        fresh && "fz-rise",
+        flash && "bg-accent-soft",
+      )}
+    >
       <div className={cx("w-8 shrink-0", mine && "max-sm:hidden")}>
         {grouped ? (
           <time
@@ -265,6 +299,7 @@ function MessageRow({
               {time}
             </time>
             {message.edited_at && <span className="text-[11px] text-faint">edited</span>}
+            {pinned && <span className="text-[11px] font-medium text-accent">Pinned</span>}
           </header>
         )}
         <div
@@ -277,6 +312,7 @@ function MessageRow({
         >
           <Markdown text={message.body} channels={channels} />
         </div>
+        <AttachmentList attachments={message.attachments} />
         {message.options && message.options.length > 0 && <MessageChoices message={message} channelId={channelId} />}
         {run && <RunCard run={run} channelId={channelId} />}
         {onOpenThread && (
@@ -298,10 +334,38 @@ function MessageRow({
             >
               Reply in thread
             </button>
+            <PinButton message={message} pinned={pinned} />
           </p>
         )}
       </div>
     </article>
+  )
+}
+
+// Pin or unpin from the message row. The pins list refetches when the
+// message.pinned event arrives, and right away for the person who clicked.
+function PinButton({ message, pinned }: { message: Message; pinned: boolean }) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  async function toggle() {
+    setBusy(true)
+    try {
+      await (pinned ? api.unpinMessage(message.id) : api.pinMessage(message.id))
+      await qc.invalidateQueries({ queryKey: qk.messagePins(message.channel_id) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void toggle()}
+      aria-pressed={pinned}
+      className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline md:min-h-6 md:opacity-0 md:transition-opacity md:duration-150 md:group-hover/msg:opacity-100 md:focus-visible:opacity-100"
+    >
+      {pinned ? "Unpin" : "Pin"}
+    </button>
   )
 }
 
@@ -456,6 +520,9 @@ function PendingRow({ item, onRetry }: { item: PendingMessage; onRetry: (item: P
   return (
     <article className="ml-[42px] text-[13px] text-muted">
       <Markdown text={item.body} />
+      {item.attachments && item.attachments.length > 0 && (
+        <p className="mt-0.5 text-[12px] text-faint">{item.attachments.map((file) => file.name).join(", ")}</p>
+      )}
       {item.error ? (
         <p className="mt-1 text-danger">
           {item.error}{" "}

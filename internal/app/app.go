@@ -187,6 +187,7 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 	a.MCP = mcp.New(s, a)
 	a.MCP.Policy = mcp.Policy{ChiefOfStaff: a.chiefHandle(), Limits: a.requestLimits()}
 	a.routines = newRoutineEngine(a)
+	a.MCP.FilesDir = p.FilesDir
 	return a, nil
 }
 

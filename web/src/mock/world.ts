@@ -25,6 +25,7 @@ import type {
   OutputPage,
   PairBody,
   PairingTicket,
+  Pin,
   Project,
   ReadCursor,
   ReadResult,
@@ -34,6 +35,7 @@ import type {
   Run,
   RunMode,
   RunState,
+  SearchHit,
   StreamEvent,
   ThreadPage,
 } from "../types"
@@ -72,6 +74,7 @@ export class MockWorld {
   private members: Member[]
   private channels: Channel[]
   private messages: Message[] = []
+  private pinned = new Map<ID, string>()
   private runs: Run[] = []
   private approvals: Approval[] = []
   private lanes: Lane[]
@@ -445,6 +448,43 @@ export class MockWorld {
       pool = all.filter((message) => byTime(message, pivot) < 0)
     }
     return ok(structuredClone(pool.slice(-capped)))
+  }
+
+  // Substring search over bodies, newest first. The real server ranks with
+  // FTS5; the mock only needs the same shape and the same match markers.
+  search(q: string, channelId?: ID): Result<SearchHit[]> {
+    const words = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+    if (words.length === 0) return ok([])
+    const pattern = new RegExp(`(${words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "giu")
+    const hits = this.messages
+      .filter((message) => (!channelId || message.channel_id === channelId) && words.every((word) => message.body.toLowerCase().includes(word)))
+      .sort(byTime)
+      .reverse()
+      .slice(0, 30)
+    return ok(hits.map((message) => ({ message: structuredClone(message), snippet: message.body.replace(pattern, "\u0001$1\u0002") })))
+  }
+
+  getPins(channelId: ID): Result<Pin[]> {
+    if (!this.channels.some((item) => item.id === channelId)) return err(404, "not_found", "channel not found")
+    const pins: Pin[] = []
+    for (const [messageId, at] of this.pinned) {
+      const message = this.messages.find((item) => item.id === messageId)
+      if (message && message.channel_id === channelId) {
+        pins.push({ channel_id: channelId, message_id: messageId, pinned_by: this.me.id, pinned_at: at, message: structuredClone(message) })
+      }
+    }
+    return ok(pins.sort((a, b) => b.pinned_at.localeCompare(a.pinned_at)))
+  }
+
+  setPin(messageId: ID, pinned: boolean): Result<{ pinned: boolean }> {
+    const message = this.messages.find((item) => item.id === messageId)
+    if (!message) return err(404, "not_found", "message not found")
+    if (pinned === this.pinned.has(messageId)) return ok({ pinned })
+    const at = iso(this.clock.now())
+    if (pinned) this.pinned.set(messageId, at)
+    else this.pinned.delete(messageId)
+    this.emit(pinned ? "message.pinned" : "message.unpinned", message.channel_id, { channel_id: message.channel_id, message_id: messageId, pinned_by: this.me.id, pinned_at: at }, `human:${this.me.id}`)
+    return ok({ pinned })
   }
 
   getThread(messageId: ID): Result<ThreadPage> {
