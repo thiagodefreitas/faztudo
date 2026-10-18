@@ -12,8 +12,8 @@ way to the right agent.
 | :--- | :--- |
 | Departments and projects in `lanes.toml`, personas with description and standing instructions | built, see [configuration](configuration.md) |
 | `GET /api/v1/org`, and assigning or removing a department or specialist on a project (humans only) | built, see [API](api.md) |
-| In a project's channels only assigned agents run; others get a notice with an Assign button | built |
-| `@<department>` goes to its lead, `@<project>` to the project lead | built |
+| In a project's channels only assigned agents run; others get a notice with an Assign button (the Director can use it; agents get 403) | built |
+| `@<department>` goes to its lead, `@<project>` to the project lead (a group with no lead answers with a notice) | built |
 | Organization page: the Director, departments, projects, assign and unassign | built |
 | Chief of Staff, delegation by leads, budgets, routines, templates | not built |
 | Working groups, drag-to-assign, lane budgets shared across projects | not built, next pass |
@@ -56,7 +56,8 @@ Director (you)
 - A **project** groups channels and a repository. Departments and single
   specialists are **assigned** to projects. Only assigned agents act in a
   project's channels, which keeps context and quota spending contained.
-- A **channel** belongs to at most one project. A department can also have its
+- A **channel** is meant to belong to at most one project; if it is listed
+  under several, the first match wins. A department can also have its
   own channel for its internal work.
 
 ## Cross-functional projects
@@ -118,6 +119,10 @@ posts what its team did, what is blocked, and what needs the Director.
 a reviewer). A template is a TOML file, so people can share their own.
 
 ## Configuration sketch
+
+`departments` and `specialists` seed the assignments on first start;
+afterwards the Director's changes in the app win, while name, `repo_path`,
+lead and channels still follow the file.
 
 ```toml
 [[department]]

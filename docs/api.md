@@ -82,7 +82,14 @@ interface Channel {
   unread: number;
   last_seq?: number;
 }
+```
 
+Channel commands: `/lane <persona> <lane>` pins the persona's lane in
+this channel (a `channel.updated` event and a notice confirm it);
+`/lane <persona> default` clears the pin. The command starts no agent and
+applies only when the message has no @mention.
+
+```ts
 interface Message {
   id: ID;
   channel_id: ID;
@@ -153,6 +160,7 @@ interface Lane {
     measured_at?: string;
   }[];
   runs_today: number;
+  runs_date?: string;       // local day (YYYY-MM-DD) that runs_today counts
   tokens_last_hour?: number;
   last_error?: { class: string; message: string; at: string };
 }
@@ -213,7 +221,7 @@ interface NoticeAction {
 | POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/channels` | channels the caller can see |
-| POST | `/api/v1/channels` | create `{name, kind, visibility, topic?, repo_path?, member_ids?}` |
+| POST | `/api/v1/channels` | create `{name, kind?, visibility?, topic?, repo_path?, member_ids?}`; kind defaults to `team`, visibility to `public` |
 | PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, default_agent_id, lane_overrides, members; a non-empty `repo_path` must be a git work tree, a non-empty `default_agent_id` must be an agent member of the channel, and every `lane_overrides` entry must name an agent and one of its lanes (400 otherwise); `lane_overrides` replaces the whole map |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of top-level messages (thread replies excluded), newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
@@ -227,8 +235,8 @@ interface NoticeAction {
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
 | POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message |
-| GET | `/api/v1/lanes` | all lanes |
-| PATCH | `/api/v1/lanes/{id}` | set `{capacity?, health_override?, manual_window?}` |
+| GET | `/api/v1/lanes` | configured lanes (a detected-only default is hidden once lanes.toml configures that CLI) |
+| PATCH | `/api/v1/lanes/{id}` | set `{capacity?, health_override?, manual_window?}` (capacity must be at least 1; health_override records the reason as a manual override) |
 | POST | `/api/v1/lanes/{id}/probe` | refresh this lane's usage now |
 | GET | `/api/v1/health` | `{ok, version, api}` without auth on loopback; `{ok}` only on the LAN listener |
 

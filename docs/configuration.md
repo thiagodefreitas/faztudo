@@ -131,7 +131,7 @@ members = ["coder", "reviewer"]
 [[project]]
 handle = "faztudo"              # @faztudo goes to the project lead
 name = "Faztudo"
-repo_path = "~/code/faztudo"    # shown on the Organization page; runs still use the channel's repo_path
+repo_path = "~/code/faztudo"    # recorded with the project; runs still use the channel's repo_path
 lead = "coder"                  # optional; always allowed in the project's channels
 channels = ["faztudo-dev"]      # channel names, matched exactly
 departments = ["engineering"]   # assigned at first start
@@ -175,7 +175,8 @@ is usable, and the channel gets a notice saying so. A lane that is merely busy
 counts as usable, so the run waits for it.
 
 `runs_today` on a lane counts runs started on it since local midnight.
-`tokens_last_hour` is filled for Claude lanes from the local session logs.
+`tokens_last_hour` is filled for Claude and Grok lanes from the local
+session logs.
 
 `allowed_tools` is an optional list on a `claude` lane, passed to Claude as
 `--allowedTools`. These tools run without asking, which matters because

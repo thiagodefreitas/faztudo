@@ -27,9 +27,10 @@ a guess. Every number on the Lanes page shows its source and age.
 ## Where the numbers come from
 
 faztudo reads usage from the CLIs' own local logs and status output, where
-they offer one. Not every CLI reports a quota percentage. Claude logs token
-totals without a percentage, so its health stays unknown unless you set
-`plan_limit_tokens` on the lane to give it a daily limit to measure against.
+they offer one. Not every CLI reports a quota percentage. Claude and Grok
+log token totals without a percentage, so their health stays unknown unless
+you set `plan_limit_tokens` on the lane to give it a daily limit to measure
+against.
 If a number is wrong, the API (`PATCH /api/v1/lanes/{id}`) accepts a health override and a manual usage window.
 
 ## Switching
