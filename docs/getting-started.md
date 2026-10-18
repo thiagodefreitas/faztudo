@@ -87,7 +87,9 @@ faztudo doctor
 ```
 
 The profile only applies to `/usr/bin/faztudo` and `/usr/bin/bwrap`; if you
-put either somewhere else, change the paths in it. Read-only runs work
+put either somewhere else, change the paths in it. Where the kernel restricts
+user namespaces, `faztudo doctor` adds an `AppArmor:` line saying whether the
+profile is installed and whether this faztudo runs from `/usr/bin/faztudo`. Read-only runs work
 without it. If you accept unsandboxed write runs instead, set
 `sandbox = "auto"` under `[runs]` in `config.toml`. The "systemd user scopes" line only matters
 for the memory and task limits.

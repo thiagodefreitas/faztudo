@@ -479,6 +479,9 @@ func doctor(p config.Paths) error {
 	} else {
 		fmt.Println("unprivileged user namespaces:", e)
 	}
+	if line := apparmorStatus("/", runningBinary()); line != "" {
+		fmt.Println(line)
+	}
 	limits := config.Defaults().Runs
 	if err == nil {
 		limits = c.Runs
