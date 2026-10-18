@@ -248,6 +248,15 @@ func (a *App) Start(ctx context.Context) error {
 	if _, err := a.Runner.Recover(ctx); err != nil {
 		return err
 	}
+	activeTasks, err := a.Store.Tasks(ctx, "")
+	if err != nil {
+		return err
+	}
+	for _, task := range activeTasks {
+		if task.Status == domain.TaskRunning {
+			a.syncTask(ctx, task.MessageID, true)
+		}
+	}
 	if err := a.RefreshUsage(ctx); err != nil {
 		return err
 	}
@@ -687,6 +696,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	if err == nil {
 		if mode == domain.RunWrite {
+			// Record the checked-out branch immediately before creating this
+			// run's worktree. Older runs lack it and retain prior merge behavior.
+			run.ChannelBranch, _ = git(ctx, channel.RepoPath, "symbolic-ref", "--quiet", "--short", "HEAD")
 			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{
 				Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand,
 				SandboxMode: sandboxMode, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly,
@@ -1119,6 +1131,12 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 	if err != nil {
 		return "", err
 	}
+	if run.State == domain.RunDone && run.ApprovalOutcome != "" {
+		if run.ApprovalOption != option {
+			return "", domain.UserError{Message: "This run was already " + run.ApprovalOption + "."}
+		}
+		return run.ApprovalOutcome, nil
+	}
 	channel, err := a.Store.Channel(ctx, run.ChannelID)
 	if err != nil {
 		return "", err
@@ -1134,6 +1152,15 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 	var outcome string
 	switch option {
 	case "merge":
+		if run.ChannelBranch != "" {
+			current, err := git(ctx, w.Repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+			if err != nil || current != run.ChannelBranch {
+				if current == "" {
+					current = "detached HEAD"
+				}
+				return "", domain.UserError{Message: "Merge refused: this run started on branch " + run.ChannelBranch + ", but the channel repository is now on " + current + ". Switch back before merging."}
+			}
+		}
 		// Host git must never run on a worktree whose .git the agent replaced.
 		if err := wm.Check(w); err != nil {
 			return "", domain.UserError{Message: "Merge refused: " + err.Error() + ". Choose Keep to inspect it, or Discard."}
@@ -1214,6 +1241,7 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 	}
 	a.notice(ctx, channel.ID, "info", outcome)
 	run.State = domain.RunDone
+	run.ApprovalOption, run.ApprovalOutcome = option, outcome
 	_, err = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run})
 	return outcome, err
 }

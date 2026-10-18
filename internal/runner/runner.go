@@ -813,7 +813,8 @@ func addHas(add map[string]string, k string) bool { _, ok := add[k]; return ok }
 func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 	entries, err := os.ReadDir(r.RunDir)
 	if os.IsNotExist(err) {
-		return nil, nil
+		entries = nil
+		err = nil
 	}
 	if err != nil {
 		return nil, err
@@ -883,6 +884,34 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 			}
 		}
 		result = append(result, m.Run)
+	}
+	// A crash can happen after RunCreated but before the runner writes run.json.
+	// Those queued runs have no process to reattach and otherwise stay queued.
+	if source, ok := r.Appender.(interface {
+		Runs(context.Context, string, string) ([]domain.Run, error)
+	}); ok {
+		queued, err := source.Runs(ctx, "", string(domain.RunQueued))
+		if err != nil {
+			return result, err
+		}
+		for _, run := range queued {
+			_, err := os.Stat(filepath.Join(r.RunDir, run.ID, "run.json"))
+			if err == nil {
+				continue
+			}
+			if !os.IsNotExist(err) {
+				return result, err
+			}
+			run.State = domain.RunFailed
+			run.FailureClass = domain.FailureTransient
+			run.FailureReason = "run never started before daemon restart"
+			now := time.Now().UTC()
+			run.EndedAt = &now
+			if err := r.emitRun(ctx, &run, events.RunUpdated, run); err != nil {
+				return result, err
+			}
+			result = append(result, run)
+		}
 	}
 	return result, nil
 }

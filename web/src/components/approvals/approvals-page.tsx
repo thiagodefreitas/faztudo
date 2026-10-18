@@ -22,25 +22,32 @@ const SELECT = "min-h-10 rounded-md border border-line bg-surface px-2 text-[13p
 /** The card for one pending approval, with the run, diff and people it needs. */
 export function ConnectedApproval({ approval }: { approval: Approval }) {
   const qc = useQueryClient()
+  const [resolveError, setResolveError] = useState("")
   const runs = useRuns()
   const members = useMembers()
   const run = approval.run_id ? runs.data?.find((item) => item.id === approval.run_id) : undefined
   const agent = members.data?.find((item) => item.id === (run?.agent_id ?? approval.requested_by))
   const diff = useRunDiff(approval.run_id, approval.state === "pending" && approval.commit_message !== undefined)
   return (
-    <ApprovalCard
-      approval={approval}
-      run={run}
-      agentName={agent?.display_name}
-      diff={diff.data?.diff}
-      decider={deciderName(approval, members.data ?? [])}
-      onResolve={(option, commitMessage) => {
-        const body = commitMessage ? { option, commit_message: commitMessage } : { option }
-        void api.resolveApproval(approval.id, body).then((next) => {
-          qc.setQueryData<Approval[]>(qk.approvals, (list = []) => replaceById(list, next))
-        })
-      }}
-    />
+    <div>
+      <ApprovalCard
+        approval={approval}
+        run={run}
+        agentName={agent?.display_name}
+        diff={diff.data?.diff}
+        decider={deciderName(approval, members.data ?? [])}
+        onResolve={(option, commitMessage) => {
+          setResolveError("")
+          const body = commitMessage ? { option, commit_message: commitMessage } : { option }
+          void api.resolveApproval(approval.id, body).then((next) => {
+            qc.setQueryData<Approval[]>(qk.approvals, (list = []) => replaceById(list, next))
+          }).catch((error: unknown) => {
+            setResolveError(error instanceof Error ? error.message : "Approval could not be applied.")
+          })
+        }}
+      />
+      {resolveError && <p role="alert" className="mt-2 rounded-md border border-danger bg-danger-soft p-2 text-[13px] text-danger">{resolveError}</p>}
+    </div>
   )
 }
 

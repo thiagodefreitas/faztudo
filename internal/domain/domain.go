@@ -204,6 +204,9 @@ type Run struct {
 	State            RunState     `json:"state"`
 	Worktree         string       `json:"worktree,omitempty"`
 	BaseCommit       string       `json:"base_commit,omitempty"`
+	ChannelBranch    string       `json:"channel_branch,omitempty"`
+	ApprovalOption   string       `json:"approval_option,omitempty"`
+	ApprovalOutcome  string       `json:"approval_outcome,omitempty"`
 	StartedAt        *time.Time   `json:"started_at,omitempty"`
 	EndedAt          *time.Time   `json:"ended_at,omitempty"`
 	ExitCode         *int         `json:"exit_code,omitempty"`

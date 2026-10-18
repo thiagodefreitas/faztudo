@@ -1,6 +1,7 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
+import { useState } from "react"
 import { api } from "../api/client"
 import { hueFor } from "../lib/avatar"
 import { cx } from "../lib/cx"
@@ -40,6 +41,7 @@ const BUTTON = "min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg
 const PRIMARY = "min-h-10 rounded-md border border-accent bg-accent px-3 text-[12px] font-medium text-canvas hover:opacity-90 md:min-h-8 md:px-2"
 
 export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
+  const [resolveError, setResolveError] = useState("")
   const now = useNow()
   const members = useMembers()
   const lanes = useLanes()
@@ -69,6 +71,7 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
       approval={approval}
       approvalDiff={approvalDiff.data?.diff}
       decider={decider}
+      resolveError={resolveError}
       now={now}
       retryLanes={retryLanes}
       {...(why ? { why } : {})}
@@ -98,9 +101,12 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
       }}
       onResolve={(option, commitMessage) => {
         if (!approval) return
+        setResolveError("")
         const body = commitMessage ? { option, commit_message: commitMessage } : { option }
         void api.resolveApproval(approval.id, body).then((next) => {
           qc.setQueryData<Approval[]>(qk.approvals, (list = []) => replaceById(list, next))
+        }).catch((error: unknown) => {
+          setResolveError(error instanceof Error ? error.message : "Approval could not be applied.")
         })
       }}
     />
@@ -118,6 +124,7 @@ export function RunCardView({
   approval,
   approvalDiff,
   decider,
+  resolveError,
   now,
   retryLanes,
   why,
@@ -136,6 +143,7 @@ export function RunCardView({
   approvalDiff?: string | undefined
   /** Who decided the approval, once it is decided. */
   decider?: string | undefined
+  resolveError?: string | undefined
   now: number
   retryLanes?: string[]
   /** Why this lane, for example "codex/default skipped: busy". */
@@ -228,6 +236,7 @@ export function RunCardView({
         {approval && (
           <ApprovalCard approval={approval} onResolve={onResolve} run={run} agentName={name} diff={approvalDiff} decider={decider} />
         )}
+        {approval && resolveError && <p role="alert" className="mt-2 ml-7 rounded-md border border-danger bg-danger-soft p-2 text-[13px] text-danger">{resolveError}</p>}
         <details className="mt-2 pl-7">
           <summary className="inline-flex min-h-8 cursor-pointer items-center text-[12px] text-muted hover:text-ink">Details</summary>
           <div className="mt-1 flex flex-col gap-2">

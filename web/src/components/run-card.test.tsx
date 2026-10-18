@@ -1,9 +1,14 @@
 import { TooltipProvider } from "@radix-ui/react-tooltip"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import { FAIL_LINE } from "../mock/script"
-import type { Lane, Member, Run } from "../types"
-import { RunCardView } from "./run-card"
+import { qk } from "../state/keys"
+import type { Approval, Lane, Member, Run } from "../types"
+import { RunCard, RunCardView } from "./run-card"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
 
@@ -76,6 +81,35 @@ function renderCard(run: Run) {
 }
 
 describe("RunCardView", () => {
+
+  it("shows a merge refusal and keeps the approval pending", async () => {
+    const user = userEvent.setup()
+    const approval: Approval = {
+      id: "approval", channel_id: failed.channel_id, requested_by: reviewer.id,
+      run_id: failed.id, title: "Review change", detail: "Merge the change", state: "pending",
+      commit_message: "Add change", options: [{ key: "merge", label: "Merge", style: "primary" }, { key: "keep", label: "Keep" }],
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+    client.setQueryData(qk.members, [reviewer])
+    client.setQueryData(qk.lanes, [lane])
+    client.setQueryData(qk.runs, [{ ...failed, mode: "write", state: "waiting_approval" }])
+    client.setQueryData(qk.approvals, [approval])
+    client.setQueryData(qk.output(failed.id), [])
+    client.setQueryData(qk.diff(failed.id), { diff: "" })
+    client.setQueryData(qk.notices, [])
+    const root = createRootRoute({ component: () => <RunCard run={{ ...failed, mode: "write", state: "waiting_approval" }} channelId={failed.channel_id} /> })
+    const router = createRouter({ routeTree: root.addChildren([]), history: createMemoryHistory({ initialEntries: ["/"] }), context: {} })
+    await router.load()
+    const resolve = vi.spyOn(api, "resolveApproval").mockRejectedValueOnce(new Error("Merge refused: branch main moved to feature"))
+    try {
+      render(<QueryClientProvider client={client}><TooltipProvider><RouterProvider router={router} /></TooltipProvider></QueryClientProvider>)
+      await user.click(screen.getByRole("button", { name: /Merge/ }))
+      expect(await screen.findByRole("alert")).toHaveTextContent("branch main moved to feature")
+      expect(screen.getByRole("button", { name: /Keep/ })).toBeEnabled()
+    } finally {
+      resolve.mockRestore()
+    }
+  })
   it("shows a failed verification with the failing output", () => {
     renderCard(failed)
     expect(screen.getAllByText("Failed").length).toBeGreaterThan(0)

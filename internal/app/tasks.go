@@ -104,7 +104,7 @@ func (a *App) StartTask(ctx context.Context, by domain.Member, id string) (domai
 	if err != nil {
 		return domain.Task{}, err
 	}
-	if t.Status != domain.TaskTodo && t.Status != domain.TaskFailed {
+	if t.Status != domain.TaskTodo && t.Status != domain.TaskFailed && t.Status != domain.TaskCancelled {
 		return domain.Task{}, domain.UserError{Message: "This task is already " + string(t.Status) + "."}
 	}
 	channel, err := a.Store.Channel(ctx, t.ChannelID)
@@ -121,6 +121,13 @@ func (a *App) StartTask(ctx context.Context, by domain.Member, id string) (domai
 	agent, err := a.agentByHandle(ctx, t.Assignee)
 	if err != nil {
 		return domain.Task{}, err
+	}
+	departments, err := a.Store.Departments(ctx)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if allowed, _ := org.Gate(projects, departments, channel.Name, []domain.Member{agent}); len(allowed) == 0 {
+		return domain.Task{}, domain.UserError{Message: "@" + agent.Handle + " is not assigned to this project's team."}
 	}
 	if t.Mode == domain.RunWrite && channel.RepoPath == "" {
 		return domain.Task{}, domain.UserError{Message: "Write tasks need a channel repo_path. Set it with PATCH /api/v1/channels/" + channel.ID + "."}

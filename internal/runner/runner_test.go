@@ -16,6 +16,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/eventstest"
 	"github.com/thiagodefreitas/faztudo/internal/lanes"
 	"github.com/thiagodefreitas/faztudo/internal/sandbox"
+	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
@@ -215,6 +216,31 @@ func TestRecoveryIdentity(t *testing.T) {
 	}
 	if !processAlive(cmd.Process.Pid) {
 		t.Fatal("killed reused process")
+	}
+}
+
+func TestRecoverQueuedRunWithoutMetadata(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	run := domain.Run{ID: "queued-before-crash", ChannelID: "channel", State: domain.RunQueued, Mode: domain.RunRead}
+	if _, err := s.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: run.ChannelID, Payload: run}); err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{RunDir: t.TempDir(), Appender: s}
+	recovered, err := r.Recover(ctx)
+	if err != nil || len(recovered) != 1 || recovered[0].State != domain.RunFailed {
+		t.Fatalf("recover: %+v %v", recovered, err)
+	}
+	got, err := s.Run(ctx, run.ID)
+	if err != nil || got.FailureClass != domain.FailureTransient || !strings.Contains(got.FailureReason, "never started") || got.EndedAt == nil {
+		t.Fatalf("queued run: %+v %v", got, err)
+	}
+	if second, err := r.Recover(ctx); err != nil || len(second) != 0 {
+		t.Fatalf("repeated recovery: %+v %v", second, err)
 	}
 }
 

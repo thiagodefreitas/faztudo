@@ -44,4 +44,13 @@ func TestTasksAreProjectedFromEvents(t *testing.T) {
 	if _, err := s.Task(ctx, "t9"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
+	if _, err := s.db.ExecContext(ctx, "INSERT INTO tasks(id,channel_id,message_id,status,data) VALUES ('stale','c1','','todo',?)", `{"id":"stale","channel_id":"c1","status":"todo","order":0}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rebuilt, err := s.Tasks(ctx, ""); err != nil || len(rebuilt) != 2 || rebuilt[1].Status != domain.TaskRunning {
+		t.Fatalf("tasks after rebuild: %+v %v", rebuilt, err)
+	}
 }

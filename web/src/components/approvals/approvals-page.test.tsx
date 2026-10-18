@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { api } from "../../api/client"
 import { qk } from "../../state/keys"
 import type { Approval, Channel, Member, Message, Org, Run } from "../../types"
 import { ApprovalsInbox } from "./approvals-page"
@@ -136,6 +137,20 @@ describe("ApprovalsInbox", () => {
     await renderInbox("01API")
     expect(screen.getByRole("article", { name: "Push the api change" })).toBeInTheDocument()
     expect(screen.queryByRole("article", { name: "Push the login fix" })).not.toBeInTheDocument()
+  })
+
+  it("shows a resolve refusal and leaves the approval usable", async () => {
+    const user = userEvent.setup()
+    const resolve = vi.spyOn(api, "resolveApproval").mockRejectedValueOnce(new Error("The channel repository has uncommitted changes"))
+    try {
+      await renderInbox("01API")
+      await user.click(screen.getByRole("button", { name: /Push$/ }))
+      expect(await screen.findByRole("alert")).toHaveTextContent("The channel repository has uncommitted changes")
+      expect(screen.getByRole("article", { name: "Push the api change" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /Hold/ })).toBeEnabled()
+    } finally {
+      resolve.mockRestore()
+    }
   })
 
   it("lists unanswered questions with their options", async () => {

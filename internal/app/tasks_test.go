@@ -11,6 +11,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/tasks"
 )
@@ -177,6 +178,70 @@ func TestStartTaskTwiceIsRefused(t *testing.T) {
 	}
 	close(f.holdUntil)
 	f.waitStatus(t, task.ID, domain.TaskDone)
+}
+
+func TestStartTaskChecksProjectAssignmentBeforePosting(t *testing.T) {
+	f := newTaskFixture(t)
+	ctx := context.Background()
+	project := domain.Project{Handle: "site", Name: "Site", Channels: []string{f.general.Name}, Departments: []string{}, Specialists: []string{}, Lead: "reviewer"}
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.ProjectUpdated, Actor: events.System, Payload: project}); err != nil {
+		t.Fatal(err)
+	}
+	task := f.create(t, tasks.Input{Title: "Blocked", Assignee: "coder"})
+	var user domain.UserError
+	if _, err := f.app.StartTask(ctx, f.human, task.ID); !errors.As(err, &user) {
+		t.Fatalf("project gate: got %v", err)
+	}
+	if got, _ := f.s.Task(ctx, task.ID); got.Status != domain.TaskTodo || got.MessageID != "" {
+		t.Fatalf("refused task changed: %+v", got)
+	}
+	if messages, err := f.s.Messages(ctx, f.general.ID, "", 100); err != nil || len(messages) != 0 {
+		t.Fatalf("refusal posted a message: %+v %v", messages, err)
+	}
+	if allowed, _ := org.Gate([]domain.Project{project}, nil, f.general.Name, []domain.Member{f.coder}); len(allowed) != 0 {
+		t.Fatal("fixture does not exercise the gate")
+	}
+}
+
+func TestStartTaskAllowsCancelledAndFailed(t *testing.T) {
+	f := newTaskFixture(t)
+	ctx := context.Background()
+	for _, status := range []domain.TaskStatus{domain.TaskCancelled, domain.TaskFailed} {
+		task := f.create(t, tasks.Input{Title: string(status), Assignee: "coder"})
+		task.Status = status
+		if _, err := f.s.Append(ctx, events.Draft{Type: events.TaskUpdated, Actor: events.System, ChannelID: task.ChannelID, Payload: task}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.app.StartTask(ctx, f.human, task.ID); err != nil {
+			t.Fatalf("restart %s: %v", status, err)
+		}
+		f.waitStatus(t, task.ID, domain.TaskDone)
+	}
+}
+
+func TestStartRecoversTaskWhoseRunFailed(t *testing.T) {
+	f := newTaskFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.app.Paths.RunsDir = t.TempDir()
+	f.app.Runner.RunDir = f.app.Paths.RunsDir
+	task := f.create(t, tasks.Input{Title: "Interrupted", Assignee: "coder"})
+	task.Status, task.MessageID = domain.TaskRunning, "message"
+	run := domain.Run{ID: "interrupted", ChannelID: task.ChannelID, TriggerMessageID: task.MessageID, AgentID: f.coder.ID, LaneID: "a", Mode: domain.RunRead, State: domain.RunFailed}
+	for _, d := range []events.Draft{
+		{Type: events.TaskUpdated, Actor: events.System, ChannelID: task.ChannelID, Payload: task},
+		{Type: events.RunCreated, Actor: events.System, ChannelID: task.ChannelID, Payload: run},
+	} {
+		if _, err := f.s.Append(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.app.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.s.Task(ctx, task.ID); got.Status != domain.TaskFailed || len(got.RunIDs) != 1 {
+		t.Fatalf("task after restart: %+v", got)
+	}
 }
 
 func TestTaskWithoutARunFails(t *testing.T) {
