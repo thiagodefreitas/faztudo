@@ -3,6 +3,10 @@ import { expect, test } from "@playwright/test"
 
 test("posts a mention, streams a run, and answers the approval", async ({ page }) => {
   mkdirSync("docs-shots", { recursive: true })
+  await page.context().addCookies([{
+    name: "fz_local", value: "synthetic-mock-cookie", url: "http://127.0.0.1:5173",
+    httpOnly: true, sameSite: "Strict",
+  }])
   await page.goto("/")
   await page.getByTestId("inbox-list").getByRole("link", { name: /faztudo-dev/ }).click()
   await expect(page.getByRole("heading", { name: "# faztudo-dev" })).toBeVisible()

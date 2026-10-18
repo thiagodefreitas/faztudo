@@ -92,6 +92,7 @@ export function createApi(options: ApiOptions = {}): Api {
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const response = await doFetch(`${base}${path}`, {
       method,
+      credentials: "same-origin",
       headers: body === undefined ? undefined : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     })

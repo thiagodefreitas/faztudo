@@ -2,14 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/agentsdetect"
+	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/store"
@@ -18,7 +24,15 @@ import (
 
 func printLanes(p config.Paths) error {
 	var lanes []domain.Lane
-	if _, err := os.Stat(p.DBFile); err == nil {
+	c, err := config.Load(p)
+	if err != nil {
+		return err
+	}
+	if remote, connected, err := lanesFromAPI(p, c.Server.Listen); err != nil {
+		return err
+	} else if connected {
+		lanes = remote
+	} else if _, err := os.Stat(p.DBFile); err == nil {
 		s, err := store.Open(p.DBFile)
 		if err != nil {
 			return err
@@ -28,20 +42,12 @@ func printLanes(p config.Paths) error {
 		if err != nil {
 			return err
 		}
-		c, err := config.Load(p)
-		if err != nil {
-			return err
-		}
 		for _, l := range all {
 			if !c.IsStaleDefaultLane(l.ID, l.CLI) {
 				lanes = append(lanes, l)
 			}
 		}
 	} else if os.IsNotExist(err) {
-		c, err := config.Load(p)
-		if err != nil {
-			return err
-		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return err
@@ -112,6 +118,39 @@ func printLanes(p config.Paths) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n", l.ID, l.Health, strings.Join(windows, "; "), l.Capacity, l.Running)
 	}
 	return w.Flush()
+}
+
+func lanesFromAPI(p config.Paths, listen string) ([]domain.Lane, bool, error) {
+	token, err := auth.ReadLocalToken(auth.LocalTokenPath(p.DataDir))
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	req, err := http.NewRequest("GET", "http://"+listen+"/api/v1/lanes", nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	client := &http.Client{Timeout: 2 * time.Second}
+	res, err := client.Do(req)
+	if err != nil {
+		var op *net.OpError
+		if errors.As(err, &op) && errors.Is(op.Err, syscall.ECONNREFUSED) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		return nil, true, fmt.Errorf("lanes API returned %s", res.Status)
+	}
+	var lanes []domain.Lane
+	if err := json.NewDecoder(res.Body).Decode(&lanes); err != nil {
+		return nil, true, err
+	}
+	return lanes, true, nil
 }
 
 // compactTokens writes a token count the way people read it: 950, 12k, 1.2M.

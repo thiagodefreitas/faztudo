@@ -16,7 +16,8 @@ setup that the first alpha will have, and is updated as pieces land.
 ```bash
 faztudo init      # writes ~/.config/faztudo and looks for agent CLIs on PATH
 faztudo doctor    # checks each CLI, its sign-in and its version
-faztudo serve     # starts the server and opens http://127.0.0.1:7457
+faztudo serve     # starts the server and opens an authenticated local browser
+faztudo open      # opens the browser again after a restart or token rotation
 ```
 
 ## First steps
@@ -31,6 +32,10 @@ faztudo serve     # starts the server and opens http://127.0.0.1:7457
 5. Type `/status` in any channel for a quick summary: active runs, approvals
    waiting for you and lane health. faztudo answers it itself, so it costs no
    agent quota.
+
+The local browser uses a private token created on first start. Open it with
+`faztudo open`, not by typing the server address directly. If you rotate the
+token with `faztudo token --rotate`, run `faztudo open` again on each browser.
 
 ## Run it in the background
 
@@ -85,7 +90,7 @@ HTTPS.
      Android: Settings > Security > Encryption & credentials > Install a
      certificate > CA certificate).
 
-5. Pair your phone from the desktop browser (`http://127.0.0.1:7457`):
+5. Pair your phone from the desktop browser (opened with `faztudo open`):
    - Open **Settings > Devices** and click **Pair a phone**.
    - Scan the QR code with your phone camera. It opens
      `https://<lan-ip>:7458/pair#<token>` (the token is valid for 5 minutes
@@ -116,6 +121,11 @@ Tailscale is one example:
    `allowed_hosts = ["mypc.tailnet-name.ts.net"]` under `[server]`, then
    restart faztudo.
 5. Open `https://mypc.tailnet-name.ts.net` on the phone.
+
+When LAN mode is off, the proxy uses local token authentication. On the phone,
+visit `https://<your-proxy-host>/auth/local#<token>` once, using the token in
+the data directory's `local-token` file. Treat that link like a password. With
+LAN mode on, sign in with a LAN session instead.
 
 ## Build from source
 

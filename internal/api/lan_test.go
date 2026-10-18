@@ -45,7 +45,7 @@ func setupLANTestAPI(t *testing.T, password string) (*store.Store, *API, domain.
 		}
 	}
 
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	h.LANEnabled = true
 	h.LANListen = "0.0.0.0:7458"
 	h.LANURLs = []string{"https://192.168.1.10:7458"}
@@ -55,13 +55,20 @@ func setupLANTestAPI(t *testing.T, password string) (*store.Store, *API, domain.
 	return s, h, human, ch
 }
 
-func TestLANWithoutSessionGets401WhileLoopbackWorks(t *testing.T) {
+func TestLANWithoutSessionGets401WhileLocalBearerWorks(t *testing.T) {
 	_, h, human, _ := setupLANTestAPI(t, "synthetic-pass")
+	h.localAuthBypass = false
+	h.LocalTokenPath = auth.LocalTokenPath(t.TempDir())
+	token, err := auth.EnsureLocalToken(h.LocalTokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Loopback request without session cookie still works and auto-signs-in local user.
+	// Loopback uses the local token even while LAN mode is on.
 	loopReq := httptest.NewRequest("GET", "/api/v1/me", nil)
 	loopReq.RemoteAddr = "127.0.0.1:12345"
 	loopReq.Host = "127.0.0.1:7457"
+	loopReq.Header.Set("Authorization", "Bearer "+token)
 	loopRec := httptest.NewRecorder()
 	h.ServeHTTP(loopRec, loopReq)
 	if loopRec.Code != http.StatusOK {

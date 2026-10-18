@@ -17,6 +17,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
 	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/app"
+	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -61,9 +62,19 @@ func setupWire(t *testing.T, c config.Config) (*store.Store, *app.App, *httptest
 		t.Fatal(err)
 	}
 	h := api.New(s, humanID, "test")
+	h.LocalTokenPath = auth.LocalTokenPath(p.DataDir)
+	if _, err := auth.EnsureLocalToken(h.LocalTokenPath); err != nil {
+		t.Fatal(err)
+	}
 	a.Bind(h)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
+	if err := os.MkdirAll(p.ConfigDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte("[server]\nlisten = \""+strings.TrimPrefix(srv.URL, "http://")+"\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	return s, a, srv, p
 }
 
@@ -74,6 +85,9 @@ func requestJSON(t *testing.T, method, url, body string, want int, out any) {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token, err := auth.ReadLocalToken(auth.LocalTokenPath(config.PathsFromEnv().DataDir)); err == nil {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +209,16 @@ func TestWireWriteRunAndMergeApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	requestJSON(t, "POST", srv.URL+"/api/v1/approvals/"+approval.ID+"/resolve", `{"option":"merge"}`, 200, nil)
-	diffRes, err := http.Get(srv.URL + "/api/v1/runs/" + run.ID + "/diff")
+	diffReq, err := http.NewRequest("GET", srv.URL+"/api/v1/runs/"+run.ID+"/diff", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffToken, err := auth.ReadLocalToken(auth.LocalTokenPath(config.PathsFromEnv().DataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffReq.Header.Set("Authorization", "Bearer "+diffToken)
+	diffRes, err := http.DefaultClient.Do(diffReq)
 	if err != nil {
 		t.Fatal(err)
 	}

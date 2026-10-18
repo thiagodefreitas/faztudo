@@ -39,7 +39,11 @@ type API struct {
 	// AllowedHosts are extra host names (no port) accepted in the Host
 	// header of loopback requests, for a local reverse proxy such as
 	// tailscale serve. With LAN mode on, such requests need a session.
-	AllowedHosts    []string
+	AllowedHosts []string
+	// LocalTokenPath is the persistent token file. Serve fails closed if unset.
+	LocalTokenPath  string
+	LocalLimiter    *auth.LoginRateLimiter
+	localAuthBypass bool // used only by legacy in-package tests
 	Trigger         RunTrigger
 	ResolveApproval func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
 	ReadDiff        func(string) ([]byte, error)
@@ -77,13 +81,14 @@ type actorKey struct{}
 
 func New(s *store.Store, humanID, version string) *API {
 	return &API{
-		Store:   s,
-		HumanID: humanID,
-		Version: version,
-		Trigger: noopTrigger{},
-		Limiter: auth.NewLoginRateLimiter(),
-		Now:     time.Now,
-		streams: map[string]map[*streamHandle]struct{}{},
+		Store:        s,
+		HumanID:      humanID,
+		Version:      version,
+		Trigger:      noopTrigger{},
+		Limiter:      auth.NewLoginRateLimiter(),
+		LocalLimiter: auth.NewLoginRateLimiter(),
+		Now:          time.Now,
+		streams:      map[string]map[*streamHandle]struct{}{},
 	}
 }
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +111,8 @@ func (a *API) routes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/auth/login", a.publicPost(a.login))
 	m.HandleFunc("POST /api/v1/auth/pair", a.publicPost(a.pair))
 	m.HandleFunc("POST /api/v1/auth/pairings/redeem", a.publicPost(a.pair))
+	m.HandleFunc("POST /api/v1/auth/local", a.localPost)
+	m.HandleFunc("GET /auth/local", a.localPage)
 	m.Handle("/api/v1/", a.authenticated())
 }
 func (a *API) authenticated() http.Handler {
@@ -190,6 +197,15 @@ func (a *API) authenticated() http.Handler {
 				fail(w, 403, "forbidden", "invalid origin")
 				return
 			}
+		}
+		authed, limited := a.localAuthenticated(r)
+		if !authed {
+			if limited {
+				fail(w, 429, "rate_limited", "too many failed token attempts")
+			} else {
+				fail(w, 401, "unauthorized", "local token required; run faztudo open")
+			}
+			return
 		}
 		var (
 			member domain.Member

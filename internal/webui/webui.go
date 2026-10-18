@@ -68,7 +68,7 @@ func Mount(api http.Handler) http.Handler {
 	ui := Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if p == "/api" || strings.HasPrefix(p, "/api/") || p == "/ca.crt" || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
+		if p == "/api" || strings.HasPrefix(p, "/api/") || p == "/auth/local" || p == "/ca.crt" || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
 			api.ServeHTTP(w, r)
 			return
 		}

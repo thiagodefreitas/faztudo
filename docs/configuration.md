@@ -8,6 +8,7 @@ faztudo follows the XDG directory layout:
 | `~/.config/faztudo/lanes.toml` | lanes and personas |
 | `~/.config/faztudo/secrets` | secrets when no keyring is available (mode 0600) |
 | `~/.local/share/faztudo/faztudo.db` | the event log and projections |
+| `~/.local/share/faztudo/local-token` | local browser and CLI authentication token (mode 0600) |
 | `~/.local/share/faztudo/worktrees/` | git worktrees for write runs |
 | `~/.local/share/faztudo/runs/` | raw run output |
 | `~/.local/share/faztudo/tls/` | local CA and LAN server certificates (mode 0700, keys 0600) |
@@ -38,12 +39,18 @@ sandbox_tasks_max = 512    # systemd user scope, when available
 reverse proxy running on this machine, for example
 `allowed_hosts = ["mypc.tailnet-name.ts.net"]` with `tailscale serve`.
 Requests must still arrive from 127.0.0.1; the proxy decides who may
-connect. faztudo has no login of its own until LAN mode, so only use this
-with a proxy that already restricts access to your own devices.
+connect. With LAN mode on, proxied requests need a LAN session. With LAN mode
+off, they need the local cookie, set once by visiting the proxy's
+`/auth/local#<token>` link. The token is in the data directory's `local-token`
+file; treat the link like a password. Restrict proxy access to your own
+devices.
 
-`faztudo serve` opens the URL with `xdg-open` after binding when
+`faztudo serve` opens `/auth/local#<token>` with `xdg-open` after binding when
 `open_browser` is true, stdout is a terminal, and `DISPLAY` or
-`WAYLAND_DISPLAY` is set. Use `faztudo serve --no-open` to skip this.
+`WAYLAND_DISPLAY` is set. Use `faztudo serve --no-open` to skip this, or
+`faztudo open` to open it later. The token is created on first start in the
+data directory and reused across restarts. `faztudo token --rotate` replaces
+it and signs local browsers out. CLI API requests send it as a bearer token.
 When `[lan] enabled = true`, `faztudo serve` also binds the HTTPS LAN
 listener on `lan.listen` (default `0.0.0.0:7458`) and the plain-HTTP CA
 helper listener on `lan.ca_listen` (default `0.0.0.0:7459`). Run

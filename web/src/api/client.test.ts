@@ -5,13 +5,14 @@ interface Call {
   url: string
   method: string
   body?: unknown
+  credentials?: RequestCredentials
 }
 
 function fakeFetch(status = 200, payload: unknown = {}) {
   const calls: Call[] = []
   const fetchImpl: typeof fetch = async (input, init) => {
     const body = init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined
-    calls.push({ url: String(input), method: init?.method ?? "GET", body })
+    calls.push({ url: String(input), method: init?.method ?? "GET", body, credentials: init?.credentials })
     return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } })
   }
   return { fetchImpl, calls }
@@ -49,6 +50,7 @@ describe("api client", () => {
       "POST /api/v1/channels/ch-1/read",
     ])
     expect(calls[2]?.body).toEqual({ body: "hi @coder", idempotency_key: "key-1" })
+    expect(calls.every((call) => call.credentials === "same-origin")).toBe(true)
     expect(calls[6]?.body).toEqual({ lane_id: "claude/opus" })
   })
 

@@ -16,8 +16,18 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403),
 
 ## Authentication
 
-On `127.0.0.1` (`server.listen`), the single local user is signed in
-automatically. With LAN mode on, a loopback request that carries a proxy
+On `127.0.0.1` (`server.listen`), the single local user authenticates with
+`Authorization: Bearer <token>` or the `fz_local` cookie. The 32-byte hex
+token is stored in the data directory as `local-token` (mode 0600).
+`faztudo open` visits `/auth/local#<token>`; that page sends the fragment in
+JSON to `POST /api/v1/auth/local`, which sets the HttpOnly, SameSite=Strict,
+Path=/ cookie for one year. The cookie contains an HMAC derived from the token,
+not the token. `faztudo token --rotate` invalidates old cookies. Failed bearer
+attempts are rate-limited. `GET /api/v1/health` and `/mcp` keep their own rules.
+The local exchange accepts only loopback connections and the local Origin (or
+no Origin for a CLI request). An unauthenticated local browser sees a short
+page directing it to `faztudo open`, without app data.
+With LAN mode on, a loopback request that carries a proxy
 header (`X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or
 `Forwarded`) is treated as a LAN request and needs a session. On the LAN HTTPS listener (`lan.listen`, default
 `0.0.0.0:7458`), every API request (except `GET /api/v1/health`,

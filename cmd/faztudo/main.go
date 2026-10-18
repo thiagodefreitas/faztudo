@@ -20,6 +20,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/agentsdetect"
 	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/app"
+	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -37,7 +38,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: faztudo serve|init|doctor|agents detect|lanes|passwd|version")
+		return fmt.Errorf("usage: faztudo serve|open|token --rotate|init|doctor|agents detect|lanes|passwd|version")
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
@@ -58,6 +59,24 @@ func run(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(agentsdetect.Local())
 	case "doctor":
 		return doctor(p)
+	case "token":
+		if len(args) != 2 || args[1] != "--rotate" {
+			return fmt.Errorf("usage: faztudo token --rotate")
+		}
+		if _, err := auth.RotateLocalToken(auth.LocalTokenPath(p.DataDir)); err != nil {
+			return err
+		}
+		fmt.Println("local token rotated; open browsers again with faztudo open")
+		return nil
+	case "open":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: faztudo open")
+		}
+		c, err := config.Load(p)
+		if err != nil {
+			return err
+		}
+		return openLocalBrowser(c.Server.Listen, auth.LocalTokenPath(p.DataDir))
 	case "lanes":
 		return printLanes(p)
 	case "serve":
@@ -74,6 +93,10 @@ func run(args []string) error {
 			return fmt.Errorf("unexpected serve arguments")
 		}
 		if err := config.WriteDefaults(p); err != nil {
+			return err
+		}
+		localTokenPath := auth.LocalTokenPath(p.DataDir)
+		if _, err := auth.EnsureLocalToken(localTokenPath); err != nil {
 			return err
 		}
 		c, err := config.Load(p)
@@ -110,13 +133,14 @@ func run(args []string) error {
 		}
 		handler := api.New(s, humanID, version.Get().Version)
 		handler.AllowedHosts = c.Server.AllowedHosts
+		handler.LocalTokenPath = localTokenPath
 		application.Bind(handler)
 		listener, err := net.Listen("tcp", c.Server.Listen)
 		if err != nil {
 			return err
 		}
 		application.MCPBase = "http://" + listener.Addr().String()
-		server := &http.Server{Addr: c.Server.Listen, Handler: webui.WithMCP(webui.Mount(handler), application.MCP), ReadHeaderTimeout: 5 * time.Second}
+		server := &http.Server{Addr: c.Server.Listen, Handler: handler.LocalWeb(webui.WithMCP(webui.Mount(handler), application.MCP)), ReadHeaderTimeout: 5 * time.Second}
 		if c.LAN.Enabled {
 			lanSrv, err := startLAN(context.Background(), s, c, p, handler, logger, os.Stdout)
 			if err != nil {
@@ -129,7 +153,7 @@ func run(args []string) error {
 		logger.Info("serving", "listen", listener.Addr().String(), "url", url)
 		if shouldOpenBrowser(c.Server.OpenBrowser, *noOpen, isatty.IsTerminal(os.Stdout.Fd()), os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY")) {
 			go func() {
-				if err := exec.Command("xdg-open", url).Run(); err != nil {
+				if err := openLocalBrowser(listener.Addr().String(), localTokenPath); err != nil {
 					logger.Debug("could not open browser", "error", err)
 				}
 			}()
@@ -138,6 +162,14 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func openLocalBrowser(listen, tokenPath string) error {
+	token, err := auth.ReadLocalToken(tokenPath)
+	if err != nil {
+		return fmt.Errorf("read local token: %w", err)
+	}
+	return exec.Command("xdg-open", "http://"+listen+"/auth/local#"+token).Run()
 }
 
 func shouldOpenBrowser(configured, noOpen, terminal bool, display, wayland string) bool {

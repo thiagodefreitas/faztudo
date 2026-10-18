@@ -47,7 +47,7 @@ func newThreadFixture(t *testing.T) *threadFixture {
 			t.Fatal(err)
 		}
 	}
-	f.h = New(s, f.human.ID, "test")
+	f.h = newTestAPI(s, f.human.ID, "test")
 	f.h.Trigger = f.trigger
 	return f
 }

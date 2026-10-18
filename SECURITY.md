@@ -14,8 +14,12 @@ design assumes that agents make mistakes and that messages from outside
 (Signal, Discord, the local network) can be hostile.
 
 - **Local by default.** The server listens on `127.0.0.1:7457` unless you
-  turn on LAN mode. Loopback stays open alongside LAN mode (`0.0.0.0:7458`)
-  and continues to sign in the local user automatically.
+  turn on LAN mode. Loopback stays open alongside LAN mode (`0.0.0.0:7458`).
+  Local API requests need a bearer token or the `fz_local` browser cookie.
+  `faztudo serve` creates a 32-byte token in the data directory as
+  `local-token` (mode 0600). `faztudo open` opens a fragment URL that exchanges
+  it for an HttpOnly, SameSite=Strict cookie; the token is not the cookie.
+  `faztudo token --rotate` replaces it and invalidates existing local cookies.
 - **LAN mode requires TLS and a session.** On first LAN start, faztudo creates
   a local ECDSA P-256 CA (10 years) and server certificate (1 year) in
   `~/.local/share/faztudo/tls/` (directory `0700`, private keys `0600`) with
@@ -70,9 +74,10 @@ design assumes that agents make mistakes and that messages from outside
   outside the sandbox; the shared `.git` directory is writable, so git
   settings an agent writes (fsmonitor, filters, hooks) run when faztudo
   diffs or merges on the host; the CLI's config directories are writable,
-  so an agent can leave hooks that later unsandboxed sessions run; and with
-  the network shared, an agent can reach the local API, which treats
-  loopback requests as you. Fixes are tracked in the issues.
+  so an agent can leave hooks that later unsandboxed sessions run. A sandboxed
+  agent with network access can reach the local API but lacks the token file,
+  which is outside its mounts. Fixes for the other gaps are tracked in the
+  issues.
 - **Honest limits.** The sandbox shares the host kernel, and the CLI still
   runs as your user. It can change its worktree and git metadata, read and
   write its own bound sign-in and config files, and access the network when
@@ -84,6 +89,10 @@ design assumes that agents make mistakes and that messages from outside
   records an interrupted run rather than resuming its process.
 - **Stripped environment.** Agent processes start with known secret variables
   removed from their environment.
+- **Local token limit.** An unsandboxed agent runs as you and can read the
+  local token file. The token prevents a sandboxed agent or an unrelated local
+  process without that file from acting as you; it does not isolate processes
+  that already have your filesystem access.
 - **Bridges are allowlisted.** Signal and Discord accept messages only from
   identities you listed.
 

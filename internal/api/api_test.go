@@ -38,7 +38,7 @@ func TestMessageStreamAndHumanApproval(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	trigger := &countTrigger{}
 	h.Trigger = trigger
 	srv := httptest.NewServer(h)
@@ -146,7 +146,7 @@ func TestMessageStreamAndHumanApproval(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:1234"
 	req.Host = "127.0.0.1"
 	req.Header.Set("Content-Type", "application/json")
-	agentHandler := New(s, human.ID, "test")
+	agentHandler := newTestAPI(s, human.ID, "test")
 	agentHandler.actorForRequest = func(*http.Request) (domain.Member, error) { return agent, nil }
 	rec := httptest.NewRecorder()
 	agentHandler.ServeHTTP(rec, req)
@@ -190,7 +190,7 @@ func TestEndpointSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	cases := []struct {
 		method, path, body string
 		want               int
@@ -277,7 +277,7 @@ func TestDiffIncludesCommittedAgentWork(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:1234"
 	req.Host = "127.0.0.1"
 	rec := httptest.NewRecorder()
-	New(s, human.ID, "test").ServeHTTP(rec, req)
+	newTestAPI(s, human.ID, "test").ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "+changed") {
 		t.Fatalf("diff after agent commit: %d %q", rec.Code, rec.Body.String())
 	}
@@ -288,7 +288,7 @@ func TestAppendStoreErrorIsInternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(s, "human", "test")
+	h := newTestAPI(s, "human", "test")
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestAppendConstraintIsConflict(t *testing.T) {
 	if _, err := s.Append(context.Background(), events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: human}); err != nil {
 		t.Fatal(err)
 	}
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest("POST", "/api/v1/channels", strings.NewReader(`{"name":"same"}`))
 		req.RemoteAddr = "127.0.0.1:1234"
@@ -347,7 +347,7 @@ func TestPatchProbePathIsNotLanePatch(t *testing.T) {
 	req.Host = "127.0.0.1"
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	New(s, human.ID, "test").ServeHTTP(rec, req)
+	newTestAPI(s, human.ID, "test").ServeHTTP(rec, req)
 	got, err := s.Lane(context.Background(), lane.ID)
 	if err != nil || rec.Code != 404 || got.Capacity != 1 {
 		t.Fatalf("probe path patched lane: status %d lane %+v error %v", rec.Code, got, err)
@@ -368,7 +368,7 @@ func TestConcurrentApprovalOnlyOneResolution(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
 	h.ResolveApproval = func(context.Context, domain.Approval, string, string) (string, error) {
@@ -434,7 +434,7 @@ func TestMessageKeyCanRepeatInAnotherChannel(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	for _, id := range []string{"a", "b"} {
 		req := httptest.NewRequest("POST", "/api/v1/channels/"+id+"/messages", strings.NewReader(`{"body":"synthetic `+id+`","idempotency_key":"same"}`))
 		req.RemoteAddr = "127.0.0.1:1234"
@@ -462,7 +462,7 @@ func TestAllowedHostsForLocalProxy(t *testing.T) {
 	if _, err := s.Append(context.Background(), events.Draft{Type: events.MemberUpdated, Actor: events.System, Payload: human}); err != nil {
 		t.Fatal(err)
 	}
-	h := New(s, human.ID, "test")
+	h := newTestAPI(s, human.ID, "test")
 	get := func(host, remote string) int {
 		req := httptest.NewRequest("GET", "/api/v1/me", nil)
 		req.Host = host
