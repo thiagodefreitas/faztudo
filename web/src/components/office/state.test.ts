@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Approval, Lane, Member, Run } from "../../types"
-import { deriveMemberDesk, deriveOfficeDesks, FAIL_WINDOW_MS, resolveMemberHue } from "./state"
+import { deriveMemberDesk, deriveOfficeDesks, FAIL_WINDOW_MS, laneBorrower, resolveMemberHue } from "./state"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
 
@@ -200,5 +200,49 @@ describe("deriveMemberDesk", () => {
       const m: Member = { id: `m-${key}`, kind: "agent", handle: key, display_name: key, presence: "online" }
       expect(resolveMemberHue(m)).toBe(key)
     }
+  })
+})
+
+describe("laneBorrower", () => {
+  const coder: Member = {
+    id: "mem-coder",
+    kind: "agent",
+    handle: "coder",
+    display_name: "Coder",
+    presence: "busy",
+    agent: { lanes: ["claude/opus"], role: "coder", mode: "write" },
+  }
+  const members = [director, claudeAgent, coder]
+  const personaRun = (overrides: Partial<Run> = {}) =>
+    makeRun({ id: "run-p", agent_id: coder.id, lane_id: "claude/opus", state: "running", ...overrides })
+
+  it("names the persona running on a raw CLI's lane", () => {
+    expect(laneBorrower(claudeAgent, [personaRun()], members)?.handle).toBe("coder")
+  })
+
+  it("counts queued and verifying runs but not finished ones or other lanes", () => {
+    expect(laneBorrower(claudeAgent, [personaRun({ state: "queued" })], members)).not.toBeNull()
+    expect(laneBorrower(claudeAgent, [personaRun({ state: "verifying" })], members)).not.toBeNull()
+    expect(laneBorrower(claudeAgent, [personaRun({ state: "done" })], members)).toBeNull()
+    expect(laneBorrower(claudeAgent, [personaRun({ lane_id: "codex/default" })], members)).toBeNull()
+  })
+
+  it("ignores the CLI's own runs, personas and humans", () => {
+    expect(laneBorrower(claudeAgent, [makeRun({})], members)).toBeNull()
+    expect(laneBorrower(coder, [personaRun()], members)).toBeNull()
+    expect(laneBorrower(director, [personaRun()], members)).toBeNull()
+  })
+
+  it("keeps the desk idle but records who borrows the lane", () => {
+    const desk = deriveMemberDesk({
+      member: claudeAgent,
+      runs: [personaRun()],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+      members,
+    })
+    expect(desk.state).toBe("idle")
+    expect(desk.busyFor?.handle).toBe("coder")
   })
 })

@@ -238,6 +238,7 @@ func (c Config) Validate() error {
 	for _, d := range c.Lanes.Department {
 		departments[d.Handle] = true
 	}
+	channelOwner := map[string]string{}
 	for i, p := range c.Lanes.Project {
 		if !handleName.MatchString(p.Handle) {
 			return fmt.Errorf("project[%d].handle: use letters, digits, - and _", i)
@@ -254,6 +255,13 @@ func (c Config) Validate() error {
 			if !departments[h] {
 				return fmt.Errorf("project[%d]: unknown department %s", i, h)
 			}
+		}
+		for _, ch := range p.Channels {
+			key := strings.ToLower(ch)
+			if other, ok := channelOwner[key]; ok && other != p.Handle {
+				return fmt.Errorf("project[%d]: channel %s is already listed under project %s and project %s; a channel belongs to one project", i, ch, other, p.Handle)
+			}
+			channelOwner[key] = p.Handle
 		}
 	}
 	return nil

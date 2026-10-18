@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { identityOf } from "../../lib/avatar"
 import { useTheme, type ThemeChoice } from "../../lib/theme"
 import { formatElapsed } from "../../lib/time"
 import { useNow } from "../../state/now"
@@ -66,6 +67,8 @@ export interface DeskInfo {
   pendingApproval: Approval | null
   approvalChannelId: ID | undefined
   elapsedText: string | undefined
+  // The persona running on this raw CLI's lane, when the CLI itself is not.
+  busyFor: Member | null
 }
 
 export interface DeriveMemberDeskInput {
@@ -75,6 +78,7 @@ export interface DeriveMemberDeskInput {
   lanes: Lane[]
   now: number
   theme?: ThemeChoice
+  members?: Member[]
 }
 
 export interface DeriveOfficeDesksInput {
@@ -160,6 +164,23 @@ function pickLatestRun(candidates: Run[]): Run | null {
   return best
 }
 
+const LANE_IN_USE = new Set<RunState>(["queued", "running", "verifying"])
+
+// A raw CLI (claude, codex, ...) shares its lanes with the personas built on
+// them. This returns the persona whose run is using one of the CLI's lanes
+// right now, or null when the member is not a raw CLI or nobody borrows it.
+export function laneBorrower(member: Member, runs: Run[], members: Member[]): Member | null {
+  if (member.kind !== "agent" || identityOf(member).role !== null) return null
+  const laneIds = new Set(member.agent?.lanes ?? [])
+  if (laneIds.size === 0) return null
+  const run = pickLatestRun(
+    runs.filter((item) => item.agent_id !== member.id && laneIds.has(item.lane_id) && LANE_IN_USE.has(item.state)),
+  )
+  if (!run) return null
+  const borrower = members.find((item) => item.id === run.agent_id)
+  return borrower && borrower.kind === "agent" ? borrower : null
+}
+
 function isFailedWithinWindow(run: Run, now: number): boolean {
   if (run.state !== "failed") return false
   const raw = run.ended_at ?? run.started_at
@@ -176,6 +197,7 @@ export function deriveMemberDesk({
   lanes,
   now,
   theme = "light",
+  members = [],
 }: DeriveMemberDeskInput): DeskInfo {
   const memberRuns = runs.filter((run) => run.agent_id === member.id)
   const memberRunIds = new Set(memberRuns.map((run) => run.id))
@@ -242,6 +264,7 @@ export function deriveMemberDesk({
     pendingApproval,
     approvalChannelId,
     elapsedText,
+    busyFor: state === "idle" ? laneBorrower(member, runs, members) : null,
   }
 }
 
@@ -261,6 +284,7 @@ export function deriveOfficeDesks({
       lanes,
       now,
       theme,
+      members,
     }),
   )
   // Director (human) desks sit at the front of the room, followed by agent desks.

@@ -148,8 +148,11 @@ export function RoomDesk({
   const ariaParts = [member.display_name, stateLabel]
   if (state === "working" && elapsedText) ariaParts.push(`elapsed ${elapsedText}`)
   if (dimmed && state !== "out_of_quota") ariaParts.push("out of quota")
-  const hoverTitle =
-    state === "working" && elapsedText
+  const busyFor = desk.busyFor
+  if (busyFor) ariaParts.push(`busy for @${busyFor.handle}`)
+  const hoverTitle = busyFor
+    ? `${member.display_name} - busy for @${busyFor.handle}`
+    : state === "working" && elapsedText
       ? `${member.display_name} - working (${elapsedText})`
       : `${member.display_name} - ${stateLabel}`
 
@@ -173,6 +176,7 @@ export function RoomDesk({
         aria-pressed={selected}
         data-testid={`desk-${member.id}`}
         data-state={state}
+        data-busy-for={busyFor?.handle}
         data-director={desk.isDirector ? "true" : "false"}
         data-out-of-quota={dimmed ? "true" : "false"}
         onClick={() => onSelect(desk)}
@@ -267,6 +271,21 @@ export function RoomDesk({
               <AgentAvatar member={member} size={36} state={avatarState(state)} decorative className="h-full w-full" />
             </div>
           </foreignObject>
+
+          {busyFor && (
+            <rect
+              data-testid={`busy-ring-${member.id}`}
+              x="41"
+              y="1"
+              width="38"
+              height="38"
+              rx="19"
+              fill="none"
+              stroke={hue.accent}
+              strokeOpacity="0.35"
+              strokeWidth="1.5"
+            />
+          )}
 
           {state === "working" && (
             <g data-testid={`typing-hands-${member.id}`} data-animated={animate ? "true" : "false"}>

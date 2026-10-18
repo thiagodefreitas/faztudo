@@ -56,8 +56,9 @@ Director (you)
 - A **project** groups channels and a repository. Departments and single
   specialists are **assigned** to projects. Only assigned agents act in a
   project's channels, which keeps context and quota spending contained.
-- A **channel** is meant to belong to at most one project; if it is listed
-  under several, the first match wins. A department can also have its
+- A **channel** belongs to at most one project. Listing the same channel
+  (names compare without regard to case) under two projects in `lanes.toml`
+  is a config error that names both projects. A department can also have its
   own channel for its internal work.
 
 ## Cross-functional projects

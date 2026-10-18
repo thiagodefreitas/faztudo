@@ -221,6 +221,35 @@ describe("OfficeScene", () => {
     expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "m-claude" }))
   })
 
+  it("shows a quiet busy-for-persona state on a raw CLI whose lane a persona is using", async () => {
+    const coderRun: Run = {
+      id: "run-coder",
+      channel_id: "ch-build",
+      trigger_message_id: "msg-3",
+      agent_id: "m-coder",
+      lane_id: "grok/default",
+      mode: "write",
+      state: "running",
+      started_at: new Date(now - 30_000).toISOString(),
+    }
+    const borrowed = members.map((member) =>
+      member.id === "m-coder" ? { ...member, agent: { lanes: ["grok/default"], role: "coder", mode: "write" as const } } : member,
+    )
+    const healthy = lanes.map((lane) => (lane.id === "grok/default" ? { ...lane, health: "available" as const } : lane))
+    const desks = deriveOfficeDesks({ members: borrowed, runs: [...runs, coderRun], approvals, lanes: healthy, now })
+    await renderScene({ desks })
+
+    const grok = screen.getByTestId("desk-m-grok")
+    expect(grok).toHaveAttribute("data-state", "idle")
+    expect(grok).toHaveAttribute("data-busy-for", "coder")
+    expect(grok).toHaveAccessibleName(expect.stringContaining("busy for @coder"))
+    expect(within(grok).getByText("Grok - busy for @coder")).toBeInTheDocument()
+    expect(screen.getByTestId("busy-ring-m-grok")).toBeInTheDocument()
+    // The persona's own desk and desks nobody borrows get no ring.
+    expect(screen.queryByTestId("busy-ring-m-coder")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("busy-ring-m-claude")).not.toBeInTheDocument()
+  })
+
   it("draws one room with labeled pod areas, a legend and desks in reading order", async () => {
     await renderScene()
 

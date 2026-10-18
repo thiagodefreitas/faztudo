@@ -4,7 +4,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { qk } from "../state/keys"
-import type { Channel, Member } from "../types"
+import type { Channel, Member, Run } from "../types"
 import { WorkspaceNav } from "./sidebar"
 
 const ada: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA1", kind: "human", handle: "ada", display_name: "Ada", presence: "online" }
@@ -35,10 +35,31 @@ const coderDm: Channel = {
   unread: 3,
 }
 
-async function setup() {
+const claude: Member = {
+  id: "01ARZ3NDEKTSV4RRFFQ69G5AA4",
+  kind: "agent",
+  handle: "claude",
+  display_name: "Claude",
+  presence: "online",
+  agent: { lanes: ["claude/default"] },
+}
+
+const coderRun: Run = {
+  id: "r1",
+  channel_id: "c1",
+  trigger_message_id: "m1",
+  agent_id: coder.id,
+  lane_id: "claude/default",
+  mode: "write",
+  state: "running",
+  started_at: "2026-10-18T12:00:00.000Z",
+}
+
+async function setup(options: { members?: Member[]; runs?: Run[] } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.me, ada)
-  client.setQueryData(qk.members, [ada, bob, coder])
+  client.setQueryData(qk.members, options.members ?? [ada, bob, coder])
+  client.setQueryData(qk.runs, options.runs ?? [])
   client.setQueryData(qk.channels, [general, coderDm])
   client.setQueryData(qk.lanes, [])
   const rootRoute = createRootRoute({ component: () => <WorkspaceNav /> })
@@ -64,6 +85,22 @@ describe("WorkspaceNav", () => {
     expect(row).not.toBeNull()
     expect(within(row as HTMLElement).getByLabelText("3 unread")).toBeInTheDocument()
     expect(screen.queryByText("dm-ada-coder")).not.toBeInTheDocument()
+  })
+
+  it("marks a raw CLI busy for the persona using its lane", async () => {
+    await setup({ members: [ada, claude, coder], runs: [coderRun] })
+    const row = (await screen.findByText("Claude")).closest("li") as HTMLElement
+    const busy = within(row).getByTitle("Busy for @coder")
+    expect(busy).toBeInTheDocument()
+    expect(busy).toHaveAttribute("data-busy-for", "coder")
+    const coderRow = screen.getByText("Coder").closest("li") as HTMLElement
+    expect(within(coderRow).queryByTitle(/^Busy for/)).not.toBeInTheDocument()
+  })
+
+  it("shows no busy mark when the lane is free", async () => {
+    await setup({ members: [ada, claude, coder], runs: [{ ...coderRun, state: "done" }] })
+    const row = (await screen.findByText("Claude")).closest("li") as HTMLElement
+    expect(within(row).queryByTitle(/^Busy for/)).not.toBeInTheDocument()
   })
 
   it("keeps channels, direct messages with people, then agents", async () => {

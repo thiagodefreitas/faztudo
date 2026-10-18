@@ -1,6 +1,7 @@
 import * as Tooltip from "@radix-ui/react-tooltip"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { useState } from "react"
+import { identityOf } from "../lib/avatar"
 import { cx } from "../lib/cx"
 import { directPeer, findDirect, isDirect } from "../lib/direct"
 import { primaryWindow } from "../lib/lanes"
@@ -8,13 +9,14 @@ import { useTheme } from "../lib/theme"
 import { formatAge } from "../lib/time"
 import { useNow } from "../state/now"
 import { useOpenDirect } from "../state/direct"
-import { useChannels, useLanes, useMe, useMembers } from "../state/queries"
+import { useChannels, useLanes, useMe, useMembers, useRuns } from "../state/queries"
 import { useStreamStatus } from "../state/status"
-import type { Channel, Lane, LaneHealth, Member, Presence } from "../types"
+import type { Channel, Lane, LaneHealth, Member, Presence, Run } from "../types"
 import { WORKSPACE_NAME } from "../types"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { healthDotClass } from "./lane-chip"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
+import { laneBorrower } from "./office/state"
 import { LanesGauge } from "./lanes"
 
 const PRESENCE: Record<Presence, string> = {
@@ -54,6 +56,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const channels = useChannels()
   const members = useMembers()
   const lanes = useLanes()
+  const runs = useRuns()
   const me = useMe()
   const openDirect = useOpenDirect()
   const now = useNow()
@@ -135,6 +138,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
                   pathname={pathname}
                   lanes={[]}
                   now={now}
+                  members={[]}
+                  runs={[]}
                   onNavigate={onNavigate}
                   onOpen={startDirect}
                 />
@@ -168,6 +173,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
                   pathname={pathname}
                   lanes={lanes.data ?? []}
                   now={now}
+                  members={members.data ?? []}
+                  runs={runs.data ?? []}
                   onNavigate={onNavigate}
                   onOpen={startDirect}
                 />
@@ -231,6 +238,8 @@ function PeerRow({
   pathname,
   lanes,
   now,
+  members,
+  runs,
   onNavigate,
   onOpen,
 }: {
@@ -239,16 +248,33 @@ function PeerRow({
   pathname: string
   lanes: Lane[]
   now: number
+  members: Member[]
+  runs: Run[]
   onNavigate: (() => void) | undefined
   onOpen: (member: Member) => void
 }) {
   const lane = lanes.find((item) => item.id === member.agent?.lanes[0])
+  // A quiet "busy for @persona" only when the CLI is not busy itself.
+  const busyFor = member.presence === "busy" ? null : laneBorrower(member, runs, members)
   const active = channel ? pathname === `/c/${channel.id}` : false
   const className = cx(ROW, "min-w-0 flex-1 text-left", active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")
   const inner = (
     <>
       {member.kind === "agent" ? (
-        <AgentAvatar member={member} size={20} state={AGENT_STATE[member.presence]} decorative />
+        busyFor ? (
+          <span
+            title={`Busy for @${busyFor.handle}`}
+            data-busy-for={busyFor.handle}
+            className="flex shrink-0 rounded-full"
+            style={{
+              boxShadow: `0 0 0 1.5px color-mix(in srgb, var(--color-agent-${(identityOf(member).slot % 6) + 1}) 35%, transparent)`,
+            }}
+          >
+            <AgentAvatar member={member} size={20} decorative />
+          </span>
+        ) : (
+          <AgentAvatar member={member} size={20} state={AGENT_STATE[member.presence]} decorative />
+        )
       ) : (
         <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
       )}

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -86,5 +87,30 @@ func TestOrgValidation(t *testing.T) {
 		if c.Validate() == nil {
 			t.Errorf("%s: expected a validation error", name)
 		}
+	}
+}
+
+func TestProjectChannelInTwoProjects(t *testing.T) {
+	c := Defaults()
+	c.Lanes.Project = []Project{
+		{Handle: "alpha", Channels: []string{"general", "Dev"}},
+		{Handle: "beta", Channels: []string{"ops", "dev"}},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected an error for a channel under two projects")
+	}
+	for _, want := range []string{"alpha", "beta", "dev"} {
+		if !strings.Contains(strings.ToLower(err.Error()), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+	c.Lanes.Project[1].Channels = []string{"ops"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("distinct channels rejected: %v", err)
+	}
+	c.Lanes.Project[0].Channels = []string{"general", "general"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("repeat inside one project rejected: %v", err)
 	}
 }
