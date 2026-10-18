@@ -113,6 +113,10 @@ explaining why. Each candidate has its own worktree. The compare card offers
 Merge A, Merge B, Discard both, and Combine after both candidates finish.
 Merging one discards the other. Combine discards both candidates and starts a
 third write run whose prompt includes both diffs; it does not merge anything.
+Only a human message can start a compare; an `x2` posted by an agent (MCP
+post or a delegated message) starts nothing and gets a notice. Combine
+records `compare.decided` (with `combine_message_id`) before the third run
+starts, and a repeated Combine starts the run only if none exists yet.
 
 ```ts
 interface Message {
@@ -409,7 +413,7 @@ Event types in version 1:
 | `run.output` | `{run_id, seq, stream: "stdout" or "stderr", text}` |
 | `approval.requested`, `approval.resolved` | `Approval` |
 | `compare.started` | `{id, channel_id, message_id, agent_id, lanes: [lane_a, lane_b]}` |
-| `compare.decided` | `{id, decision, winner_lane?, winner_run?, by}` |
+| `compare.decided` | `{id, decision, winner_lane?, winner_run?, combine_message_id?, by}` |
 | `lane.updated` | `Lane` |
 | `lane.switched` | `{run_id, from, to, reason}` |
 | `department.updated` | `Department` |

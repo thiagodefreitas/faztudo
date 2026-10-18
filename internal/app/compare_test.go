@@ -57,7 +57,8 @@ func compareStartFixture(t *testing.T, health [3]domain.LaneHealth) (*App, *stor
 	agent := domain.Member{ID: "coder", Kind: domain.MemberAgent, Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"a", "b", "c"}, Mode: domain.RunWrite}}
 	channel := domain.Channel{ID: "work", Name: "work", RepoPath: "/fixture/repo", Visibility: domain.VisibilityPublic}
 	m := domain.Message{ID: "request", ChannelID: channel.ID, Body: "@coder x2 change it", AuthorID: "human"}
-	drafts := []events.Draft{{Type: events.MemberUpdated, Payload: agent}, {Type: events.ChannelCreated, ChannelID: channel.ID, Payload: channel}, {Type: events.MessagePosted, ChannelID: channel.ID, Payload: m}}
+	human := domain.Member{ID: "human", Kind: domain.MemberHuman, Handle: "ada"}
+	drafts := []events.Draft{{Type: events.MemberUpdated, Payload: human}, {Type: events.MemberUpdated, Payload: agent}, {Type: events.ChannelCreated, ChannelID: channel.ID, Payload: channel}, {Type: events.MessagePosted, ChannelID: channel.ID, Payload: m}}
 	for i, id := range []string{"a", "b", "c"} {
 		drafts = append(drafts, events.Draft{Type: events.LaneUpdated, Payload: domain.Lane{ID: id, CLI: "codex", Capacity: 1, Health: health[i], Windows: []domain.LaneWindow{}}})
 	}

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
 	"github.com/thiagodefreitas/faztudo/internal/api"
@@ -31,8 +32,10 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
-// A run's answer is read from the end of its stdout (CLIs print progress
-// first), up to maxAnswerRead, and posted up to maxAnswerBytes from its start.
+// A run's answer is read from the end of its stdout, up to maxAnswerRead:
+// the CLIs print progress first and the final answer last, so the cleaners
+// need the tail, not the head. It is posted up to maxAnswerBytes from its
+// start.
 const (
 	maxAnswerRead  = 256 << 10
 	maxAnswerBytes = 64 << 10
@@ -44,7 +47,12 @@ func shortenAnswer(s string) string {
 	if len(s) <= maxAnswerBytes {
 		return s
 	}
-	cut := s[:maxAnswerBytes]
+	// Back up to the start of a rune so the cut never splits a character.
+	n := maxAnswerBytes
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	cut := s[:n]
 	if i := strings.LastIndexByte(cut, '\n'); i > maxAnswerBytes/2 {
 		cut = cut[:i]
 	}
@@ -470,6 +478,12 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 		agent, msg := agent, m
 		if body, compare := parseCompareRequest(m.Body, agent.Handle); compare {
 			msg.Body = body
+			// Two write lanes are spent without the Director and outside
+			// the delegation budget, so only a person may ask for it.
+			if author, err := a.Store.Member(ctx, m.AuthorID); err != nil || author.Kind != domain.MemberHuman {
+				a.notice(ctx, m.ChannelID, "warn", fmt.Sprintf("x2 compare runs are started by people only; @%s did not run.", agent.Handle))
+				continue
+			}
 			if err := a.startCompare(ctx, msg, agent); err != nil {
 				a.notice(ctx, m.ChannelID, "warn", err.Error())
 			}

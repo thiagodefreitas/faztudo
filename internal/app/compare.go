@@ -121,6 +121,7 @@ func (a *App) CompareList(ctx context.Context, channelID string) ([]api.CompareG
 				if i, ok := index[p.ID]; ok {
 					groups[i].Decision = p.Decision
 					groups[i].WinnerLane = p.WinnerLane
+					groups[i].CombineMessageID = p.CombineMessageID
 				}
 			}
 		}
@@ -214,6 +215,14 @@ func (a *App) CompareDecide(ctx context.Context, channelID, id, decision, humanI
 	if group == nil {
 		return api.CompareGroup{}, store.ErrNotFound
 	}
+	if group.Decision == "combine" && decision == "combine" && group.CombineMessageID != "" {
+		// A crash or a failed step left the combiner unstarted: finish it
+		// once, without a second combine message or run.
+		if err := a.combineCompare(ctx, *group, humanID, group.CombineMessageID); err != nil {
+			return api.CompareGroup{}, err
+		}
+		return *group, nil
+	}
 	if group.Decision != "" {
 		return api.CompareGroup{}, domain.UserError{Message: "This comparison was already decided."}
 	}
@@ -268,9 +277,21 @@ func (a *App) CompareDecide(ctx context.Context, channelID, id, decision, humanI
 			return api.CompareGroup{}, err
 		}
 	case "combine":
-		if err := a.combineCompare(ctx, *group, humanID); err != nil {
+		// The decision is recorded before the combiner starts, so a second
+		// click after a crash retries this one instead of starting another.
+		if _, _, err := a.combineInputs(ctx, *group); err != nil {
 			return api.CompareGroup{}, err
 		}
+		messageID := store.NewID()
+		payload := events.CompareDecidedPayload{ID: id, Decision: decision, By: humanID, CombineMessageID: messageID}
+		if _, err := a.Store.Append(ctx, events.Draft{Type: events.CompareDecided, Actor: events.Human(humanID), ChannelID: channelID, Payload: payload, IdempotencyKey: "compare:" + id}); err != nil {
+			return api.CompareGroup{}, err
+		}
+		group.Decision, group.CombineMessageID = decision, messageID
+		if err := a.combineCompare(ctx, *group, humanID, messageID); err != nil {
+			return api.CompareGroup{}, err
+		}
+		return *group, nil
 	default:
 		return api.CompareGroup{}, domain.UserError{Message: "Unknown comparison decision."}
 	}
@@ -285,27 +306,29 @@ func (a *App) CompareDecide(ctx context.Context, channelID, id, decision, humanI
 	return *group, nil
 }
 
-func (a *App) combineCompare(ctx context.Context, group api.CompareGroup, humanID string) error {
+// combineInputs returns the compare persona and the prompt context holding
+// both diffs, or the reason a combined run cannot start.
+func (a *App) combineInputs(ctx context.Context, group api.CompareGroup) (domain.Member, string, error) {
 	parts := make([]string, 2)
 	for i, candidate := range group.Candidates {
 		if candidate.Run == nil {
-			return errors.New("candidate run missing")
+			return domain.Member{}, "", errors.New("candidate run missing")
 		}
 		b, err := os.ReadFile(filepath.Join(a.Paths.RunsDir, candidate.Run.ID, "diff.patch"))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			return domain.Member{}, "", err
 		}
 		if len(b) > 128<<10 {
-			return domain.UserError{Message: "A candidate diff is over 128 KB; combine it manually."}
+			return domain.Member{}, "", domain.UserError{Message: "A candidate diff is over 128 KB; combine it manually."}
 		}
 		if len(b) == 0 {
-			return domain.UserError{Message: "Both candidates need a diff before they can be combined."}
+			return domain.Member{}, "", domain.UserError{Message: "Both candidates need a diff before they can be combined."}
 		}
 		parts[i] = fmt.Sprintf("Candidate %c on %s:\n%s", 'A'+i, candidate.LaneID, b)
 	}
 	members, err := a.Store.Members(ctx)
 	if err != nil {
-		return err
+		return domain.Member{}, "", err
 	}
 	var agent domain.Member
 	for _, member := range members {
@@ -315,46 +338,71 @@ func (a *App) combineCompare(ctx context.Context, group api.CompareGroup, humanI
 		}
 	}
 	if agent.Agent == nil {
-		return errors.New("compare agent no longer exists")
+		return domain.Member{}, "", errors.New("compare agent no longer exists")
 	}
 	if agent.Agent.Mode != domain.RunWrite {
-		return domain.UserError{Message: "The compare persona is no longer a write persona."}
+		return domain.Member{}, "", domain.UserError{Message: "The compare persona is no longer a write persona."}
 	}
 	channel, err := a.Store.Channel(ctx, group.ChannelID)
 	if err != nil {
-		return err
+		return domain.Member{}, "", err
 	}
 	projects, err := a.Store.Projects(ctx)
 	if err != nil {
-		return err
+		return domain.Member{}, "", err
 	}
 	if project, ok := org.ProjectOfChannel(projects, channel.Name); ok && project.Archived {
-		return domain.UserError{Message: "The project is archived, so the combined run did not start."}
+		return domain.Member{}, "", domain.UserError{Message: "The project is archived, so the combined run did not start."}
 	}
 	departments, err := a.Store.Departments(ctx)
 	if err != nil {
-		return err
+		return domain.Member{}, "", err
 	}
 	if allowed, _ := org.Gate(projects, departments, channel.Name, []domain.Member{agent}); len(allowed) == 0 {
-		return domain.UserError{Message: "@" + agent.Handle + " is not assigned to this project's team."}
+		return domain.Member{}, "", domain.UserError{Message: "@" + agent.Handle + " is not assigned to this project's team."}
 	}
 	if _, skipped, err := a.Registry.Pick(agent.Handle, ""); err != nil && !lanes.Busy(skipped) {
-		return domain.UserError{Message: "No healthy lane is available for the combined run."}
+		return domain.Member{}, "", domain.UserError{Message: "No healthy lane is available for the combined run."}
+	}
+	return agent, strings.Join(parts, "\n\n"), nil
+}
+
+// combineCompare discards both candidates and starts the combiner run for a
+// combine decision that is already recorded. Every step can be repeated: the
+// message has a fixed id and key, and the run starts only when none is tied
+// to that message yet.
+func (a *App) combineCompare(ctx context.Context, group api.CompareGroup, humanID, messageID string) error {
+	agent, diffs, err := a.combineInputs(ctx, group)
+	if err != nil {
+		return err
 	}
 	for _, candidate := range group.Candidates {
 		if err := a.discardCompareRun(ctx, candidate.Run); err != nil {
 			return err
 		}
 	}
-	m := domain.Message{ID: store.NewID(), ChannelID: group.ChannelID, AuthorID: humanID, Body: "@" + agent.Handle + " Combine candidates A and B from comparison " + group.ID + " into one change. Take the best of each; review both diffs below.", CreatedAt: time.Now().UTC()}
-	if _, err := a.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(humanID), ChannelID: m.ChannelID, Payload: m}); err != nil {
+	m := domain.Message{ID: messageID, ChannelID: group.ChannelID, AuthorID: humanID, Body: "@" + agent.Handle + " Combine candidates A and B from comparison " + group.ID + " into one change. Take the best of each; review both diffs below.", CreatedAt: time.Now().UTC()}
+	if _, err := a.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(humanID), ChannelID: m.ChannelID, Payload: m, IdempotencyKey: "compare-combine:" + group.ID}); err != nil {
 		return err
 	}
+	runs, err := a.Store.Runs(ctx, group.ChannelID, "")
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if run.TriggerMessageID == messageID {
+			return nil
+		}
+	}
 	a.extraMu.Lock()
+	if _, starting := a.extra[m.ID]; starting {
+		a.extraMu.Unlock()
+		return nil
+	}
 	if a.extra == nil {
 		a.extra = map[string]string{}
 	}
-	a.extra[m.ID] = strings.Join(parts, "\n\n")
+	a.extra[m.ID] = diffs
 	a.extraMu.Unlock()
 	go func() {
 		defer a.clearExtra(m.ID)

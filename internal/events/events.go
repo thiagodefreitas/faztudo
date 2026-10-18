@@ -55,7 +55,10 @@ type CompareDecidedPayload struct {
 	Decision   string `json:"decision"`
 	WinnerLane string `json:"winner_lane,omitempty"`
 	WinnerRun  string `json:"winner_run,omitempty"`
-	By         string `json:"by"`
+	// CombineMessageID is the message that carries a combine request. It is
+	// chosen before the combiner run starts, so a retry finds the same one.
+	CombineMessageID string `json:"combine_message_id,omitempty"`
+	By               string `json:"by"`
 }
 
 // Actor identifies who caused an event: "human:<id>", "agent:<id>",

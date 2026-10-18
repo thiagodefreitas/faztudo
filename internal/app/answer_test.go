@@ -3,7 +3,19 @@ package app
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
+
+func TestShortenAnswerCutsOnARuneBoundary(t *testing.T) {
+	// Three-byte runes and no newline: a raw byte cut would split one.
+	got := shortenAnswer(strings.Repeat("€", maxAnswerBytes))
+	if !utf8.ValidString(got) {
+		t.Fatal("the cut split a UTF-8 character")
+	}
+	if !strings.HasSuffix(got, "(The answer was longer; the rest is in the run output.)") {
+		t.Fatalf("no note: %q", got[len(got)-60:])
+	}
+}
 
 func TestShortenAnswerKeepsTheStart(t *testing.T) {
 	short := "Summary first.\nDetails."

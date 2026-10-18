@@ -23,6 +23,8 @@ type CompareGroup struct {
 	Candidates [2]CompareCandidate `json:"candidates"`
 	Decision   string              `json:"decision,omitempty"`
 	WinnerLane string              `json:"winner_lane,omitempty"`
+	// CombineMessageID is the request message of a combine decision.
+	CombineMessageID string `json:"combine_message_id,omitempty"`
 }
 
 type CompareControl interface {
