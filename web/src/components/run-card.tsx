@@ -12,7 +12,15 @@ import { useNow } from "../state/now"
 import { approvalForRun, useApprovals, useLanes, useMembers, useOutput } from "../state/queries"
 import type { Approval, Lane, Member, OutputLine, Run, RunState } from "../types"
 import { ApprovalCard } from "./approval-card"
+import { AgentAvatar, type AvatarState } from "./agent-avatar"
 import { LaneChip } from "./lane-chip"
+
+const RING: Partial<Record<RunState, AvatarState>> = {
+  running: "working",
+  verifying: "working",
+  waiting_approval: "waiting",
+  failed: "failed",
+}
 
 const STATE_LABEL: Record<RunState, string> = {
   queued: "Queued",
@@ -137,6 +145,7 @@ export function RunCardView({
       <div className={cx("w-1 shrink-0", hueFor(agent).edge)} aria-hidden="true" />
       <div className="min-w-0 flex-1 p-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <AgentAvatar member={agent} size={20} state={RING[run.state]} decorative />
           <p className="text-[13px] font-semibold">{agent?.display_name ?? "Agent"}</p>
           <p className="font-mono text-[12px] text-muted">{run.lane_id}</p>
           <p className="text-[12px] text-faint">{run.mode}</p>

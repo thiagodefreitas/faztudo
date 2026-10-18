@@ -2,7 +2,6 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { api } from "../api/client"
-import { hueFor, initialOf } from "../lib/avatar"
 import { continuesGroup } from "../lib/group"
 import { formatClock } from "../lib/time"
 import { cx } from "../lib/cx"
@@ -12,6 +11,7 @@ import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
 import { useMe, useMembers, useMessages, useNotices, usePending, useRuns, type PendingMessage } from "../state/queries"
 import type { Member, Message, NoticeItem, Run } from "../types"
+import { AgentAvatar } from "./agent-avatar"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
 
@@ -210,7 +210,6 @@ function MessageRow({
 }) {
   const replies = message.reply_count ?? 0
   const authorName = author?.display_name ?? "Member"
-  const hue = hueFor(author)
   const time = formatClock(message.created_at)
   return (
     <article className={cx("group/msg flex gap-2.5", fresh && "fz-rise")}>
@@ -223,17 +222,7 @@ function MessageRow({
             {time}
           </time>
         ) : (
-          <span
-            aria-hidden="true"
-            data-testid="avatar"
-            className={cx(
-              "flex h-8 w-8 items-center justify-center text-[13px] font-semibold",
-              author?.kind === "agent" ? "rounded-md" : "rounded-full",
-              hue.disc,
-            )}
-          >
-            {initialOf(authorName)}
-          </span>
+          <AgentAvatar member={author} size={28} decorative className="mt-0.5" />
         )}
       </div>
       <div className="min-w-0 flex-1">

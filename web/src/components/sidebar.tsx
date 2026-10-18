@@ -14,6 +14,7 @@ import type { Channel, Lane, LaneHealth, Member, Presence } from "../types"
 import { WORKSPACE_NAME } from "../types"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { healthDotClass } from "./lane-chip"
+import { AgentAvatar, type AvatarState } from "./agent-avatar"
 import { LanesGauge } from "./lanes"
 
 const PRESENCE: Record<Presence, string> = {
@@ -21,6 +22,13 @@ const PRESENCE: Record<Presence, string> = {
   idle: "bg-warn",
   busy: "bg-accent",
   offline: "bg-faint",
+}
+
+const AGENT_STATE: Record<Presence, AvatarState | undefined> = {
+  online: undefined,
+  idle: undefined,
+  busy: "working",
+  offline: "off",
 }
 
 const STATUS_LABEL = {
@@ -220,7 +228,11 @@ function PeerRow({
   const className = cx(ROW, "min-w-0 flex-1 text-left", active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")
   const inner = (
     <>
-      <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
+      {member.kind === "agent" ? (
+        <AgentAvatar member={member} size={20} state={AGENT_STATE[member.presence]} decorative />
+      ) : (
+        <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
+      )}
       <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
       {channel && <Unread count={channel.unread} />}
     </>

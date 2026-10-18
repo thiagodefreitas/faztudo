@@ -5,6 +5,7 @@ import { isDirect } from "../lib/direct"
 import { useTheme } from "../lib/theme"
 import { useOpenDirect } from "../state/direct"
 import { useChannels, useMe, useMembers } from "../state/queries"
+import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
 
 // The channel page listens for this to open its settings dialog.
@@ -85,7 +86,7 @@ export function CommandPalette() {
                 className={itemClass}
                 onSelect={() => run(() => void openDirect(member))}
               >
-                <span className="text-faint">@</span>
+                <AgentAvatar member={member} size={20} decorative />
                 Message {member.display_name}
               </Command.Item>
             ))}

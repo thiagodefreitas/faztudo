@@ -7,7 +7,8 @@ import { formatClock } from "../lib/time"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { useMembers, useThread } from "../state/queries"
-import type { Message, ThreadPage } from "../types"
+import type { Member, Message, ThreadPage } from "../types"
+import { AgentAvatar } from "./agent-avatar"
 import { Composer } from "./composer"
 import { Markdown } from "./markdown"
 
@@ -45,8 +46,12 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
     )
   }
 
+  function memberOf(message: Message): Member | undefined {
+    return members.data?.find((member) => member.id === message.author_id)
+  }
+
   function author(message: Message): string {
-    return members.data?.find((member) => member.id === message.author_id)?.display_name ?? "Member"
+    return memberOf(message)?.display_name ?? "Member"
   }
 
   const count = thread.replies.length
@@ -71,7 +76,8 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
             {[thread.root, ...thread.replies].map((message, index) => (
               <li key={message.id} className={index === 0 ? "border-b border-line px-3 py-2" : "px-3 py-2"}>
                 <article>
-                  <header className="flex items-baseline gap-2">
+                  <header className="flex items-center gap-2">
+                    <AgentAvatar member={memberOf(message)} size={20} decorative />
                     <p className="text-[13px] font-medium">{author(message)}</p>
                     <time className="font-mono text-[11px] text-faint" dateTime={message.created_at}>
                       {formatClock(message.created_at)}
