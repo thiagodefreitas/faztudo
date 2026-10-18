@@ -66,7 +66,7 @@ export function LoginPage({ onSuccess }: { onSuccess?: (device: Device) => void 
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-canvas p-4 text-ink">
+    <main className="flex min-h-full items-center justify-center bg-canvas p-4 text-ink">
       <div className="w-full max-w-sm rounded-md border border-line bg-surface p-5 shadow-sm">
         <p className="font-mono text-[12px] text-muted">{WORKSPACE_NAME}</p>
         <h1 className="mt-1 text-[18px] font-semibold">Sign in</h1>
@@ -182,7 +182,7 @@ export function PairPage({
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-canvas p-4 text-ink">
+    <main className="flex min-h-full items-center justify-center bg-canvas p-4 text-ink">
       <div className="w-full max-w-sm rounded-md border border-line bg-surface p-5 shadow-sm">
         <p className="font-mono text-[12px] text-muted">{WORKSPACE_NAME}</p>
         <h1 className="mt-1 text-[18px] font-semibold">Pair this device</h1>

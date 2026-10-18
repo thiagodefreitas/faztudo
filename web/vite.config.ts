@@ -6,6 +6,7 @@ import { mockPlugin } from "./src/mock/plugin"
 const useMock = process.env.VITE_USE_MOCK === "1"
 
 export default defineConfig({
+  define: { __FAZTUDO_BUILD_ID__: JSON.stringify(Date.now().toString(36)) },
   plugins: [react(), tailwindcss(), ...(useMock ? [mockPlugin()] : [])],
   server: {
     host: "127.0.0.1",

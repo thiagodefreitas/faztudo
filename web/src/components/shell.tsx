@@ -5,6 +5,7 @@ import { Notifier } from "./notifier"
 import { CommandPalette } from "./palette"
 import { SearchDialog } from "./search-dialog"
 import { Sidebar } from "./sidebar"
+import { PwaStatus } from "./pwa-status"
 
 function LiveStreamBridge() {
   useLiveStream()
@@ -18,7 +19,7 @@ export function Shell() {
     return <Outlet />
   }
   return (
-    <div className="flex h-dvh min-h-0 bg-canvas text-ink">
+    <div className="flex h-full min-h-0 bg-canvas text-ink">
       <LiveStreamBridge />
       <Sidebar />
       <CommandPalette />
@@ -26,6 +27,7 @@ export function Shell() {
       <Notifier />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Outlet />
+        <PwaStatus />
         {showTabs(pathname) && <BottomTabs pathname={pathname} />}
       </div>
     </div>
