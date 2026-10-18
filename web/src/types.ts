@@ -134,6 +134,7 @@ export type UsageSource = "cli-log" | "probe" | "error" | "manual" | "unknown"
 export interface LaneWindow {
   name: WindowName
   used_pct?: number
+  tokens?: number
   resets_at?: string
   source: UsageSource
   measured_at?: string

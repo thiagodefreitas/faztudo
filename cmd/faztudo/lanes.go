@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -99,6 +100,8 @@ func printLanes(p config.Paths) error {
 			used := "unknown"
 			if win.UsedPct != nil {
 				used = fmt.Sprintf("%.1f%%", *win.UsedPct)
+			} else if win.Tokens != nil {
+				used = compactTokens(*win.Tokens) + " tokens"
 			}
 			age := "unknown"
 			if win.MeasuredAt != nil {
@@ -109,4 +112,17 @@ func printLanes(p config.Paths) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\n", l.ID, l.Health, strings.Join(windows, "; "), l.Capacity, l.Running)
 	}
 	return w.Flush()
+}
+
+// compactTokens writes a token count the way people read it: 950, 12k, 1.2M.
+func compactTokens(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	case n >= 10_000:
+		return strconv.FormatInt(n/1000, 10) + "k"
+	case n >= 1000:
+		return strconv.FormatFloat(float64(n)/1e3, 'f', 1, 64) + "k"
+	}
+	return strconv.FormatInt(n, 10)
 }

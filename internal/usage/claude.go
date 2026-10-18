@@ -144,6 +144,10 @@ func claudeWindow(name string, tu TokenUsage, opts Options) domain.LaneWindow {
 	if tu.Entries == 0 {
 		w.Source = domain.SourceUnknown
 	}
+	if tu.Entries > 0 {
+		total := tu.Total()
+		w.Tokens = &total
+	}
 	if opts.PlanLimitTokens > 0 && tu.Entries > 0 {
 		pct := 100 * float64(tu.Total()) / float64(opts.PlanLimitTokens)
 		w.UsedPct = &pct

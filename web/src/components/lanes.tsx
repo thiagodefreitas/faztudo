@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
-import { displayPct, formatCountdown, formatTokens } from "../lib/lane-format"
+import { compactTokens, displayPct, formatCountdown, formatTokens } from "../lib/lane-format"
 import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
 import { formatAge } from "../lib/time"
 import { qk } from "../state/keys"
@@ -131,12 +131,19 @@ function WindowFill({ health, pct }: { health: LaneHealth; pct: number | undefin
 
 function WindowBar({ lane, window, now }: { lane: Lane; window: LaneWindow; now: number }) {
   const pct = displayPct(window, lane.health)
-  const label = pct === undefined ? `${window.name} window unknown` : `${window.name} window ${Math.round(pct)} percent`
+  // Without a percentage, a CLI that logs tokens still says how much it used.
+  const tokens = pct === undefined && window.tokens !== undefined ? `${compactTokens(window.tokens)} tokens` : undefined
+  const label =
+    pct !== undefined
+      ? `${window.name} window ${Math.round(pct)} percent`
+      : tokens !== undefined
+        ? `${window.name} window ${tokens} used, no limit set`
+        : `${window.name} window unknown`
   return (
     <li data-window={window.name}>
       <div className="flex items-baseline justify-between gap-2">
         <p className="font-mono text-[12px] text-muted">{window.name}</p>
-        <p className="font-mono text-[12px] tabular-nums text-ink">{pct === undefined ? "unknown" : `${Math.round(pct)}%`}</p>
+        <p className="font-mono text-[12px] tabular-nums text-ink">{pct !== undefined ? `${Math.round(pct)}%` : (tokens ?? "unknown")}</p>
       </div>
       <div className="mt-1" role="img" aria-label={label}>
         <WindowFill health={lane.health} pct={pct} />

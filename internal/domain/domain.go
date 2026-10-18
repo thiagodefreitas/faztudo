@@ -216,8 +216,11 @@ const (
 )
 
 type LaneWindow struct {
-	Name       string      `json:"name"` // "5h", "day", "week", "month"
-	UsedPct    *float64    `json:"used_pct,omitempty"`
+	Name    string   `json:"name"` // "5h", "day", "week", "month"
+	UsedPct *float64 `json:"used_pct,omitempty"`
+	// Tokens used in the window, for CLIs that log tokens but report no
+	// quota percentage (claude, grok).
+	Tokens     *int64      `json:"tokens,omitempty"`
 	ResetsAt   *time.Time  `json:"resets_at,omitempty"`
 	Source     UsageSource `json:"source"`
 	MeasuredAt *time.Time  `json:"measured_at,omitempty"`

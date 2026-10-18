@@ -144,6 +144,7 @@ interface Lane {
   windows: {
     name: "5h" | "day" | "week" | "month";
     used_pct?: number;      // 0..100, absent when unknown
+    tokens?: number;        // tokens used in the window, for CLIs that log tokens but no quota (claude, grok)
     resets_at?: string;
     source: "cli-log" | "probe" | "error" | "manual" | "unknown";
     measured_at?: string;

@@ -85,6 +85,21 @@ describe("LaneCardView", () => {
     expect(screen.getByText("Probe now")).toBeEnabled()
   })
 
+  it("shows tokens used when a lane logs tokens but has no quota percentage", () => {
+    renderCard({
+      ...unknownLane,
+      id: "grok/default",
+      cli: "grok",
+      windows: [
+        { name: "5h", tokens: 1_107_522, source: "cli-log", measured_at: new Date(now - 30 * 60_000).toISOString() },
+        { name: "day", tokens: 4200, source: "cli-log", measured_at: new Date(now - 30 * 60_000).toISOString() },
+      ],
+    })
+    expect(screen.getByText("1.1M tokens")).toBeInTheDocument()
+    expect(screen.getByText("4.2k tokens")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "5h window 1.1M tokens used, no limit set" })).toBeInTheDocument()
+  })
+
   it("renders unknown instead of zero for an unmeasured lane", () => {
     renderCard(unknownLane)
     const card = screen.getByRole("article", { name: "lane kimi/default" })

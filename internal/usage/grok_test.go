@@ -32,6 +32,12 @@ func TestReadGrokSumsTurnsIntoWindows(t *testing.T) {
 	if len(res.Windows) != 2 || res.Windows[0].Source != domain.SourceCLILog || res.Windows[0].UsedPct != nil {
 		t.Fatalf("windows without a plan limit: %+v", res.Windows)
 	}
+	if tok := res.Windows[0].Tokens; tok == nil || *tok != 2420 {
+		t.Fatalf("5h window tokens %v, want 2420", tok)
+	}
+	if tok := res.Windows[1].Tokens; tok == nil || *tok != 3740 {
+		t.Fatalf("day window tokens %v, want 3740", tok)
+	}
 }
 
 func TestReadGrokPlanLimitGivesPercentage(t *testing.T) {
@@ -50,7 +56,7 @@ func TestReadGrokWithoutHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Windows[0].Source != domain.SourceUnknown {
-		t.Fatalf("no sessions should be unknown, got %+v", res.Windows[0])
+	if res.Windows[0].Source != domain.SourceUnknown || res.Windows[0].Tokens != nil {
+		t.Fatalf("no sessions should be unknown with no token count, got %+v", res.Windows[0])
 	}
 }

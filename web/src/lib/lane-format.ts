@@ -26,3 +26,11 @@ export function formatTokens(tokens: number | undefined): string {
   if (tokens === undefined || !Number.isFinite(tokens)) return "unknown"
   return Math.round(tokens).toLocaleString("en-US")
 }
+
+// A token count the way people read it: 950, 12k, 1.2M.
+export function compactTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 10_000) return `${Math.floor(tokens / 1000)}k`
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`
+  return String(Math.round(tokens))
+}
