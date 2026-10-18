@@ -12,4 +12,6 @@ export const qk = {
   notices: ["notices"] as const,
   seq: ["seq"] as const,
   pending: (id: string) => ["pending", id] as const,
+  devices: ["devices"] as const,
+  caInfo: ["caInfo"] as const,
 }

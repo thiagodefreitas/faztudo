@@ -10,6 +10,7 @@ faztudo follows the XDG directory layout:
 | `~/.local/share/faztudo/faztudo.db` | the event log and projections |
 | `~/.local/share/faztudo/worktrees/` | git worktrees for write runs |
 | `~/.local/share/faztudo/runs/` | raw run output |
+| `~/.local/share/faztudo/tls/` | local CA and LAN server certificates (mode 0700, keys 0600) |
 
 `faztudo init` writes commented starting versions of both files.
 
@@ -17,12 +18,13 @@ faztudo follows the XDG directory layout:
 
 ```toml
 [server]
-listen = "127.0.0.1:7457"   # LAN mode: "0.0.0.0:7457" plus [lan] below
+listen = "127.0.0.1:7457"
 open_browser = true
 
 [lan]
 enabled = false
-# tls and pairing settings arrive in M2
+listen = "0.0.0.0:7458"
+ca_listen = "0.0.0.0:7459"
 
 [runs]
 default_timeout = "30m"
@@ -39,6 +41,10 @@ with a proxy that already restricts access to your own devices.
 `faztudo serve` opens the URL with `xdg-open` after binding when
 `open_browser` is true, stdout is a terminal, and `DISPLAY` or
 `WAYLAND_DISPLAY` is set. Use `faztudo serve --no-open` to skip this.
+When `[lan] enabled = true`, `faztudo serve` also binds the HTTPS LAN
+listener on `lan.listen` (default `0.0.0.0:7458`) and the plain-HTTP CA
+helper listener on `lan.ca_listen` (default `0.0.0.0:7459`). Run
+`faztudo passwd` before starting LAN mode for the first time.
 
 ## lanes.toml
 

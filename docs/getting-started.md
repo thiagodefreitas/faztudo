@@ -48,10 +48,61 @@ Restarting the service does not kill agent runs in progress; the daemon
 reattaches to them when it starts again. Adjust `PATH` in the unit if your
 agent CLIs live elsewhere.
 
-## Use it from your phone today (Tailscale)
+## Use faztudo from your phone
 
-Until built-in LAN mode lands, Tailscale gives you an HTTPS address that
-only your own devices can open:
+By default faztudo listens only on `127.0.0.1:7457`. You can turn on LAN mode
+to use the web app from a phone or tablet on the same Wi-Fi network over
+HTTPS.
+
+1. Set a local password on your desktop:
+
+   ```bash
+   faztudo passwd
+   ```
+
+2. Edit `~/.config/faztudo/config.toml` and turn on LAN mode:
+
+   ```toml
+   [lan]
+   enabled = true
+   listen = "0.0.0.0:7458"
+   ```
+
+3. Start (or restart) `faztudo serve`. On first LAN start faztudo generates a
+   local certificate authority (ECDSA P-256, 10 years) and a server
+   certificate (ECDSA P-256, 1 year) in `~/.local/share/faztudo/tls/` and
+   prints one `https://<lan-ip>:7458` URL per non-loopback network address.
+
+4. Install the local CA certificate on your phone so its browser trusts the
+   HTTPS connection:
+   - Open `http://<lan-ip>:7459` on your phone (plain HTTP helper that serves
+     only the CA certificate download and its SHA-256 fingerprint).
+   - Compare the SHA-256 fingerprint shown on that page with the fingerprint
+     shown on your desktop under **Settings > Devices**.
+   - Download `ca.crt` and install it in your phone's certificate settings
+     (on iOS: install the downloaded profile in Settings, then enable full
+     trust under Settings > General > About > Certificate Trust Settings; on
+     Android: Settings > Security > Encryption & credentials > Install a
+     certificate > CA certificate).
+
+5. Pair your phone from the desktop browser (`http://127.0.0.1:7457`):
+   - Open **Settings > Devices** and click **Pair a phone**.
+   - Scan the QR code with your phone camera. It opens
+     `https://<lan-ip>:7458/pair#<token>` (the token is valid for 5 minutes
+     and works once).
+   - Enter a device name (for example `Pixel 9` or `iPhone`) and tap
+     **Pair device**. You can also sign in at `https://<lan-ip>:7458/login`
+     with the password set via `faztudo passwd`.
+
+6. To disconnect a phone at any time, open **Settings > Devices** and click
+   **Revoke** next to the device. Its session and any open WebSocket stream
+   are closed right away.
+
+## Or use Tailscale
+
+Without LAN mode, Tailscale gives you an HTTPS address that only your own
+devices can open, from anywhere. With LAN mode on, these requests also need
+a login:
 
 1. Log in to Tailscale on this machine and on the phone (same account).
 2. Enable Serve for your tailnet when Tailscale asks, and allow your user
@@ -65,3 +116,4 @@ only your own devices can open:
 ## Build from source
 
 See [CONTRIBUTING.md](https://github.com/thiagodefreitas/faztudo/blob/main/CONTRIBUTING.md).
+

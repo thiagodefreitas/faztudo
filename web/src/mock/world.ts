@@ -3,19 +3,24 @@ import { iso } from "../lib/time"
 import { ulid } from "../lib/id"
 import type {
   Approval,
+  CAInfo,
   Channel,
   ChannelCreate,
   ChannelPatch,
+  Device,
   DiffPage,
   Health,
   ID,
   Lane,
   LanePatch,
+  LoginBody,
   Member,
   Message,
   MessageCreate,
   OutputLine,
   OutputPage,
+  PairBody,
+  PairingTicket,
   ReadCursor,
   ReadResult,
   ResolveBody,
@@ -585,6 +590,91 @@ export class MockWorld {
     lane.windows = lane.windows.map((window) => ({ ...window, source: "probe", measured_at: measured }))
     this.emit("lane.updated", undefined, lane, "system")
     return ok(structuredClone(lane))
+  }
+
+  private devicesList: Device[] = [
+    {
+      id: "01BRZ3NDEKTSV4RRFFQ69G5DEV",
+      device_name: "Pixel 9",
+      user_agent: "Mozilla/5.0 (Linux; Android 15; Pixel 9)",
+      created_at: "2026-04-17T10:00:00Z",
+      last_seen_at: "2026-04-17T10:05:00Z",
+      current: false,
+    },
+  ]
+  private pairingTokens = new Set<string>(["0123456789abcdef0123456789abcdef"])
+
+  login(body: LoginBody): Result<Device> {
+    if (!body.password || body.password === "wrong") {
+      return err(401, "unauthorized", "invalid password")
+    }
+    const dev: Device = {
+      id: ulid(this.clock.now()),
+      device_name: body.device_name?.trim() || "Browser",
+      user_agent: "MockBrowser/1.0",
+      created_at: iso(this.clock.now()),
+      last_seen_at: iso(this.clock.now()),
+      current: true,
+      ok: true,
+    }
+    this.devicesList.unshift(dev)
+    return ok(structuredClone(dev))
+  }
+
+  logout(): Result<ReadResult> {
+    return ok({ ok: true })
+  }
+
+  getDevices(): Device[] {
+    return structuredClone(this.devicesList)
+  }
+
+  revokeDevice(id: ID): Result<ReadResult> {
+    const idx = this.devicesList.findIndex((item) => item.id === id)
+    if (idx === -1) return err(404, "not_found", "device not found")
+    this.devicesList.splice(idx, 1)
+    return ok({ ok: true })
+  }
+
+  createPairing(): Result<PairingTicket> {
+    const token = "fedcba9876543210fedcba9876543210" // gitleaks:allow (synthetic test token)
+    this.pairingTokens.add(token)
+    return ok({
+      token,
+      url: `https://192.168.1.10:7458/pair#${token}`,
+      qr_svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" role="img" aria-label="QR code"><rect width="29" height="29" fill="#ffffff"/><path d="M4 4h7v7H4z" fill="#000000"/></svg>`,
+      ca_fingerprint: "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+      ca_http_url: "http://192.168.1.10:7459",
+      expires_at: iso(this.clock.now() + 5 * 60_000),
+    })
+  }
+
+  pairDevice(body: PairBody): Result<Device> {
+    const tok = body.token.trim()
+    const valid = this.pairingTokens.has(tok)
+    this.pairingTokens.delete(tok)
+    if (!tok) return err(400, "bad_request", "token required")
+    if (!body.device_name.trim()) return err(400, "bad_request", "device_name required")
+    if (!valid) return err(401, "unauthorized", "invalid or expired pairing token")
+    const dev: Device = {
+      id: ulid(this.clock.now()),
+      device_name: body.device_name.trim(),
+      user_agent: "MockPhone/1.0",
+      created_at: iso(this.clock.now()),
+      last_seen_at: iso(this.clock.now()),
+      current: true,
+      ok: true,
+    }
+    this.devicesList.unshift(dev)
+    return ok(structuredClone(dev))
+  }
+
+  caInfo(): CAInfo {
+    return {
+      ca_fingerprint: "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+      ca_http_url: "http://192.168.1.10:7459",
+      lan_urls: ["https://192.168.1.10:7458"],
+    }
   }
 
   private seed(now: number): void {

@@ -12,7 +12,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir string }
+type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir, TLSDir string }
 
 func PathsFromEnv() Paths {
 	home, _ := os.UserHomeDir()
@@ -26,7 +26,17 @@ func PathsFromEnv() Paths {
 	}
 	cfg = filepath.Join(cfg, "faztudo")
 	data = filepath.Join(data, "faztudo")
-	return Paths{cfg, data, filepath.Join(cfg, "config.toml"), filepath.Join(cfg, "lanes.toml"), filepath.Join(cfg, "secrets"), filepath.Join(data, "faztudo.db"), filepath.Join(data, "worktrees"), filepath.Join(data, "runs")}
+	return Paths{
+		ConfigDir:    cfg,
+		DataDir:      data,
+		ConfigFile:   filepath.Join(cfg, "config.toml"),
+		LanesFile:    filepath.Join(cfg, "lanes.toml"),
+		SecretsFile:  filepath.Join(cfg, "secrets"),
+		DBFile:       filepath.Join(data, "faztudo.db"),
+		WorktreesDir: filepath.Join(data, "worktrees"),
+		RunsDir:      filepath.Join(data, "runs"),
+		TLSDir:       filepath.Join(data, "tls"),
+	}
 }
 
 type Server struct {
@@ -35,7 +45,9 @@ type Server struct {
 	AllowedHosts []string `toml:"allowed_hosts"`
 }
 type LAN struct {
-	Enabled bool `toml:"enabled"`
+	Enabled  bool   `toml:"enabled"`
+	Listen   string `toml:"listen"`
+	CAListen string `toml:"ca_listen"`
 }
 type Runs struct {
 	DefaultTimeout  string `toml:"default_timeout"`
@@ -73,7 +85,11 @@ type Config struct {
 }
 
 func Defaults() Config {
-	return Config{Server: Server{Listen: "127.0.0.1:7457", OpenBrowser: true}, Runs: Runs{DefaultTimeout: "30m", ContextMessages: 40}}
+	return Config{
+		Server: Server{Listen: "127.0.0.1:7457", OpenBrowser: true},
+		LAN:    LAN{Enabled: false, Listen: "0.0.0.0:7458"},
+		Runs:   Runs{DefaultTimeout: "30m", ContextMessages: 40},
+	}
 }
 func Load(p Paths) (Config, error) {
 	c := Defaults()
@@ -92,8 +108,15 @@ func (c Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.Server.Listen); err != nil {
 		return fmt.Errorf("server.listen: %w", err)
 	}
-	if c.LAN.Enabled {
-		return errors.New("lan.enabled: LAN authentication is not available yet")
+	if c.LAN.Enabled || c.LAN.Listen != "" {
+		if _, _, err := net.SplitHostPort(c.LAN.Listen); err != nil {
+			return fmt.Errorf("lan.listen: %w", err)
+		}
+	}
+	if c.LAN.CAListen != "" {
+		if _, _, err := net.SplitHostPort(c.LAN.CAListen); err != nil {
+			return fmt.Errorf("lan.ca_listen: %w", err)
+		}
 	}
 	if _, err := time.ParseDuration(c.Runs.DefaultTimeout); err != nil {
 		return fmt.Errorf("runs.default_timeout: %w", err)
@@ -166,7 +189,7 @@ func WriteDefaults(p Paths) error {
 			return err
 		}
 	}
-	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
+	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
 		h, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if errors.Is(err, os.ErrExist) {
 			continue

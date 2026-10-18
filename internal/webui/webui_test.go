@@ -12,6 +12,8 @@ func TestMountRoutesAPIAndUI(t *testing.T) {
 	h := Mount(api)
 	for _, tc := range []struct{ path, want string }{
 		{"/api/v1/health", "api"},
+		{"/ca.crt", "api"},
+		{"/mcp", "api"},
 		{"/", "faztudo"},
 		{"/channels/abc", "faztudo"},
 	} {

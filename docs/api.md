@@ -16,14 +16,40 @@ Codes: `bad_request` (400), `unauthorized` (401), `forbidden` (403),
 
 ## Authentication
 
-On 127.0.0.1 with LAN mode off, the single local user is signed in
-automatically. In LAN mode, every request needs the session cookie set by
-`POST /api/v1/auth/login` (later: passkeys and device pairing).
+On `127.0.0.1` (`server.listen`), the single local user is signed in
+automatically. On the LAN HTTPS listener (`lan.listen`, default
+`0.0.0.0:7458`), every API request (except `GET /api/v1/health`,
+`GET /ca.crt`, `POST /api/v1/auth/login`, and `POST /api/v1/auth/pair`)
+requires the `fz_session` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`,
+`Path=/`, 30-day sliding expiry) set by `POST /api/v1/auth/login` or
+`POST /api/v1/auth/pair`.
+
+On the LAN listener, every state-changing request (`POST`, `PATCH`, `DELETE`)
+and every `GET /api/v1/stream` WebSocket upgrade must carry an `Origin`
+header equal to `https://<Host>` (403 otherwise). `/mcp` is loopback-only.
 
 ## Objects
 
 ```ts
 type ID = string;           // ULID
+
+interface Device {
+  id: ID;
+  device_name: string;
+  user_agent: string;
+  created_at: string;
+  last_seen_at: string;
+  current?: boolean;
+}
+
+interface PairingTicket {
+  token: string;            // 128-bit hex token, valid 5 minutes, single use
+  url: string;              // https://<lan-ip>:7458/pair#<token>
+  qr_svg: string;           // server-rendered SVG QR code
+  ca_fingerprint: string;   // SHA-256 fingerprint of the local CA
+  ca_http_url?: string;     // http://<lan-ip>:7459 helper URL
+  expires_at: string;
+}
 
 interface Member {
   id: ID;
@@ -129,6 +155,14 @@ interface Lane {
 
 | method | path | does |
 | :--- | :--- | :--- |
+| POST | `/api/v1/auth/login` | verify `{password, device_name?}`, create session, set `fz_session` cookie; rate-limited to 5 failures per 15 minutes per remote address (429) |
+| POST | `/api/v1/auth/logout` | delete the current session and clear `fz_session` |
+| GET | `/api/v1/auth/devices` | list active device sessions (`Device[]`) |
+| DELETE | `/api/v1/auth/devices/{id}` | revoke a device session and close its open WebSocket streams immediately |
+| POST | `/api/v1/auth/pairings` | loopback only: create a 5-minute single-use pairing token (`PairingTicket`) with SVG QR code and CA fingerprint |
+| POST | `/api/v1/auth/pair` | exchange `{token, device_name}` for a session cookie; burns the token on first use whether it succeeds or not |
+| GET | `/api/v1/auth/ca` | `{ca_fingerprint, ca_http_url, lan_urls}` |
+| GET | `/ca.crt` | download the local CA certificate in PEM format (also served on the port 7459 plain-HTTP CA helper) |
 | GET | `/api/v1/me` | the signed-in member |
 | GET | `/api/v1/members` | all members, humans and agents |
 | GET | `/api/v1/channels` | channels the caller can see |

@@ -9,7 +9,10 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/crypto v0.42.0
+	golang.org/x/term v0.35.0
 	modernc.org/sqlite v1.40.1
+	rsc.io/qr v0.2.0
 )
 
 require (

@@ -78,6 +78,16 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 3 {
+		migration, err = migrations.ReadFile("migrations/003.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db: db}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }

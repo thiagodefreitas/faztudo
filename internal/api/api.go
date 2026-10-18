@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/gorilla/websocket"
+	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
@@ -36,7 +37,7 @@ type API struct {
 	HumanID, Version string
 	// AllowedHosts are extra host names (no port) accepted in the Host
 	// header of loopback requests, for a local reverse proxy such as
-	// tailscale serve. Everything else stays loopback-only.
+	// tailscale serve. With LAN mode on, such requests need a session.
 	AllowedHosts    []string
 	Trigger         RunTrigger
 	ResolveApproval func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
@@ -47,13 +48,32 @@ type API struct {
 	// HideLane drops lanes that must not be listed, such as a detected-only
 	// default once lanes.toml configures the CLI.
 	HideLane        func(domain.Lane) bool
+	MCP             http.Handler
+	LANEnabled      bool
+	LANListen       string
+	CACertPEM       []byte
+	CAFingerprint   string
+	CAHTTPURL       string
+	LANURLs         []string
+	Limiter         *auth.LoginRateLimiter
+	Now             func() time.Time
 	actorForRequest func(*http.Request) (domain.Member, error)
 	resolveMu       sync.Mutex
+	streamsMu       sync.Mutex
+	streams         map[string]map[*streamHandle]struct{}
 }
 type actorKey struct{}
 
 func New(s *store.Store, humanID, version string) *API {
-	return &API{Store: s, HumanID: humanID, Version: version, Trigger: noopTrigger{}}
+	return &API{
+		Store:   s,
+		HumanID: humanID,
+		Version: version,
+		Trigger: noopTrigger{},
+		Limiter: auth.NewLoginRateLimiter(),
+		Now:     time.Now,
+		streams: map[string]map[*streamHandle]struct{}{},
+	}
 }
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mux := http.NewServeMux()
@@ -64,10 +84,21 @@ func (a *API) routes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"ok": true, "version": a.Version, "api": "v1"})
 	})
+	m.HandleFunc("GET /ca.crt", a.serveCACert)
+	m.HandleFunc("/mcp", a.serveMCP)
+	m.HandleFunc("/mcp/", a.serveMCP)
+	m.HandleFunc("POST /api/v1/auth/login", a.publicPost(a.login))
+	m.HandleFunc("POST /api/v1/auth/pair", a.publicPost(a.pair))
+	m.HandleFunc("POST /api/v1/auth/pairings/redeem", a.publicPost(a.pair))
 	m.Handle("/api/v1/", a.authenticated())
 }
 func (a *API) authenticated() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("POST /api/v1/auth/logout", a.logout)
+	m.HandleFunc("GET /api/v1/auth/devices", a.devices)
+	m.HandleFunc("DELETE /api/v1/auth/devices/{id}", a.revokeDevice)
+	m.HandleFunc("POST /api/v1/auth/pairings", a.createPairing)
+	m.HandleFunc("GET /api/v1/auth/ca", a.caInfo)
 	m.HandleFunc("GET /api/v1/me", a.me)
 	m.HandleFunc("GET /api/v1/members", a.members)
 	m.HandleFunc("GET /api/v1/channels", a.channels)
@@ -91,8 +122,43 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/stream", a.stream)
 	m.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "not_found", "endpoint not found") })
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+		if a.isLANRequest(r) {
+			if r.Method != "GET" && r.Method != "HEAD" {
+				if !validLANOrigin(r) {
+					fail(w, 403, "forbidden", "invalid origin")
+					return
+				}
+			}
+			cookie, err := r.Cookie(sessionCookieName)
+			if err != nil || cookie.Value == "" {
+				fail(w, 401, "unauthorized", "authentication required")
+				return
+			}
+			now := a.now()
+			expires := now.Add(sessionTTL)
+			dev, err := a.Store.SessionByTokenHash(r.Context(), auth.HashToken(cookie.Value), now, expires)
+			if err != nil {
+				fail(w, 401, "unauthorized", "invalid or expired session")
+				return
+			}
+			setSessionCookie(w, cookie.Value, expires)
+			var member domain.Member
+			if a.actorForRequest != nil {
+				member, err = a.actorForRequest(r)
+			} else {
+				member, err = a.Store.Member(r.Context(), dev.MemberID)
+			}
+			if err != nil {
+				fail(w, 401, "unauthorized", "member not found")
+				return
+			}
+			ctx := context.WithValue(r.Context(), actorKey{}, member)
+			ctx = context.WithValue(ctx, sessionKey{}, dev.ID)
+			ctx = context.WithValue(ctx, lanConnKey{}, true)
+			m.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		if !isLoopbackAddr(r.RemoteAddr) {
 			fail(w, 403, "forbidden", "local requests only")
 			return
 		}
@@ -101,13 +167,15 @@ func (a *API) authenticated() http.Handler {
 			return
 		}
 		if r.Method != "GET" && r.Method != "HEAD" {
-			origin := r.Header.Get("Origin")
-			if origin != "" && origin != "http://"+r.Host && origin != "https://"+r.Host {
+			if !validLoopbackOrigin(r) {
 				fail(w, 403, "forbidden", "invalid origin")
 				return
 			}
 		}
-		var member domain.Member
+		var (
+			member domain.Member
+			err    error
+		)
 		if a.actorForRequest != nil {
 			member, err = a.actorForRequest(r)
 		} else {
@@ -117,7 +185,14 @@ func (a *API) authenticated() http.Handler {
 			failErr(w, err)
 			return
 		}
-		m.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), actorKey{}, member)))
+		ctx := context.WithValue(r.Context(), actorKey{}, member)
+		if cookie, cerr := r.Cookie(sessionCookieName); cerr == nil && cookie.Value != "" {
+			now := a.now()
+			if dev, serr := a.Store.SessionByTokenHash(r.Context(), auth.HashToken(cookie.Value), now, now.Add(sessionTTL)); serr == nil {
+				ctx = context.WithValue(ctx, sessionKey{}, dev.ID)
+			}
+		}
+		m.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 func (a *API) hostAllowed(addr string) bool {
@@ -807,13 +882,20 @@ func (a *API) probe(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, lane)
 }
 func (a *API) stream(w http.ResponseWriter, r *http.Request) {
-	origin := r.Header.Get("Origin")
-	if origin != "" {
-		u := strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://")
-		host := strings.Split(u, "/")[0]
-		if host != r.Host && !a.hostAllowed(host) {
+	if a.isLANRequest(r) {
+		if !validLANOrigin(r) {
 			fail(w, 403, "forbidden", "invalid origin")
 			return
+		}
+	} else {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			u := strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://")
+			host := strings.Split(u, "/")[0]
+			if host != r.Host && !a.hostAllowed(host) {
+				fail(w, 403, "forbidden", "invalid origin")
+				return
+			}
 		}
 	}
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -822,6 +904,28 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	streamCtx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	sessID := currentSessionID(r)
+	handle := &streamHandle{conn: conn, cancel: cancel}
+	a.registerStream(sessID, handle)
+	defer a.unregisterStream(sessID, handle)
+	if sessID != "" {
+		devs, err := a.Store.Devices(streamCtx, a.Now())
+		if err != nil {
+			return
+		}
+		found := false
+		for _, d := range devs {
+			if d.ID == sessID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return
+		}
+	}
 	if err = conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		return
 	}
@@ -837,7 +941,7 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "invalid subscribe"), time.Now().Add(time.Second))
 		return
 	}
-	ch, err := a.Store.Subscribe(r.Context(), sub.AfterSeq)
+	ch, err := a.Store.Subscribe(streamCtx, sub.AfterSeq)
 	if err != nil {
 		return
 	}

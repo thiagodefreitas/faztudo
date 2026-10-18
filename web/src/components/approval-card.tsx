@@ -62,7 +62,7 @@ export function ApprovalCard({
                 type="button"
                 onClick={() => resolve(option.key)}
                 className={cx(
-                  "min-h-9 rounded-md border px-3 text-[13px]",
+                  "min-h-11 rounded-md border px-4 text-[14px] md:min-h-9 md:px-3 md:text-[13px]",
                   option.style === "primary" && "border-accent bg-accent text-canvas",
                   option.style === "danger" && "border-danger text-danger",
                   !option.style && "border-line bg-surface",

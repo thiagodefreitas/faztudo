@@ -93,7 +93,7 @@ export function Composer({
 
   return (
     <form
-      className="border-t border-line bg-surface px-3 py-2"
+      className="shrink-0 border-t border-line bg-surface px-3 py-2"
       onSubmit={(event) => {
         event.preventDefault()
         send()
@@ -153,7 +153,10 @@ export function Composer({
       </div>
       <div className="mt-1 flex items-center justify-between gap-3">
         <p className="hidden text-[12px] text-faint md:block">Enter to send, Shift+Enter for a new line</p>
-        <button type="submit" className="ml-auto min-h-9 rounded-md bg-accent px-3 text-[13px] text-canvas">
+        <button
+          type="submit"
+          className="ml-auto min-h-11 rounded-md bg-accent px-4 text-[14px] text-canvas md:min-h-9 md:px-3 md:text-[13px]"
+        >
           Send
         </button>
       </div>

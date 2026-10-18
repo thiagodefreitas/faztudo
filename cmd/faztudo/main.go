@@ -36,7 +36,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: faztudo serve|init|doctor|agents detect|lanes|version")
+		return fmt.Errorf("usage: faztudo serve|init|doctor|agents detect|lanes|passwd|version")
 	}
 	p := config.PathsFromEnv()
 	switch args[0] {
@@ -48,6 +48,8 @@ func run(args []string) error {
 		return nil
 	case "init":
 		return config.WriteDefaults(p)
+	case "passwd":
+		return runPasswd(p, os.Stdin, os.Stderr)
 	case "agents":
 		if len(args) < 2 || args[1] != "detect" {
 			return fmt.Errorf("usage: faztudo agents detect")
@@ -81,13 +83,18 @@ func run(args []string) error {
 			c.Server.Listen = *listen
 		}
 		if !config.IsLoopbackListen(c.Server.Listen) {
-			return fmt.Errorf("server.listen: M1 serves loopback only")
+			return fmt.Errorf("server.listen: must be a loopback address")
 		}
 		s, err := store.Open(p.DBFile)
 		if err != nil {
 			return err
 		}
 		defer s.Close()
+		if c.LAN.Enabled {
+			if err := checkLANAuthReady(context.Background(), s, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
 		humanID, err := seed(context.Background(), s, c)
 		if err != nil {
 			return err
@@ -109,6 +116,14 @@ func run(args []string) error {
 		}
 		application.MCPBase = "http://" + listener.Addr().String()
 		server := &http.Server{Addr: c.Server.Listen, Handler: webui.WithMCP(webui.Mount(handler), application.MCP), ReadHeaderTimeout: 5 * time.Second}
+		if c.LAN.Enabled {
+			lanSrv, err := startLAN(context.Background(), s, c, p, handler, logger, os.Stdout)
+			if err != nil {
+				_ = listener.Close()
+				return err
+			}
+			defer lanSrv.Close()
+		}
 		url := "http://" + listener.Addr().String()
 		logger.Info("serving", "listen", listener.Addr().String(), "url", url)
 		if shouldOpenBrowser(c.Server.OpenBrowser, *noOpen, isatty.IsTerminal(os.Stdout.Fd()), os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY")) {

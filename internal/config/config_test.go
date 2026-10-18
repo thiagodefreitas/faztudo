@@ -53,3 +53,36 @@ func TestConserveAt(t *testing.T) {
 		}
 	}
 }
+
+func TestLANConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	p := PathsFromEnv()
+	if p.TLSDir != filepath.Join(dir, "data", "faztudo", "tls") {
+		t.Fatalf("unexpected TLSDir %s", p.TLSDir)
+	}
+	if err := WriteDefaults(p); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LAN.Enabled || c.LAN.Listen != "0.0.0.0:7458" {
+		t.Fatalf("unexpected LAN defaults: %+v", c.LAN)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte("[lan]\nenabled = true\nlisten = \"0.0.0.0:7458\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = Load(p)
+	if err != nil || !c.LAN.Enabled || c.LAN.Listen != "0.0.0.0:7458" {
+		t.Fatalf("LAN enabled load: %+v %v", c.LAN, err)
+	}
+	if err := os.WriteFile(p.ConfigFile, []byte("[lan]\nenabled = true\nlisten = \"bad-addr\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected error for invalid lan.listen")
+	}
+}

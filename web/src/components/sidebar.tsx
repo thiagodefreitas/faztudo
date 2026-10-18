@@ -145,6 +145,14 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <div className="border-t border-line px-3 py-2">
         <LanesGauge lanes={lanes.data ?? []} />
+        <Link
+          to="/settings/devices"
+          onClick={onNavigate}
+          className="mt-0.5 flex min-h-8 items-center justify-between rounded px-2 text-[12px] text-ink hover:bg-canvas"
+        >
+          <span>Devices</span>
+          <span className="font-mono text-[11px] text-faint">LAN</span>
+        </Link>
         <div className="mt-1 flex items-center justify-between gap-2">
           <p className="text-[12px] text-muted" role="status">
             {STATUS_LABEL[status]}

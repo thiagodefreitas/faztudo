@@ -1,17 +1,22 @@
 import type {
   Approval,
+  CAInfo,
   Channel,
   ChannelCreate,
   ChannelPatch,
+  Device,
   DiffPage,
   Health,
   ID,
   Lane,
   LanePatch,
+  LoginBody,
   Member,
   Message,
   MessageCreate,
   OutputPage,
+  PairBody,
+  PairingTicket,
   ReadCursor,
   ReadResult,
   ResolveBody,
@@ -59,6 +64,13 @@ export interface Api {
   lanes: () => Promise<Lane[]>
   patchLane: (id: string, body: LanePatch) => Promise<Lane>
   probeLane: (id: string) => Promise<Lane>
+  login: (body: LoginBody) => Promise<Device>
+  logout: () => Promise<ReadResult>
+  devices: () => Promise<Device[]>
+  revokeDevice: (id: ID) => Promise<ReadResult>
+  createPairing: () => Promise<PairingTicket>
+  pairDevice: (body: PairBody) => Promise<Device>
+  caInfo: () => Promise<CAInfo>
 }
 
 export interface ApiOptions {
@@ -119,7 +131,15 @@ export function createApi(options: ApiOptions = {}): Api {
     lanes: () => request("GET", "/lanes"),
     patchLane: (id, body) => request("PATCH", `/lanes/${encodeURIComponent(id)}`, body),
     probeLane: (id) => request("POST", `/lanes/${encodeURIComponent(id)}/probe`),
+    login: (body) => request("POST", "/auth/login", body),
+    logout: () => request("POST", "/auth/logout"),
+    devices: () => request("GET", "/auth/devices"),
+    revokeDevice: (id) => request("DELETE", `/auth/devices/${encodeURIComponent(id)}`),
+    createPairing: () => request("POST", "/auth/pairings"),
+    pairDevice: (body) => request("POST", "/auth/pair", body),
+    caInfo: () => request("GET", "/auth/ca"),
   }
 }
 
 export const api = createApi()
+

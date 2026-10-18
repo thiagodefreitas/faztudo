@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query"
 import { createRootRouteWithContext, createRoute, createRouter, redirect } from "@tanstack/react-router"
-import { api } from "./api/client"
+import { ApiError, api } from "./api/client"
+import { DevicesPage, LoginPage, PairPage } from "./components/auth"
 import { isDirect } from "./lib/direct"
 import { ChannelPage } from "./components/channel"
 import { LanesPage } from "./components/lanes"
@@ -27,18 +28,56 @@ function validateSearch(search: Record<string, unknown>): ChannelSearch {
   return result
 }
 
+async function withAuthRedirect<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work()
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      throw redirect({ to: "/login", replace: true })
+    }
+    throw error
+  }
+}
+
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: Shell,
+})
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login",
+  component: () => <LoginPage />,
+})
+
+const pairRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/pair",
+  component: () => <PairPage />,
+})
+
+const devicesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/devices",
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.devices, queryFn: () => api.devices() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.caInfo, queryFn: () => api.caInfo() }),
+      ]),
+    ),
+  component: DevicesPage,
 })
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   loader: async ({ context }) => {
-    const channels = await context.queryClient.ensureQueryData({
-      queryKey: qk.channels,
-      queryFn: () => api.channels(),
-    })
+    const channels = await withAuthRedirect(() =>
+      context.queryClient.ensureQueryData({
+        queryKey: qk.channels,
+        queryFn: () => api.channels(),
+      }),
+    )
     const first = channels.find((channel) => !isDirect(channel)) ?? channels[0]
     if (!first) return
     throw redirect({
@@ -55,18 +94,20 @@ const channelRoute = createRoute({
   path: "/c/$channelId",
   validateSearch,
   loader: ({ context, params }) =>
-    Promise.all([
-      context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
-      context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
-      context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
-      context.queryClient.ensureQueryData({ queryKey: qk.lanes, queryFn: () => api.lanes() }),
-      context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
-      context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
-      context.queryClient.ensureQueryData({
-        queryKey: qk.messages(params.channelId),
-        queryFn: async () => sortMessages(await api.messages(params.channelId, { limit: 100 })),
-      }),
-    ]),
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.lanes, queryFn: () => api.lanes() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
+        context.queryClient.ensureQueryData({
+          queryKey: qk.messages(params.channelId),
+          queryFn: async () => sortMessages(await api.messages(params.channelId, { limit: 100 })),
+        }),
+      ]),
+    ),
   component: ChannelPage,
 })
 
@@ -74,10 +115,12 @@ const lanesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/lanes",
   loader: ({ context }) =>
-    context.queryClient.ensureQueryData({
-      queryKey: qk.lanes,
-      queryFn: () => api.lanes(),
-    }),
+    withAuthRedirect(() =>
+      context.queryClient.ensureQueryData({
+        queryKey: qk.lanes,
+        queryFn: () => api.lanes(),
+      }),
+    ),
   component: LanesPage,
 })
 
@@ -85,7 +128,7 @@ function HomePage() {
   return <p className="p-6 text-[14px] text-muted">No channels yet.</p>
 }
 
-const routeTree = rootRoute.addChildren([indexRoute, channelRoute, lanesRoute])
+const routeTree = rootRoute.addChildren([indexRoute, loginRoute, pairRoute, devicesRoute, channelRoute, lanesRoute])
 
 export const router = createRouter({
   routeTree,
@@ -97,3 +140,4 @@ declare module "@tanstack/react-router" {
     router: typeof router
   }
 }
+

@@ -62,4 +62,29 @@ describe("api client", () => {
       message: "channel not found",
     } satisfies Partial<ApiError>)
   })
+
+  it("calls the auth and pairing endpoints", async () => {
+    const { fetchImpl, calls } = fakeFetch()
+    const api = createApi({ fetch: fetchImpl })
+    await api.login({ password: "synthetic-password", device_name: "Pixel" })
+    await api.logout()
+    await api.devices()
+    await api.revokeDevice("dev-1")
+    await api.createPairing()
+    await api.pairDevice({ token: "0123456789abcdef0123456789abcdef", device_name: "Phone" }) // gitleaks:allow (synthetic test token)
+    await api.caInfo()
+
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "POST /api/v1/auth/login",
+      "POST /api/v1/auth/logout",
+      "GET /api/v1/auth/devices",
+      "DELETE /api/v1/auth/devices/dev-1",
+      "POST /api/v1/auth/pairings",
+      "POST /api/v1/auth/pair",
+      "GET /api/v1/auth/ca",
+    ])
+    expect(calls[0]?.body).toEqual({ password: "synthetic-password", device_name: "Pixel" })
+    expect(calls[5]?.body).toEqual({ token: "0123456789abcdef0123456789abcdef", device_name: "Phone" }) // gitleaks:allow (synthetic test token)
+  })
 })
+

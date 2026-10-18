@@ -198,5 +198,32 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     return send(world.probeLane(id))
   }
 
+  if (parts[0] === "auth") {
+    if (parts[1] === "login" && parts.length === 2 && method === "POST") {
+      return send(world.login({ password: text(body.password) ?? "", ...(text(body.device_name) ? { device_name: text(body.device_name) } : {}) }))
+    }
+    if (parts[1] === "logout" && parts.length === 2 && method === "POST") {
+      return send(world.logout())
+    }
+    if (parts[1] === "devices" && parts.length === 2 && method === "GET") {
+      return { status: 200, body: world.getDevices() }
+    }
+    if (parts[1] === "devices" && parts.length === 3 && method === "DELETE") {
+      const id = parts[2]
+      if (!id) return send(err(404, "not_found", "device not found"))
+      return send(world.revokeDevice(id))
+    }
+    if (parts[1] === "pairings" && parts.length === 2 && method === "POST") {
+      return send(world.createPairing())
+    }
+    if (parts[1] === "pair" && parts.length === 2 && method === "POST") {
+      return send(world.pairDevice({ token: text(body.token) ?? "", device_name: text(body.device_name) ?? "" }))
+    }
+    if (parts[1] === "ca" && parts.length === 2 && method === "GET") {
+      return { status: 200, body: world.caInfo() }
+    }
+  }
+
   return { status: 404, body: { error: { code: "not_found", message: "not found" } } }
 }
+

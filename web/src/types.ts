@@ -281,4 +281,39 @@ export interface NoticeItem {
   text: string
 }
 
+export interface Device {
+  id: ID
+  device_name: string
+  user_agent: string
+  created_at: string
+  last_seen_at: string
+  current?: boolean
+  ok?: boolean
+}
+
+export interface LoginBody {
+  password: string
+  device_name?: string
+}
+
+export interface PairBody {
+  token: string
+  device_name: string
+}
+
+export interface PairingTicket {
+  token: string
+  url: string
+  qr_svg: string
+  ca_fingerprint: string
+  ca_http_url?: string
+  expires_at: string
+}
+
+export interface CAInfo {
+  ca_fingerprint: string
+  ca_http_url?: string
+  lan_urls?: string[]
+}
+
 export const WORKSPACE_NAME = "faztudo"

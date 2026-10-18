@@ -2,9 +2,11 @@ import * as Dialog from "@radix-ui/react-dialog"
 import { useQueryClient } from "@tanstack/react-query"
 import { useId, useState, type FormEvent, type ReactNode } from "react"
 import { ApiError, api } from "../api/client"
+import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import type { Channel, ChannelPatch, Member } from "../types"
+import { DevicesPanel } from "./auth"
 
 export const CHANNEL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -71,7 +73,7 @@ function Shell({
   return (
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
-      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border border-line bg-surface p-4 shadow-lg">
+      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-md border border-line bg-surface p-4 shadow-lg">
         <Dialog.Title className="text-[15px] font-semibold">{title}</Dialog.Title>
         <Dialog.Description className="mt-1 text-[12px] text-muted">{description}</Dialog.Description>
         <form onSubmit={onSubmit} noValidate>
@@ -104,21 +106,42 @@ export function ChannelSettingsDialog({
   agents,
   open,
   onOpenChange,
+  initialTab = "channel",
 }: {
   channel: Channel
   agents: Member[]
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialTab?: "channel" | "devices"
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      {open && <SettingsForm key={channel.id} channel={channel} agents={agents} onDone={() => onOpenChange(false)} />}
+      {open && (
+        <SettingsForm
+          key={`${channel.id}:${initialTab}`}
+          channel={channel}
+          agents={agents}
+          initialTab={initialTab}
+          onDone={() => onOpenChange(false)}
+        />
+      )}
     </Dialog.Root>
   )
 }
 
-function SettingsForm({ channel, agents, onDone }: { channel: Channel; agents: Member[]; onDone: () => void }) {
+function SettingsForm({
+  channel,
+  agents,
+  initialTab = "channel",
+  onDone,
+}: {
+  channel: Channel
+  agents: Member[]
+  initialTab?: "channel" | "devices"
+  onDone: () => void
+}) {
   const qc = useQueryClient()
+  const [tab, setTab] = useState<"channel" | "devices">(initialTab)
   const [topic, setTopic] = useState(channel.topic ?? "")
   const [repoPath, setRepoPath] = useState(channel.repo_path ?? "")
   const [testCommand, setTestCommand] = useState(channel.test_command ?? "")
@@ -154,6 +177,58 @@ function SettingsForm({ channel, agents, onDone }: { channel: Channel; agents: M
     )
   }
 
+  const tabs = (
+    <div role="tablist" aria-label="Settings sections" className="mt-3 flex gap-1 border-b border-line pb-2">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "channel"}
+        onClick={() => setTab("channel")}
+        className={cx(
+          "min-h-8 rounded px-2.5 text-[12px] font-medium",
+          tab === "channel" ? "bg-accent-soft text-ink" : "text-muted hover:bg-canvas",
+        )}
+      >
+        Channel
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "devices"}
+        onClick={() => setTab("devices")}
+        className={cx(
+          "min-h-8 rounded px-2.5 text-[12px] font-medium",
+          tab === "devices" ? "bg-accent-soft text-ink" : "text-muted hover:bg-canvas",
+        )}
+      >
+        Devices
+      </button>
+    </div>
+  )
+
+  if (tab === "devices") {
+    return (
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-md border border-line bg-surface p-4 shadow-lg">
+          <Dialog.Title className="text-[15px] font-semibold">Settings</Dialog.Title>
+          <Dialog.Description className="mt-1 text-[12px] text-muted">
+            Manage paired phones and LAN sessions.
+          </Dialog.Description>
+          {tabs}
+          <div className="mt-3">
+            <DevicesPanel />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Dialog.Close type="button" className={buttonClass}>
+              Close
+            </Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    )
+  }
+
   return (
     <Shell
       title="Channel settings"
@@ -163,6 +238,7 @@ function SettingsForm({ channel, agents, onDone }: { channel: Channel; agents: M
       busy={busy}
       formError={formError}
     >
+      {tabs}
       <Field label="Topic" help="Short line shown under the channel name.">
         {({ id, describedBy }) => (
           <input

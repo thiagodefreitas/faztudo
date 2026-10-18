@@ -62,12 +62,13 @@ func WithMCP(next, mcp http.Handler) http.Handler {
 	})
 }
 
-// Mount returns a handler that sends /api/ to api and everything else to the
-// web app.
+// Mount returns a handler that sends /api/, /ca.crt, and /mcp to api and
+// everything else to the web app.
 func Mount(api http.Handler) http.Handler {
 	ui := Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+		p := r.URL.Path
+		if p == "/api" || strings.HasPrefix(p, "/api/") || p == "/ca.crt" || p == "/mcp" || strings.HasPrefix(p, "/mcp/") {
 			api.ServeHTTP(w, r)
 			return
 		}
