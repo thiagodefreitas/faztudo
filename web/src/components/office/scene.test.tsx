@@ -409,4 +409,32 @@ describe("OfficeScene", () => {
     expect(screen.getByTestId("lane-bar-claude/opus")).toHaveAttribute("data-health", "available")
     expect(screen.getByTestId("lane-bar-grok/default")).toHaveAttribute("data-health", "exhausted")
   })
+
+  it("renders the Director desk as a human figure (data-figure='human') with initials on the name plate while agents keep data-figure='agent'", async () => {
+    await renderScene({
+      messages: [
+        {
+          author_id: "m-director",
+          created_at: new Date(now - 20_000).toISOString(),
+        },
+      ],
+    })
+
+    const directorDesk = screen.getByTestId("desk-m-director")
+    expect(directorDesk).toHaveAttribute("data-figure", "human")
+    expect(screen.getByTestId("character-m-director")).toHaveAttribute("data-figure", "human")
+    expect(screen.getByTestId("human-clothes-m-director")).toBeInTheDocument()
+    expect(screen.getByTestId("nameplate-m-director")).toHaveTextContent("TD")
+    expect(directorDesk).toHaveAttribute("data-state", "working")
+    expect(screen.getByTestId("typing-hands-m-director")).toBeInTheDocument()
+
+    for (const agentId of ["m-claude", "m-codex", "m-coder", "m-grok"]) {
+      expect(screen.getByTestId(`desk-${agentId}`)).toHaveAttribute("data-figure", "agent")
+    }
+    for (const seatedAgentId of ["m-claude", "m-codex", "m-coder"]) {
+      expect(screen.getByTestId(`character-${seatedAgentId}`)).toHaveAttribute("data-figure", "agent")
+      expect(screen.queryByTestId(`human-clothes-${seatedAgentId}`)).not.toBeInTheDocument()
+    }
+  })
 })
+

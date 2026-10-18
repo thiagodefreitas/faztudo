@@ -85,6 +85,7 @@ export interface OfficeSceneProps {
   channels: Channel[]
   lanes?: readonly Lane[] | undefined
   departments?: readonly Department[]
+  messages?: readonly { author_id: string; created_at: string }[] | undefined
   compact?: boolean
   now: number
   theme?: ThemeChoice
@@ -100,6 +101,7 @@ export function OfficeScene({
   channels,
   lanes: lanesProp,
   departments,
+  messages,
   compact: compactProp,
   now,
   theme = "light",
@@ -113,6 +115,18 @@ export function OfficeScene({
   const compact = compactProp ?? compactMedia
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
+
+  const lastMessageAtByAuthor = useMemo(() => {
+    const map = new Map<string, number>()
+    if (!messages) return map
+    for (const msg of messages) {
+      const parsed = Date.parse(msg.created_at)
+      if (Number.isNaN(parsed)) continue
+      const prev = map.get(msg.author_id) ?? -Infinity
+      if (parsed > prev) map.set(msg.author_id, parsed)
+    }
+    return map
+  }, [messages])
 
   useEffect(() => {
     if (!selectedDesk) return
@@ -144,7 +158,14 @@ export function OfficeScene({
   const laneBars = useMemo(() => deriveLaneMeterBars(lanes, theme), [lanes, theme])
 
   const counts = {
-    working: desks.filter((desk) => desk.state === "working").length,
+    working: desks.filter((desk) => {
+      if (desk.state === "working") return true
+      if (desk.isDirector) {
+        const lastAt = lastMessageAtByAuthor.get(desk.member.id)
+        return lastAt !== undefined && now - lastAt >= 0 && now - lastAt <= 60_000
+      }
+      return false
+    }).length,
     waiting: desks.filter((desk) => desk.state === "waiting_approval").length,
     queued: desks.filter((desk) => desk.state === "queued").length,
     failed: desks.filter((desk) => desk.state === "failed").length,
@@ -229,6 +250,8 @@ export function OfficeScene({
                     y={seat.y}
                     scale={seat.scale}
                     {...(seat.facing ? { facing: seat.facing } : {})}
+                    lastMessageAt={lastMessageAtByAuthor.get(seat.desk.member.id)}
+                    now={now}
                     selected={selectedDesk?.member.id === seat.desk.member.id}
                     reducedMotion={reducedMotion}
                     onSelect={handleSelect}
@@ -555,6 +578,13 @@ export function OfficePage() {
   const qc = useQueryClient()
   const [navOpen, setNavOpen] = useState(false)
 
+  // Read on every render (the clock ticks it) so the Director's typing pose follows new messages.
+  const cachedMessages: { author_id: string; created_at: string }[] = []
+  for (const ch of channels) {
+    const msgs = qc.getQueryData<{ author_id: string; created_at: string }[]>(qk.messages(ch.id))
+    if (Array.isArray(msgs)) cachedMessages.push(...msgs)
+  }
+
   async function handleResolveApproval(approval: Approval, option: string, commitMessage?: string) {
     const body = commitMessage ? { option, commit_message: commitMessage } : { option }
     const next = await api.resolveApproval(approval.id, body)
@@ -592,6 +622,7 @@ export function OfficePage() {
           channels={channels}
           lanes={lanes}
           departments={departments}
+          messages={cachedMessages}
           now={now}
           theme={theme}
           reducedMotion={reducedMotion}

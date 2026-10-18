@@ -454,8 +454,41 @@ describe("derive2DCharacterView and layoutWallFixtures", () => {
       lanes: [healthyLane],
       now,
     })
-    expect(derive2DCharacterView(idleDesk, { reducedMotion: false }).idleGlance).toBe(true)
+    const idleAgentView = derive2DCharacterView(idleDesk, { reducedMotion: false })
+    expect(idleAgentView.figure).toBe("agent")
+    expect(idleAgentView.idleGlance).toBe(true)
     expect(derive2DCharacterView(idleDesk, { reducedMotion: true }).idleGlance).toBe(false)
+
+    // Director (human) renders a human figure with initials, hands on the desk, and types when they posted in the last minute
+    const directorDesk = deriveMemberDesk({
+      member: director,
+      runs: [],
+      approvals: [],
+      lanes: [],
+      now,
+    })
+    const idleDirectorView = derive2DCharacterView(directorDesk, { now })
+    expect(idleDirectorView.figure).toBe("human")
+    expect(idleDirectorView.initials).toBe("AD")
+    expect(idleDirectorView.pose.pose).toBe("idle")
+    // Facing up: hands rest by the torso, never raised above the shoulders
+    expect(idleDirectorView.leftHand.y).toBeGreaterThan(idleDirectorView.leftShoulder.y)
+    expect(idleDirectorView.rightHand.y).toBeGreaterThan(idleDirectorView.rightShoulder.y)
+
+    const typingDirectorView = derive2DCharacterView(directorDesk, {
+      lastMessageAt: new Date(now - 30_000).toISOString(),
+      now,
+    })
+    expect(typingDirectorView.figure).toBe("human")
+    expect(typingDirectorView.pose.pose).toBe("working")
+    expect(typingDirectorView.pose.leftArm).toBe("typing")
+    expect(typingDirectorView.pose.rightArm).toBe("typing")
+
+    const staleDirectorView = derive2DCharacterView(directorDesk, {
+      lastMessageAt: new Date(now - 90_000).toISOString(),
+      now,
+    })
+    expect(staleDirectorView.pose.pose).toBe("idle")
   })
 
   it("places the task board and lane strip on the back wall when they fit and omits them when too narrow", () => {

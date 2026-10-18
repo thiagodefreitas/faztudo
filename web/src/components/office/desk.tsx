@@ -289,9 +289,28 @@ function CharacterHead2D({
     case "human":
       return (
         <>
-          <circle cx="0" cy="0" r="9.2" fill={soft} stroke={accent} strokeWidth="1.6" />
-          <path d="M-9 -1C-8.5 -7 8.5 -7 9 -1C5 -4 -5 -4 -9 -1Z" fill={accent} />
+          {/* Back hair crown */}
+          <path d="M-9.6 0C-10 -8.5 10 -8.5 9.6 0Z" fill={accent} />
+          {/* Ears */}
+          <circle cx="-9.2" cy="0.6" r="1.7" fill={soft} stroke={accent} strokeWidth="1.2" />
+          <circle cx="9.2" cy="0.6" r="1.7" fill={soft} stroke={accent} strokeWidth="1.2" />
+          {/* Face */}
+          <circle cx="0" cy="0.5" r="8.8" fill={soft} stroke={accent} strokeWidth="1.5" />
+          {/* Parted front hair */}
+          <path
+            d="M-8.8 -0.8C-8.4 -7.5 8.4 -7.5 8.8 -0.8C5.5 -4.2 1.2 -4.4 -1.8 -2.3C-4.5 -4.2 -7 -3.4 -8.8 -0.8Z"
+            fill={accent}
+          />
+          {/* Brows, eyes, and friendly smile */}
+          <path d="M-4.6 -1.4H-1.8M1.8 -1.4H4.6" stroke={accent} strokeWidth="1.1" strokeLinecap="round" />
           <HeadEyes x1={-3} x2={3} y={1} color={accent} closed={closed} />
+          <path
+            d={closed ? "M-2 4.6H2" : "M-2.4 4.2Q0 5.9 2.4 4.2"}
+            stroke={accent}
+            strokeWidth="1.3"
+            strokeLinecap="round"
+            fill="none"
+          />
         </>
       )
     case "neutral":
@@ -387,12 +406,24 @@ function SeatedCharacter2D({
   busyForHandle: string | undefined
   glanceDelay: number
 }) {
-  const { identity, pose, headCenter, torsoRect, leftShoulder, rightShoulder, leftHand, rightHand, eyesClosed, idleGlance } =
-    view
+  const {
+    figure,
+    identity,
+    pose,
+    headCenter,
+    torsoRect,
+    leftShoulder,
+    rightShoulder,
+    leftHand,
+    rightHand,
+    eyesClosed,
+    idleGlance,
+  } = view
   const animate = pose.animated
+  const isHuman = figure === "human"
 
   return (
-    <g data-testid={`character-${memberId}`} data-pose={pose.pose}>
+    <g data-testid={`character-${memberId}`} data-figure={figure} data-pose={pose.pose}>
       {busyForHandle && (
         <rect
           data-testid={`busy-ring-${memberId}`}
@@ -408,21 +439,57 @@ function SeatedCharacter2D({
         />
       )}
 
-      {/* Seated torso */}
-      <rect
-        x={torsoRect.x}
-        y={torsoRect.y}
-        width={torsoRect.w}
-        height={torsoRect.h}
-        rx="6"
-        fill={hue.accent}
-      />
-      <path
-        d={`M${torsoRect.x + 8} ${torsoRect.y + 1.5}H${torsoRect.x + torsoRect.w - 8}`}
-        stroke={hue.soft}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+      {/* Seated torso (human clothes with collar/lapel for the Director, robot torso for agents) */}
+      {isHuman ? (
+        <g data-testid={`human-clothes-${memberId}`}>
+          {/* Neck */}
+          <rect
+            x="57.5"
+            y={torsoRect.y - 3.5}
+            width="5"
+            height="5"
+            rx="2"
+            fill={hue.soft}
+            stroke={hue.accent}
+            strokeWidth="1.1"
+          />
+          {/* Rounded shoulders and jacket */}
+          <path
+            d={`M${torsoRect.x} ${torsoRect.y + torsoRect.h}V${torsoRect.y + 6}C${torsoRect.x} ${torsoRect.y + 1.5} ${torsoRect.x + 4} ${torsoRect.y} ${torsoRect.x + 8} ${torsoRect.y}H${torsoRect.x + torsoRect.w - 8}C${torsoRect.x + torsoRect.w - 4} ${torsoRect.y} ${torsoRect.x + torsoRect.w} ${torsoRect.y + 1.5} ${torsoRect.x + torsoRect.w} ${torsoRect.y + 6}V${torsoRect.y + torsoRect.h}Z`}
+            fill={hue.accent}
+          />
+          {/* Shirt V-collar and lapel */}
+          <path
+            d={`M55.5 ${torsoRect.y + 0.5}L60 ${torsoRect.y + 7.5}L64.5 ${torsoRect.y + 0.5}Z`}
+            fill="var(--color-surface)"
+          />
+          <path
+            d={`M55.5 ${torsoRect.y + 0.8}L60 ${torsoRect.y + 7.5}L64.5 ${torsoRect.y + 0.8}M60 ${torsoRect.y + 7.5}V${torsoRect.y + torsoRect.h - 1.5}`}
+            stroke={hue.soft}
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </g>
+      ) : (
+        <>
+          <rect
+            x={torsoRect.x}
+            y={torsoRect.y}
+            width={torsoRect.w}
+            height={torsoRect.h}
+            rx="6"
+            fill={hue.accent}
+          />
+          <path
+            d={`M${torsoRect.x + 8} ${torsoRect.y + 1.5}H${torsoRect.x + torsoRect.w - 8}`}
+            stroke={hue.soft}
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </>
+      )}
 
       {/* Persona role chest pin */}
       {identity.pinMotif && (
@@ -453,7 +520,14 @@ function SeatedCharacter2D({
             strokeWidth="3.8"
             strokeLinecap="round"
           />
-          <circle cx={leftHand.x} cy={leftHand.y} r="2.8" fill={hue.accent} stroke={hue.soft} strokeWidth="0.9" />
+          <circle
+            cx={leftHand.x}
+            cy={leftHand.y}
+            r="2.8"
+            fill={isHuman ? hue.soft : hue.accent}
+            stroke={isHuman ? hue.accent : hue.soft}
+            strokeWidth="1.1"
+          />
 
           <motion.g
             data-testid={pose.rightArm === "raised" ? `raised-arm-${memberId}` : undefined}
@@ -470,12 +544,19 @@ function SeatedCharacter2D({
               strokeWidth="3.8"
               strokeLinecap="round"
             />
-            <circle cx={rightHand.x} cy={rightHand.y} r="2.8" fill={hue.accent} stroke={hue.soft} strokeWidth="0.9" />
+            <circle
+              cx={rightHand.x}
+              cy={rightHand.y}
+              r="2.8"
+              fill={isHuman ? hue.soft : hue.accent}
+              stroke={isHuman ? hue.accent : hue.soft}
+              strokeWidth="1.1"
+            />
           </motion.g>
         </g>
       )}
 
-      {/* Character head derived from AgentAvatar silhouettes */}
+      {/* Character head derived from AgentAvatar silhouettes (or friendly human head for the Director) */}
       <g transform={`translate(${headCenter.x} ${headCenter.y})`}>
         <motion.g
           data-testid={`desk-avatar-${memberId}`}
@@ -515,15 +596,27 @@ export function RoomDesk({
   y,
   scale,
   facing = "down",
+  lastMessageAt,
+  now,
   selected,
   reducedMotion,
   onSelect,
   onOpenApproval,
-}: OfficeDeskProps & { x: number; y: number; scale: number; facing?: "up" | "down" }) {
-  const { member, state, stateLabel, outOfQuota, elapsedText, runTitle } = desk
+}: OfficeDeskProps & {
+  x: number
+  y: number
+  scale: number
+  facing?: "up" | "down"
+  lastMessageAt?: number | string | undefined
+  now?: number | undefined
+}) {
+  const { member, state: deskState, outOfQuota, elapsedText, runTitle } = desk
   const hue = hueVars(desk)
-  const view = derive2DCharacterView(desk, { reducedMotion, facing })
-  const { identity, pose } = view
+  const view = derive2DCharacterView(desk, { reducedMotion, facing, lastMessageAt, now })
+  const { figure, initials, identity, pose } = view
+  const state: DeskState = pose.pose === "working" ? "working" : deskState
+  const stateLabel = state === "working" ? "working" : desk.stateLabel
+  const isHuman = figure === "human"
   const dimmed = state === "out_of_quota" || outOfQuota
   const animate = pose.animated
   const screenStroke =
@@ -571,7 +664,33 @@ export function RoomDesk({
       <rect x="8" y={faceUp ? "10" : "32"} width="104" height="34" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
       <path d={faceUp ? "M22 41.5H98" : "M22 34.5H98"} stroke={hue.accent} strokeWidth="2.5" strokeLinecap="round" />
       <rect x="16" y={faceUp ? "18" : "42"} width="14" height="16" rx="2.5" fill="var(--color-canvas)" stroke="var(--color-line)" />
-      <circle cx="98" cy={faceUp ? "26" : "50"} r="5" fill={hue.soft} stroke={hue.accent} strokeWidth="1.2" />
+      {isHuman ? (
+        <g data-testid={`nameplate-${member.id}`}>
+          <rect
+            x="88"
+            y={faceUp ? "19" : "43"}
+            width="20"
+            height="12"
+            rx="3"
+            fill={hue.soft}
+            stroke={hue.accent}
+            strokeWidth="1.2"
+          />
+          <text
+            x="98"
+            y={faceUp ? "27.5" : "51.5"}
+            textAnchor="middle"
+            fontSize="7.5"
+            fontFamily="monospace"
+            fontWeight="700"
+            fill={hue.accent}
+          >
+            {initials}
+          </text>
+        </g>
+      ) : (
+        <circle cx="98" cy={faceUp ? "26" : "50"} r="5" fill={hue.soft} stroke={hue.accent} strokeWidth="1.2" />
+      )}
 
       {pose.monitorMode === "glow" && (
         <motion.ellipse
@@ -692,6 +811,7 @@ export function RoomDesk({
         aria-label={ariaParts.join(", ")}
         aria-pressed={selected}
         data-testid={`desk-${member.id}`}
+        data-figure={figure}
         data-state={state}
         data-pose={pose.pose}
         data-cli={identity.cli}
@@ -795,7 +915,9 @@ export function RoomDesk({
                 cx={view.leftHand.x}
                 cy={view.leftHand.y}
                 r="3"
-                fill={hue.accent}
+                fill={isHuman ? hue.soft : hue.accent}
+                stroke={isHuman ? hue.accent : undefined}
+                strokeWidth={isHuman ? "1.1" : undefined}
                 animate={animate ? { y: [0, -2.5, 0] } : undefined}
                 transition={animate ? { duration: 0.34, repeat: Infinity, ease: "easeInOut" } : undefined}
               />
@@ -803,7 +925,9 @@ export function RoomDesk({
                 cx={view.rightHand.x}
                 cy={view.rightHand.y}
                 r="3"
-                fill={hue.accent}
+                fill={isHuman ? hue.soft : hue.accent}
+                stroke={isHuman ? hue.accent : undefined}
+                strokeWidth={isHuman ? "1.1" : undefined}
                 animate={animate ? { y: [-2.5, 0, -2.5] } : undefined}
                 transition={animate ? { duration: 0.34, repeat: Infinity, ease: "easeInOut" } : undefined}
               />
@@ -908,3 +1032,4 @@ export function RoomDesk({
     </g>
   )
 }
+
