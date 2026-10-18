@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError, api } from "../api/client"
 import { qk } from "../state/keys"
-import type { Channel } from "../types"
+import type { Channel, Member } from "../types"
 import { ChannelSettingsDialog, CreateChannelDialog } from "./channel-dialogs"
 
 const channel: Channel = {
@@ -16,6 +16,11 @@ const channel: Channel = {
   member_ids: [],
   unread: 0,
 }
+
+const agents: Member[] = [
+  { id: "01BRZ3NDEKTSV4RRFFQ69G5BA1", kind: "agent", handle: "coder", display_name: "Coder", presence: "online" },
+  { id: "01BRZ3NDEKTSV4RRFFQ69G5BA2", kind: "agent", handle: "reviewer", display_name: "Reviewer", presence: "online" },
+]
 
 function wrap(node: React.ReactNode) {
   const qc = new QueryClient()
@@ -34,7 +39,7 @@ describe("ChannelSettingsDialog", () => {
     const next = { ...channel, topic: "new", repo_path: "/r", test_command: "go test ./..." }
     const spy = vi.spyOn(api, "patchChannel").mockResolvedValue(next)
     const onOpenChange = vi.fn()
-    const qc = wrap(<ChannelSettingsDialog channel={channel} open onOpenChange={onOpenChange} />)
+    const qc = wrap(<ChannelSettingsDialog channel={channel} agents={agents} open onOpenChange={onOpenChange} />)
     expect(screen.getByText(/Local git repository that write runs/)).toBeInTheDocument()
     expect(screen.getByText(/for example go test/)).toBeInTheDocument()
     const topic = screen.getByLabelText("Topic")
@@ -44,15 +49,45 @@ describe("ChannelSettingsDialog", () => {
     await user.type(screen.getByLabelText("Test command"), "go test ./...")
     await user.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
-    expect(spy).toHaveBeenCalledWith(channel.id, { topic: "new", repo_path: "/r", test_command: "go test ./..." })
+    expect(spy).toHaveBeenCalledWith(channel.id, {
+      topic: "new",
+      repo_path: "/r",
+      test_command: "go test ./...",
+      default_agent_id: "",
+    })
     expect(qc.getQueryData<Channel[]>(qk.channels)?.[0]?.topic).toBe("new")
+  })
+
+  it("offers None plus every agent as the default agent and sends the choice", async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(api, "patchChannel").mockResolvedValue({ ...channel, default_agent_id: agents[1]?.id })
+    wrap(<ChannelSettingsDialog channel={channel} agents={agents} open onOpenChange={() => undefined} />)
+    const select = screen.getByLabelText("Default agent")
+    expect(Array.from((select as HTMLSelectElement).options).map((option) => option.text)).toEqual(["None", "Coder", "Reviewer"])
+    expect(select).toHaveValue("")
+    await user.selectOptions(select, "Reviewer")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(spy).toHaveBeenCalledWith(channel.id, expect.objectContaining({ default_agent_id: agents[1]?.id }))
+  })
+
+  it("starts on the saved default agent and clears it with None", async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(api, "patchChannel").mockResolvedValue(channel)
+    wrap(<ChannelSettingsDialog channel={{ ...channel, default_agent_id: agents[0]?.id }} agents={agents} open onOpenChange={() => undefined} />)
+    const select = screen.getByLabelText("Default agent")
+    expect(select).toHaveValue(agents[0]?.id)
+    await user.selectOptions(select, "None")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(spy).toHaveBeenCalledWith(channel.id, expect.objectContaining({ default_agent_id: "" }))
   })
 
   it("shows the server error inline for an invalid repo path and stays open", async () => {
     const user = userEvent.setup()
     vi.spyOn(api, "patchChannel").mockRejectedValue(new ApiError(400, "bad_request", "repo_path is not a git work tree"))
     const onOpenChange = vi.fn()
-    wrap(<ChannelSettingsDialog channel={channel} open onOpenChange={onOpenChange} />)
+    wrap(<ChannelSettingsDialog channel={channel} agents={agents} open onOpenChange={onOpenChange} />)
     await user.type(screen.getByLabelText("Repository path"), "/nope")
     await user.click(screen.getByRole("button", { name: "Save" }))
     const alert = await screen.findByRole("alert")

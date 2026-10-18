@@ -59,16 +59,17 @@ const (
 )
 
 type Channel struct {
-	ID          ID          `json:"id"`
-	Name        string      `json:"name"`
-	Kind        ChannelKind `json:"kind"`
-	Visibility  Visibility  `json:"visibility"`
-	Topic       string      `json:"topic,omitempty"`
-	RepoPath    string      `json:"repo_path,omitempty"`
-	TestCommand string      `json:"test_command,omitempty"`
-	MemberIDs   []ID        `json:"member_ids"`
-	Unread      int         `json:"unread"`
-	LastSeq     int64       `json:"last_seq,omitempty"`
+	ID             ID          `json:"id"`
+	Name           string      `json:"name"`
+	Kind           ChannelKind `json:"kind"`
+	Visibility     Visibility  `json:"visibility"`
+	Topic          string      `json:"topic,omitempty"`
+	RepoPath       string      `json:"repo_path,omitempty"`
+	TestCommand    string      `json:"test_command,omitempty"`
+	DefaultAgentID ID          `json:"default_agent_id,omitempty"`
+	MemberIDs      []ID        `json:"member_ids"`
+	Unread         int         `json:"unread"`
+	LastSeq        int64       `json:"last_seq,omitempty"`
 }
 
 type Message struct {

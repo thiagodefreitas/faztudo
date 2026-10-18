@@ -47,6 +47,7 @@ interface Channel {
   topic?: string;
   repo_path?: string;       // local git repo that write runs in this channel use
   test_command?: string;    // optional verification command run in the worktree
+  default_agent_id?: ID;    // agent that answers human messages with no mention and no leading /
   member_ids: ID[];
   unread: number;
   last_seq?: number;
@@ -132,7 +133,7 @@ interface Lane {
 | GET | `/api/v1/members` | all members, humans and agents |
 | GET | `/api/v1/channels` | channels the caller can see |
 | POST | `/api/v1/channels` | create `{name, kind, visibility, topic?, repo_path?, member_ids?}` |
-| PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, members; a non-empty `repo_path` must be a git work tree (400 otherwise) |
+| PATCH | `/api/v1/channels/{id}` | update name, topic, repo_path, test_command, default_agent_id, members; a non-empty `repo_path` must be a git work tree and a non-empty `default_agent_id` must be an agent member of the channel (400 otherwise) |
 | GET | `/api/v1/channels/{id}/messages?before=&limit=` | page of top-level messages (thread replies excluded), newest last; `limit` max 200 |
 | GET | `/api/v1/messages/{id}/thread` | root plus replies |
 | POST | `/api/v1/channels/{id}/messages` | post `{body, thread_id?, idempotency_key?}`; mentions are parsed server side; a message with no mention in a direct channel that has exactly one agent member triggers that agent; a reply to a reply attaches to the thread root |

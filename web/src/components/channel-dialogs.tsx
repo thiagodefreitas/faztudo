@@ -4,7 +4,7 @@ import { useId, useState, type FormEvent, type ReactNode } from "react"
 import { ApiError, api } from "../api/client"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
-import type { Channel, ChannelPatch } from "../types"
+import type { Channel, ChannelPatch, Member } from "../types"
 
 export const CHANNEL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
@@ -101,25 +101,28 @@ function Shell({
 
 export function ChannelSettingsDialog({
   channel,
+  agents,
   open,
   onOpenChange,
 }: {
   channel: Channel
+  agents: Member[]
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      {open && <SettingsForm key={channel.id} channel={channel} onDone={() => onOpenChange(false)} />}
+      {open && <SettingsForm key={channel.id} channel={channel} agents={agents} onDone={() => onOpenChange(false)} />}
     </Dialog.Root>
   )
 }
 
-function SettingsForm({ channel, onDone }: { channel: Channel; onDone: () => void }) {
+function SettingsForm({ channel, agents, onDone }: { channel: Channel; agents: Member[]; onDone: () => void }) {
   const qc = useQueryClient()
   const [topic, setTopic] = useState(channel.topic ?? "")
   const [repoPath, setRepoPath] = useState(channel.repo_path ?? "")
   const [testCommand, setTestCommand] = useState(channel.test_command ?? "")
+  const [defaultAgent, setDefaultAgent] = useState(channel.default_agent_id ?? "")
   const [busy, setBusy] = useState(false)
   const [repoError, setRepoError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -131,6 +134,7 @@ function SettingsForm({ channel, onDone }: { channel: Channel; onDone: () => voi
       topic: topic.trim(),
       repo_path: repoPath.trim(),
       test_command: testCommand.trim(),
+      default_agent_id: defaultAgent,
     }
     setBusy(true)
     setRepoError(null)
@@ -193,6 +197,24 @@ function SettingsForm({ channel, onDone }: { channel: Channel; onDone: () => voi
             className={`${inputClass} font-mono`}
             placeholder="go test ./..."
           />
+        )}
+      </Field>
+      <Field label="Default agent" help="Answers plain messages that mention nobody. Messages starting with / are not sent to it.">
+        {({ id, describedBy }) => (
+          <select
+            id={id}
+            aria-describedby={describedBy || undefined}
+            value={defaultAgent}
+            onChange={(event) => setDefaultAgent(event.target.value)}
+            className={inputClass}
+          >
+            <option value="">None</option>
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.display_name}
+              </option>
+            ))}
+          </select>
         )}
       </Field>
     </Shell>

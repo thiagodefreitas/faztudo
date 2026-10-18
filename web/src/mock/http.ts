@@ -84,6 +84,7 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
         ...(body.topic !== undefined && typeof body.topic === "string" ? { topic: body.topic } : {}),
         ...(body.repo_path !== undefined && typeof body.repo_path === "string" ? { repo_path: body.repo_path } : {}),
         ...(typeof body.test_command === "string" ? { test_command: body.test_command } : {}),
+        ...(typeof body.default_agent_id === "string" ? { default_agent_id: body.default_agent_id } : {}),
         ...(Array.isArray(body.member_ids) ? { member_ids: body.member_ids.filter((item): item is string => typeof item === "string") } : {}),
       }),
     )

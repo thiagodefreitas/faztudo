@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -253,11 +254,12 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var v struct {
-		Name        *string   `json:"name"`
-		Topic       *string   `json:"topic"`
-		RepoPath    *string   `json:"repo_path"`
-		TestCommand *string   `json:"test_command"`
-		MemberIDs   *[]string `json:"member_ids"`
+		Name         *string   `json:"name"`
+		Topic        *string   `json:"topic"`
+		RepoPath     *string   `json:"repo_path"`
+		TestCommand  *string   `json:"test_command"`
+		DefaultAgent *string   `json:"default_agent_id"`
+		MemberIDs    *[]string `json:"member_ids"`
 	}
 	if !decode(w, r, &v) {
 		return
@@ -274,12 +276,26 @@ func (a *API) patchChannel(w http.ResponseWriter, r *http.Request) {
 	if v.TestCommand != nil {
 		c.TestCommand = *v.TestCommand
 	}
+	if v.DefaultAgent != nil {
+		c.DefaultAgentID = *v.DefaultAgent
+	}
 	if v.MemberIDs != nil {
 		c.MemberIDs = *v.MemberIDs
 	}
 	if !validChannel(c) {
 		fail(w, 400, "bad_request", "invalid channel name, kind or visibility")
 		return
+	}
+	if c.DefaultAgentID != "" {
+		members, err := a.Store.Members(r.Context())
+		if err != nil {
+			failErr(w, err)
+			return
+		}
+		if _, ok := channelAgent(c, c.DefaultAgentID, members); !ok {
+			fail(w, 400, "bad_request", "default_agent_id must be an agent member of the channel")
+			return
+		}
 	}
 	if err := validateRepo(r.Context(), c.RepoPath); err != nil {
 		fail(w, 400, "bad_request", err.Error())
@@ -396,6 +412,11 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	if len(agents) == 0 {
 		agents = directAgent(c, members)
 	}
+	if len(agents) == 0 && len(ids) == 0 && !strings.HasPrefix(strings.TrimSpace(v.Body), "/") {
+		if m, ok := channelAgent(c, c.DefaultAgentID, members); ok {
+			agents = []domain.Member{m}
+		}
+	}
 	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, CreatedAt: time.Now().UTC()}
 	newMessageID := m.ID
 	evt, ok := a.append(w, r, events.MessagePosted, c.ID, v.IdempotencyKey, m)
@@ -474,6 +495,19 @@ func shortID(id string) string {
 		return id[len(id)-6:]
 	}
 	return id
+}
+
+// channelAgent finds the agent with the given id among the channel's members.
+func channelAgent(c domain.Channel, id string, members []domain.Member) (domain.Member, bool) {
+	if id == "" || !slices.Contains(c.MemberIDs, id) {
+		return domain.Member{}, false
+	}
+	for _, m := range members {
+		if m.ID == id && m.Kind == domain.MemberAgent {
+			return m, true
+		}
+	}
+	return domain.Member{}, false
 }
 
 // directAgent returns the sole agent of a direct channel, so a human message

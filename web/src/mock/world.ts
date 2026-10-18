@@ -385,9 +385,16 @@ export class MockWorld {
       .map((handle) => this.members.find((member) => member.kind === "agent" && member.handle === handle))
       .find((member): member is Member => Boolean(member))
     // A direct channel with exactly one agent needs no @mention.
-    const agent = mentioned ?? this.directAgent(channel)
+    // A plain message (no mention, not a command) goes to the channel's default agent.
+    const agent = mentioned ?? this.directAgent(channel) ?? (mentions.length === 0 && !body.body.trim().startsWith("/") ? this.defaultAgent(channel) : undefined)
     if (agent) this.startRun(channel, message, agent, /verify-fail/i.test(body.body) || agent.handle === "reviewer")
     return ok(structuredClone(message))
+  }
+
+  private defaultAgent(channel: Channel): Member | undefined {
+    return this.members.find(
+      (member) => member.kind === "agent" && member.id === channel.default_agent_id && channel.member_ids.includes(member.id),
+    )
   }
 
   private directAgent(channel: Channel): Member | undefined {
@@ -429,6 +436,14 @@ export class MockWorld {
     }
     if (body.test_command !== undefined) channel.test_command = body.test_command || undefined
     if (body.member_ids !== undefined) channel.member_ids = body.member_ids
+    if (body.default_agent_id !== undefined) {
+      const agentId = body.default_agent_id
+      const agent = this.members.find((member) => member.id === agentId && member.kind === "agent")
+      if (agentId !== "" && !(agent && channel.member_ids.includes(agentId))) {
+        return err(400, "bad_request", "default_agent_id must be an agent member of the channel")
+      }
+      channel.default_agent_id = agentId || undefined
+    }
     this.emit("channel.updated", channel.id, channel, `human:${this.me.id}`)
     return ok(structuredClone(channel))
   }

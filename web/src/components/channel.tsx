@@ -110,6 +110,8 @@ export function ChannelPage() {
   const peer = directPeer(channel, me.data?.id, members.data ?? [])
   const direct = isDirect(channel)
   const title = direct ? (peer?.display_name ?? channel.name) : channel.name
+  const agents = (members.data ?? []).filter((member) => member.kind === "agent" && channel.member_ids.includes(member.id))
+  const defaultAgent = agents.find((agent) => agent.id === channel.default_agent_id)
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -132,6 +134,11 @@ export function ChannelPage() {
             </h1>
             {channel.topic && <p className="truncate text-[13px] text-muted">{channel.topic}</p>}
           </div>
+          {defaultAgent && (
+            <p className="hidden shrink-0 text-[12px] text-faint sm:block" title="Default agent for this channel">
+              Default: @{defaultAgent.handle}
+            </p>
+          )}
           {channel.repo_path && (
             <p className="hidden max-w-48 truncate font-mono text-[12px] text-faint sm:block">{channel.repo_path}</p>
           )}
@@ -144,7 +151,7 @@ export function ChannelPage() {
           >
             Settings <kbd className="ml-1 hidden font-mono text-[11px] text-faint sm:inline">Ctrl+,</kbd>
           </button>
-          <ChannelSettingsDialog channel={channel} open={settingsOpen} onOpenChange={setSettingsOpen} />
+          <ChannelSettingsDialog channel={channel} agents={agents} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
         <MessageList
           key={channelId}

@@ -33,6 +33,7 @@ export interface Channel {
   topic?: string
   repo_path?: string
   test_command?: string
+  default_agent_id?: ID
   member_ids: ID[]
   unread: number
   last_seq?: number
@@ -238,6 +239,7 @@ export interface ChannelPatch {
   topic?: string
   repo_path?: string
   test_command?: string
+  default_agent_id?: ID
   member_ids?: ID[]
 }
 
