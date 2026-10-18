@@ -132,6 +132,15 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     }
   }
 
+  if (parts[0] === "channels" && parts[2] === "compares" && parts.length === 3 && method === "GET") {
+    return { status: 200, body: world.getCompares(parts[1] ?? "") }
+  }
+  if (parts[0] === "channels" && parts[2] === "compares" && parts[4] === "decide" && parts.length === 5 && method === "POST") {
+    const decision = text(body.decision)
+    if (decision !== "merge_a" && decision !== "merge_b" && decision !== "discard_both" && decision !== "combine") return send(err(400, "bad_request", "invalid comparison decision"))
+    return send(world.decideCompare(parts[1] ?? "", parts[3] ?? "", decision))
+  }
+
   if (parts[0] === "channels" && parts[2] === "read" && parts.length === 3 && method === "POST") {
     const id = parts[1]
     if (!id) return send(err(404, "not_found", "channel not found"))

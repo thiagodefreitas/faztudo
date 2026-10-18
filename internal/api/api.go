@@ -65,6 +65,7 @@ type API struct {
 	RetryRun          func(context.Context, string, string) error
 	ProbeLane         func(context.Context, string) (domain.Lane, error)
 	RegenerateSummary func(context.Context, string) (store.ChannelSummary, error)
+	Compare           CompareControl
 	// HideLane drops lanes that must not be listed, such as a detected-only
 	// default once lanes.toml configures the CLI.
 	HideLane      func(domain.Lane) bool
@@ -179,6 +180,8 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("POST /api/v1/runs/{id}/retry", a.retry)
 	m.HandleFunc("GET /api/v1/approvals", a.approvals)
 	m.HandleFunc("POST /api/v1/approvals/{id}/resolve", a.resolve)
+	m.HandleFunc("GET /api/v1/channels/{id}/compares", a.compares)
+	m.HandleFunc("POST /api/v1/channels/{id}/compares/{compare}/decide", a.decideCompare)
 	m.HandleFunc("GET /api/v1/lanes", a.lanes)
 	m.HandleFunc("GET /api/v1/lanes/channel-summary/{channel_id}", a.getChannelSummary)
 	m.HandleFunc("POST /api/v1/lanes/channel-summary/{channel_id}/regenerate", a.regenerateChannelSummary)

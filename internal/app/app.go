@@ -75,8 +75,11 @@ type App struct {
 	summaryLocks sync.Map
 	// taskMu serializes changes to tasks. taskDispatch runs a task's message
 	// for its agent; nil means a.run, tests replace it.
-	taskMu       sync.Mutex
-	taskDispatch func(ctx context.Context, m domain.Message, agent domain.Member, override string)
+	taskMu          sync.Mutex
+	taskDispatch    func(ctx context.Context, m domain.Message, agent domain.Member, override string)
+	compareMu       sync.Mutex
+	compareTails    sync.Map
+	compareDispatch func(context.Context, domain.Message, domain.Member, string) error
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (*App, error) {
@@ -257,6 +260,7 @@ func (a *App) Bind(h *api.API) {
 	h.ProbeLane = a.ProbeLane
 	h.RegenerateSummary = a.RegenerateSummary
 	h.HideLane = func(l domain.Lane) bool { return a.Config.IsStaleDefaultLane(l.ID, l.CLI) }
+	h.Compare = a
 }
 
 func (a *App) Start(ctx context.Context) error {
@@ -264,6 +268,9 @@ func (a *App) Start(ctx context.Context) error {
 		return err
 	}
 	if _, err := a.Runner.Recover(ctx); err != nil {
+		return err
+	}
+	if err := a.recoverCompares(ctx); err != nil {
 		return err
 	}
 	activeTasks, err := a.Store.Tasks(ctx, "")
@@ -460,6 +467,13 @@ func (a *App) planLimit(id string) int64 {
 func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.Member) {
 	for _, agent := range agents {
 		agent, msg := agent, m
+		if body, compare := parseCompareRequest(m.Body, agent.Handle); compare {
+			msg.Body = body
+			if err := a.startCompare(ctx, msg, agent); err != nil {
+				a.notice(ctx, m.ChannelID, "warn", err.Error())
+			}
+			continue
+		}
 		override, body, found := parseLaneOverride(m.Body, agent.Handle)
 		if found {
 			msg.Body = body
@@ -552,9 +566,9 @@ func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member, ov
 // next lane in the persona's chain as a new run linked to the first.
 func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member, override string) error {
 	var failed string
-	err := a.attempt(ctx, m, agent, override, "", &failed)
+	err := a.attempt(ctx, m, agent, override, "", &failed, false, "")
 	if failed != "" {
-		err = a.attempt(ctx, m, agent, "", failed, new(string))
+		err = a.attempt(ctx, m, agent, "", failed, new(string), false, "")
 	}
 	return err
 }
@@ -586,7 +600,7 @@ func (a *App) laneFailed(run domain.Run) bool {
 // attempt is one run of agent on m. It sets *failed to the id of the failed
 // run when the caller should retry on the next lane; retryOf is the failed
 // run when this attempt is that retry.
-func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string) error {
+func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string, compare bool, promptOverride string) error {
 	explicit := override != "" // the human chose the lane for this message
 	if agent.Agent == nil {
 		return errors.New("agent has no lane chain")
@@ -657,9 +671,12 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	mcpReachable := mcpReachableForRun(mode, sandboxMode, network)
 	runStarted := time.Now().UTC()
 	a.Registry.RecordRun(lane.ID)
-	prompt, err := a.prompt(ctx, m)
-	if err != nil {
-		return err
+	prompt := promptOverride
+	if prompt == "" {
+		prompt, err = a.prompt(ctx, m)
+		if err != nil {
+			return err
+		}
 	}
 	prompt = withInstructions(a.instructions(agent.Handle), prompt)
 	if extra := a.extraContext(m.ID); extra != "" {
@@ -789,7 +806,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if mode == domain.RunWrite && run.State == domain.RunDone && run.DiffStat != nil && run.DiffStat.Files == 0 {
 		a.notice(ctx, channel.ID, "info", fmt.Sprintf("No changes: @%s did not change any files, so there is nothing to approve.", agent.Handle))
 	}
-	if mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
+	if !compare && mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
 		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: channel.ID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", CommitMessage: buildCommitMessage(proposal, m.Body, run.ID), State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}
 		if _, err := a.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: channel.ID, Payload: approval}); err != nil {
 			return err

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -120,6 +121,16 @@ func Open(path string) (*Store, error) {
 	}
 	if version < 7 {
 		migration, err = migrations.ReadFile("migrations/007.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if version < 8 {
+		migration, err = migrations.ReadFile("migrations/008.sql")
 		if err == nil {
 			_, err = db.Exec(string(migration))
 		}
@@ -244,6 +255,33 @@ func (s *Store) EventsAfter(ctx context.Context, after int64, limit int) ([]even
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// EventsOfTypes returns one channel's events of the given types in log
+// order, through the events_type_channel index.
+func (s *Store) EventsOfTypes(ctx context.Context, channelID string, types ...events.Type) ([]events.Event, error) {
+	out := []events.Event{}
+	for _, t := range types {
+		rows, err := s.db.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE type=? AND channel_id=? ORDER BY seq", string(t), channelID)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			e, err := scanEvent(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, e)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out, nil
 }
 func (s *Store) Subscribe(ctx context.Context, afterSeq int64) (<-chan events.Event, error) {
 	if afterSeq < 0 {

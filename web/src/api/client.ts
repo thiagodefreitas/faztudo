@@ -8,6 +8,7 @@ import type {
   ChannelCreate,
   ChannelPatch,
   ChannelSummary,
+  CompareGroup,
   Device,
   DiffPage,
   Health,
@@ -80,6 +81,8 @@ export interface Api {
   retryRun: (id: ID, body?: RetryBody) => Promise<Run>
   approvals: (state?: Approval["state"]) => Promise<Approval[]>
   resolveApproval: (id: ID, body: ResolveBody) => Promise<Approval>
+  compares: (channelId: ID) => Promise<CompareGroup[]>
+  decideCompare: (channelId: ID, id: ID, decision: "merge_a" | "merge_b" | "discard_both" | "combine") => Promise<CompareGroup>
   org: () => Promise<Org>
   createProject: (body: ProjectCreate) => Promise<Project>
   patchProject: (handle: string, body: ProjectPatch) => Promise<Project>
@@ -173,6 +176,8 @@ export function createApi(options: ApiOptions = {}): Api {
     retryRun: (id, body = {}) => request("POST", `/runs/${encodeURIComponent(id)}/retry`, body),
     approvals: (state) => request("GET", query("/approvals", { state })),
     resolveApproval: (id, body) => request("POST", `/approvals/${encodeURIComponent(id)}/resolve`, body),
+    compares: (channelId) => request("GET", `/channels/${encodeURIComponent(channelId)}/compares`),
+    decideCompare: (channelId, id, decision) => request("POST", `/channels/${encodeURIComponent(channelId)}/compares/${encodeURIComponent(id)}/decide`, { decision }),
     org: () => request("GET", "/org"),
     createProject: (body) => request("POST", "/projects", body),
     patchProject: (handle, body) => request("PATCH", `/projects/${encodeURIComponent(handle)}`, body),

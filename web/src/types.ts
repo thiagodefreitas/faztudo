@@ -186,6 +186,22 @@ export interface Run {
   cost_usd?: number
 }
 
+export interface CompareCandidate {
+  lane_id: string
+  run?: Run
+  output_tail?: string[]
+}
+
+export interface CompareGroup {
+  id: ID
+  channel_id: ID
+  message_id: ID
+  agent_id: ID
+  candidates: [CompareCandidate, CompareCandidate]
+  decision?: "merge_a" | "merge_b" | "discard_both" | "combine"
+  winner_lane?: string
+}
+
 /** Cached input is not part of `input`. */
 export interface RunTokens {
   input: number
@@ -321,6 +337,8 @@ export type EventType =
   | "run.output"
   | "approval.requested"
   | "approval.resolved"
+  | "compare.started"
+  | "compare.decided"
   | "lane.updated"
   | "lane.switched"
   | "department.updated"

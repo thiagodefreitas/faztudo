@@ -9,6 +9,7 @@ import type {
   Channel,
   ChannelCreate,
   ChannelPatch,
+  CompareGroup,
   Department,
   Device,
   DiffPage,
@@ -80,6 +81,7 @@ export class MockWorld {
   private pinned = new Map<ID, string>()
   private runs: Run[] = []
   private approvals: Approval[] = []
+  private compares: CompareGroup[] = []
   private lanes: Lane[]
   private outputs = new Map<string, OutputLine[]>()
   private outputSeq = new Map<string, number>()
@@ -520,6 +522,26 @@ export class MockWorld {
   // schedule.
   getRoutines(): Routine[] {
     return structuredClone(this.routines)
+  }
+
+  getCompares(channelId: string): CompareGroup[] {
+    return structuredClone(this.compares.filter((group) => group.channel_id === channelId).map((group) => ({
+      ...group,
+      candidates: group.candidates.map((candidate) => ({ ...candidate, run: this.runs.find((run) => run.id === candidate.run?.id) })) as CompareGroup["candidates"],
+    })))
+  }
+
+  decideCompare(channelId: string, id: string, decision: "merge_a" | "merge_b" | "discard_both" | "combine"): Result<CompareGroup> {
+    const group = this.compares.find((item) => item.id === id && item.channel_id === channelId)
+    if (!group) return err(404, "not_found", "comparison not found")
+    if (group.decision) return err(409, "conflict", "This comparison was already decided.")
+    group.decision = decision
+    if (decision === "merge_a" || decision === "merge_b") group.winner_lane = group.candidates[decision === "merge_a" ? 0 : 1].lane_id
+    for (const candidate of group.candidates) {
+      const run = this.runs.find((item) => item.id === candidate.run?.id)
+      if (run) run.state = "done"
+    }
+    return ok(this.getCompares(channelId).find((item) => item.id === id) as CompareGroup)
   }
 
   setRoutineEnabled(handle: string, enabled: boolean): Result<Routine> {
@@ -1031,6 +1053,15 @@ export class MockWorld {
       run_id: IDS.runFail,
       created_at: iso(now - 12 * minute),
     })
+
+    this.insertMessage({ id: IDS.msgCompare, channel_id: IDS.dev, author_id: IDS.ada, body: "@coder x2 Make the run card clearer", mentions: [IDS.coder], created_at: iso(now - 4 * minute) })
+    const compareA: Run = { id: IDS.runCompareA, channel_id: IDS.dev, trigger_message_id: IDS.msgCompare, agent_id: IDS.coder, lane_id: "codex/default", mode: "write", state: "waiting_approval", worktree: `/worktrees/fz/${IDS.runCompareA}`, verification: { ok: true, detail: "npm test passed" }, diff_stat: { files: 2, insertions: 14, deletions: 3 } }
+    const compareB: Run = { id: IDS.runCompareB, channel_id: IDS.dev, trigger_message_id: IDS.msgCompare, agent_id: IDS.coder, lane_id: "claude/opus", mode: "write", state: "waiting_approval", worktree: `/worktrees/fz/${IDS.runCompareB}`, verification: { ok: true, detail: "npm test passed" }, diff_stat: { files: 1, insertions: 9, deletions: 2 } }
+    this.insertRun(compareA)
+    this.insertRun(compareB)
+    this.seedOutput(compareA.id, [{ stream: "stdout", text: "candidate A: tests passed\n" }])
+    this.seedOutput(compareB.id, [{ stream: "stdout", text: "candidate B: tests passed\n" }])
+    this.compares.push({ id: "compare-showcase", channel_id: IDS.dev, message_id: IDS.msgCompare, agent_id: IDS.coder, candidates: [{ lane_id: compareA.lane_id, run: compareA, output_tail: ["candidate A: tests passed"] }, { lane_id: compareB.lane_id, run: compareB, output_tail: ["candidate B: tests passed"] }] })
 
     this.insertMessage({
       id: IDS.msgGen1,

@@ -36,7 +36,27 @@ const (
 	RoutineUpdated    Type = "routine.updated"
 	TaskCreated       Type = "task.created"
 	TaskUpdated       Type = "task.updated"
+	CompareStarted    Type = "compare.started"
+	CompareDecided    Type = "compare.decided"
 )
+
+// CompareStartedPayload identifies two runs by their trigger and lane. Run
+// records can be created after this event without losing the grouping.
+type CompareStartedPayload struct {
+	ID        string    `json:"id"`
+	ChannelID string    `json:"channel_id"`
+	MessageID string    `json:"message_id"`
+	AgentID   string    `json:"agent_id"`
+	Lanes     [2]string `json:"lanes"`
+}
+
+type CompareDecidedPayload struct {
+	ID         string `json:"id"`
+	Decision   string `json:"decision"`
+	WinnerLane string `json:"winner_lane,omitempty"`
+	WinnerRun  string `json:"winner_run,omitempty"`
+	By         string `json:"by"`
+}
 
 // Actor identifies who caused an event: "human:<id>", "agent:<id>",
 // "bridge:<id>" or "system". It is always set by the server from the

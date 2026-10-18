@@ -106,6 +106,14 @@ The message is saved even when the lane is unknown or outside that persona's
 chain. In either case no run starts for that persona, and a channel notice
 names the lanes it can use. A valid override runs only on the named lane.
 
+`@persona x2 <directive>` compares two write runs. It uses the first two
+healthy lanes in that persona's chain, skips conserve and exhausted lanes,
+and starts nothing if fewer than two are available. The channel gets a notice
+explaining why. Each candidate has its own worktree. The compare card offers
+Merge A, Merge B, Discard both, and Combine after both candidates finish.
+Merging one discards the other. Combine discards both candidates and starts a
+third write run whose prompt includes both diffs; it does not merge anything.
+
 ```ts
 interface Message {
   id: ID;
@@ -343,6 +351,8 @@ interface NoticeAction {
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
 | POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message. A merge stores the short id of the new commit in `resolution.note`, which the approvals inbox shows as "Merged as <id>" |
+| GET | `/api/v1/channels/{id}/compares` | comparisons for a visible channel; each has `id`, `message_id`, `agent_id`, two `candidates` with `lane_id`, optional `run` and `output_tail`, optional `decision` and `winner_lane` |
+| POST | `/api/v1/channels/{id}/compares/{compare}/decide` | humans only; `{decision}` is `merge_a`, `merge_b`, `discard_both`, or `combine`; a merge records the winner lane in a `compare.decided` event |
 | GET | `/api/v1/lanes` | configured lanes (a detected-only default is hidden once lanes.toml configures that CLI) |
 | GET | `/api/v1/lanes/{id}/history?window=&since=` | usage readings for a lane; `window` is optional (`5h`, `day`, `week`, `month`), `since` is RFC3339 and defaults to 7 days ago (at most 31 days ago) |
 | GET | `/api/v1/lanes/channel-summary/{channel_id}` | latest rolling summary, or an empty summary object before the first one |
@@ -398,6 +408,8 @@ Event types in version 1:
 | `run.created`, `run.updated` | `Run` |
 | `run.output` | `{run_id, seq, stream: "stdout" or "stderr", text}` |
 | `approval.requested`, `approval.resolved` | `Approval` |
+| `compare.started` | `{id, channel_id, message_id, agent_id, lanes: [lane_a, lane_b]}` |
+| `compare.decided` | `{id, decision, winner_lane?, winner_run?, by}` |
 | `lane.updated` | `Lane` |
 | `lane.switched` | `{run_id, from, to, reason}` |
 | `department.updated` | `Department` |

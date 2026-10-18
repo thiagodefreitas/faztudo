@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api/client"
 import { participants } from "../lib/agent-chat"
@@ -13,7 +13,7 @@ import { mergeById } from "../state/merge"
 import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
 import { useApprovals, useChannelPins, useChannelSummary, useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
-import type { Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
+import type { CompareGroup, Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
 import type { ChannelRef } from "../lib/channel-links"
 import { AgentAvatar } from "./agent-avatar"
 import { AnswerActions } from "./answer-actions"
@@ -24,6 +24,7 @@ import { buildCatchUp } from "./chat/catch-up"
 import { CatchUpCard } from "./chat/catch-up-card"
 import { filterContext, type ChatFilter } from "./chat/filters"
 import { buildRows, unreadIds } from "./chat/rows"
+import { CompareCard } from "./compare/compare-card"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
 
@@ -56,6 +57,7 @@ export function MessageList({
   const channelRefs = useMemo(() => channelList.data?.map(({ id, name }) => ({ id, name })), [channelList.data])
   const me = useMe()
   const runs = useRuns()
+  const compares = useQuery({ queryKey: ["compares", channelId], queryFn: () => api.compares(channelId), refetchInterval: 5000 })
   const notices = useNotices()
   const pending = usePending(channelId)
   const now = useNow()
@@ -247,6 +249,7 @@ export function MessageList({
                       channels={channelRefs}
                       fresh={now - Date.parse(row.message.created_at) < 8000}
                       run={runs.data?.find((entry) => entry.id === row.message.run_id)}
+                      compare={compares.data?.find((group) => group.message_id === row.message.id)}
                       onOpenThread={onOpenThread}
                     />
                   )}
@@ -321,6 +324,7 @@ function MessageRow({
   channels,
   fresh,
   run,
+  compare,
   onOpenThread,
 }: {
   message: Message
@@ -336,6 +340,7 @@ function MessageRow({
   channels: ChannelRef[] | undefined
   fresh: boolean
   run: Run | undefined
+  compare: CompareGroup | undefined
   onOpenThread: ((message: Message) => void) | undefined
 }) {
   const replies = message.reply_count ?? 0
@@ -391,6 +396,7 @@ function MessageRow({
         <AttachmentList attachments={message.attachments} />
         {message.options && message.options.length > 0 && <MessageChoices message={message} channelId={channelId} />}
         {run && <RunCard run={run} channelId={channelId} />}
+        {compare && <CompareCard group={compare} />}
         {onOpenThread && (
           <p className="mt-0.5 flex items-center gap-3 text-[12px]">
             {replies > 0 && (
