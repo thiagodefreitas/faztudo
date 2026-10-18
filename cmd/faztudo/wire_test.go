@@ -302,8 +302,8 @@ func TestAgentCommitIsSquashedUnderHumanIdentity(t *testing.T) {
 	if msg := gitTest(t, repo, "log", "-1", "--format=%B"); strings.Contains(msg, "Co-Authored-By") {
 		t.Fatalf("agent trailer survived: %q", msg)
 	}
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("human commit hook: %v", err)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("untrusted repository hook ran on host: %v", err)
 	}
 }
 

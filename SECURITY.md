@@ -52,36 +52,40 @@ design assumes that agents make mistakes and that messages from outside
 - **Isolated write runs.** An agent that changes code works in its own git
   worktree, not in your checkout. Pushing a branch, sending to a bridge and
   other actions that go through faztudo need an approval.
-- **Write-run sandbox.** Opt in with `runs.sandbox = "auto"` or
-  `"required"` (off by default until toolchains under your home can be
-  made visible inside it). On Linux, write runs then use bubblewrap when
-  unprivileged user namespaces work. The worktree and shared git directory
-  are writable. System tools and a small set of `/etc` files are read-only.
-  Only the selected CLI's own config and sign-in paths and its exact
-  executable file are bound from your home. The rest of home, including
-  `~/.ssh`, is hidden. SSH agent, desktop
-  and DBus sockets are not bound. Network stays on by default so CLIs can
-  reach their APIs; a lane turns it off with `sandbox_network = false`
-  (default on). Where a systemd user scope works, it sets memory and task
-  limits: `runs.sandbox_memory_max` (default `4G`) and
+- **Write-run sandbox.** `runs.sandbox = "auto"` is the default. On Linux,
+  write runs use bubblewrap when unprivileged user namespaces work. The
+  worktree is writable. The shared git directory is read-only except its
+  objects, refs, logs and packed-refs. The run's worktree metadata is a
+  private writable copy, so its config changes do not reach host Git. Host-side
+  git commands disable fsmonitor, hooks, external diffs and textconv. The
+  channel's test command runs in the same sandbox with a stripped environment.
+  System tools and a small set of `/etc` files are read-only. Toolchain roots
+  in home `PATH` entries named `bin`, `shims` or `scripts`, the Go module cache and paths in
+  `runs.sandbox_read_only` are read-only. Go, npm and XDG caches use a private
+  writable directory for this run. The selected CLI's config and sign-in
+  paths are read-only, with writable per-run session directories and copies
+  of session index files. Existing OAuth credential files are writable
+  exceptions for Claude (`.claude/.credentials.json`), Codex
+  (`.codex/auth.json`), Grok (`.grok/auth.json`), Kimi
+  (`.kimi-code/credentials/*` and `.kimi-code/oauth/*`), Agy
+  (`.gemini/antigravity-cli/antigravity-oauth-token`) and OpenCode
+  (`.local/share/opencode/auth.json`). The rest of home,
+  including `~/.ssh`, is hidden. SSH agent, desktop and DBus sockets are not
+  bound. Network stays on by default so CLIs can reach their APIs; a lane
+  turns it off with `sandbox_network = false`. Such a run gets no MCP config
+  because it cannot reach the local endpoint. Where a systemd user scope
+  works, it sets `runs.sandbox_memory_max` (default `4G`) and
   `runs.sandbox_tasks_max` (default 512). Without a scope the run is still
   sandboxed, just without those limits. Run `faztudo doctor` to check
-  bubblewrap, unprivileged user namespaces and systemd user scope
-  availability.
-- **Known gaps (2026-10-18 review), why the sandbox is opt-in.** Until they
-  are fixed, do not treat the sandbox as a boundary against a hostile agent:
-  the channel's test command runs the agent's edited tree on the host,
-  outside the sandbox; the shared `.git` directory is writable, so git
-  settings an agent writes (fsmonitor, filters, hooks) run when faztudo
-  diffs or merges on the host; the CLI's config directories are writable,
-  so an agent can leave hooks that later unsandboxed sessions run. A sandboxed
-  agent with network access can reach the local API but lacks the token file,
-  which is outside its mounts. Fixes for the other gaps are tracked in the
-  issues.
+  bubblewrap, unprivileged user namespaces and systemd user scope availability.
 - **Honest limits.** The sandbox shares the host kernel, and the CLI still
-  runs as your user. It can change its worktree and git metadata, read and
-  write its own bound sign-in and config files, and access the network when
-  allowed. It does not
+  runs as your user. It can change its worktree, shared git objects and refs,
+  writable credential exceptions and session state, and access the network
+  when allowed. Repository content and the channel test command remain
+  untrusted, but execute inside the sandbox. Disabling host-side git hooks
+  also means repository hooks do not protect merges from agent worktrees;
+  review the diff before approving. Codex receives its per-run MCP bearer
+  token through the process environment, not argv. It does not
   isolate the CLI from another process running as your user. In `auto` mode,
   a missing or unusable sandbox falls back to an unsandboxed run with one
   channel notice. Set `runs.sandbox = "required"` to refuse that run instead.

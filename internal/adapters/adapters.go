@@ -166,12 +166,16 @@ func (Codex) Command(r Request) (Cmd, error) {
 	for _, dir := range r.ExtraDirs {
 		args = append(args, "--add-dir", dir)
 	}
-	args, err := withCodexMCP(args, r.MCP)
+	args, env, err := withCodexMCP(args, r.MCP)
 	if err != nil {
 		return Cmd{}, err
 	}
 	args = append(args, r.Prompt)
-	return Cmd{Path: "codex", Args: args, Dir: r.Workdir, EnvAllow: []string{"CODEX_HOME"}}, nil
+	allow := []string{"CODEX_HOME"}
+	if env != nil {
+		allow = append(allow, "FAZTUDO_MCP_TOKEN")
+	}
+	return Cmd{Path: "codex", Args: args, Dir: r.Workdir, EnvAllow: allow, EnvAdd: env}, nil
 }
 func (Codex) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)

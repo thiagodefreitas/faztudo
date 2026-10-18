@@ -34,9 +34,10 @@ context_messages = 40       # recent messages sent to an agent
 summary_every = 20         # update the rolling channel summary after this many new messages
 context_limit_tokens = 128000 # model context estimate used for rollover
 # summary_lane = "kimi/default" # optional; otherwise the cheapest healthy lane
-sandbox = "off"             # off (default for now), auto or required for write runs
+sandbox = "auto"            # auto (default), off or required for write runs
 sandbox_memory_max = "4G"  # systemd user scope, when available
 sandbox_tasks_max = 512    # systemd user scope, when available
+sandbox_read_only = []      # extra absolute toolchain paths to mount read-only
 request_max_runs = 6          # runs one request may start by delegation
 request_max_premium_runs = 2  # of those, runs on a premium lane
 
@@ -73,21 +74,33 @@ listener on `lan.listen` (default `0.0.0.0:7458`) and the plain-HTTP CA
 helper listener on `lan.ca_listen` (default `0.0.0.0:7459`). Run
 `faztudo passwd` before starting LAN mode for the first time.
 
-The write-run sandbox is off by default for now: agents running inside it
-cannot yet see toolchains and caches installed under your home (a Go
-toolchain, Node from nvm, module caches), so their builds and tests can
-fail. Turn it on per machine with `auto` or `required` once your tools live
-in system paths. With `auto`, write runs use bubblewrap on Linux when it and
-unprivileged user namespaces work. `auto` posts a notice once per run if it falls back to the old process
-mode. `required` refuses the run instead; `off` disables the sandbox. The
-worktree and git directory stay writable, while the rest of home is hidden
-apart from the CLI's own sign-in and config paths and its executable file.
+With `auto`, write runs use bubblewrap on Linux when it and unprivileged user
+namespaces work. It posts one channel notice per run if it falls back to the
+old process mode. `required` refuses the run instead; `off` disables the
+sandbox. Existing config files that explicitly say `sandbox = "off"` keep
+that setting until you change it. The worktree is writable. The shared git directory is read-only
+except its objects, refs, logs and packed-refs. The run's worktree metadata
+is a writable copy, isolated from host Git.
+The channel test command runs inside the same sandbox. Host-side git commands
+disable fsmonitor, hooks, external diffs and textconv. CLI config and sign-in
+paths are read-only except existing OAuth credential files: Claude's
+`.claude/.credentials.json`, Codex's `.codex/auth.json`, Grok's
+`.grok/auth.json`, Kimi's `.kimi-code/credentials/*` and
+`.kimi-code/oauth/*`, Agy's `.gemini/antigravity-cli/antigravity-oauth-token`,
+and OpenCode's `.local/share/opencode/auth.json`. Session state and build
+caches are writable in a private per-run directory. Home `PATH` entries named
+`bin`, `shims` or `scripts` and the Go module cache are read-only. Go and Node
+version directories are mounted as roots. Add absolute paths to
+`sandbox_read_only` for other required tools. Paths must exist; the sandbox
+does not install missing tools or download missing Go modules into its
+read-only module cache. The rest of home is hidden.
 `faztudo doctor` reports
 bubblewrap, user namespace and systemd user-scope availability. When a scope
 works, `sandbox_memory_max` and `sandbox_tasks_max` cap memory and tasks.
 Read runs are unchanged. See [SECURITY.md](../SECURITY.md) for limits.
 Use `required` when a lane's `sandbox_network = false` must be enforced;
-an `auto` fallback runs with the host network.
+an `auto` fallback runs with the host network. A networkless sandboxed run
+does not receive the faztudo MCP config or prompt note.
 
 ## lanes.toml
 

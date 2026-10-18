@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// MCP is the per-run faztudo endpoint. The token stays in the CLI's own
-// config and is never added to the environment.
+// MCP is the per-run faztudo endpoint. Codex reads its bearer token from an
+// environment variable; Claude reads it from a private config file.
 type MCP struct {
 	URL   string
 	Token string
@@ -77,15 +77,15 @@ func claudeMCP(r Request, args []string) (Cmd, error) {
 	return cmd, nil
 }
 
-func withCodexMCP(args []string, m *MCP) ([]string, error) {
+func withCodexMCP(args []string, m *MCP) ([]string, map[string]string, error) {
 	if m == nil {
-		return args, nil
+		return args, nil, nil
 	}
 	if err := m.valid(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return append(args,
 		"-c", fmt.Sprintf("mcp_servers.faztudo.url=%q", m.URL),
-		"-c", fmt.Sprintf("mcp_servers.faztudo.http_headers={Authorization=%q}", "Bearer "+m.Token),
-	), nil
+		"-c", `mcp_servers.faztudo.bearer_token_env_var="FAZTUDO_MCP_TOKEN"`,
+	), map[string]string{"FAZTUDO_MCP_TOKEN": m.Token}, nil
 }

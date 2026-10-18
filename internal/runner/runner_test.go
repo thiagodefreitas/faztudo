@@ -305,7 +305,7 @@ func (a sandboxShell) Command(r adapters.Request) (adapters.Cmd, error) {
 	if script == "" {
 		script = "printf new > file.txt; git status --short >/dev/null"
 	}
-	return adapters.Cmd{Path: "/bin/sh", Args: []string{"-c", script}, Dir: r.Workdir}, nil
+	return adapters.Cmd{Path: "/bin/bash", Args: []string{"-c", script}, Dir: r.Workdir}, nil
 }
 func (sandboxShell) Classify(code int, tail string) (domain.FailureClass, adapters.LaneSignal, string) {
 	return (adapters.Codex{}).Classify(code, tail)
@@ -346,6 +346,146 @@ func TestExecuteWriteInSandbox(t *testing.T) {
 	time.Sleep(1200 * time.Millisecond)
 	if _, err := os.Stat(filepath.Join(timed.Worktree, "leaked.txt")); !os.IsNotExist(err) {
 		t.Fatalf("sandboxed child outlived timeout: %v", err)
+	}
+}
+
+func TestSandboxedVerificationCannotReadHostFile(t *testing.T) {
+	if err := sandbox.Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "add", "file.txt")
+	gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "base")
+	secret := filepath.Join(root, "secret")
+	if err := os.WriteFile(secret, []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SECRET_IN_HOST", "yes")
+	r := Runner{RunDir: filepath.Join(root, "runs"), Backoff: []time.Duration{}}
+	run := domain.Run{ID: "verify", Mode: domain.RunWrite, State: domain.RunQueued}
+	err := r.ExecuteWrite(context.Background(), &run, sandboxShell{script: "printf new > file.txt"}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{
+		Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+		TestCommand: "test ! -r " + secret + " && test -z \"${SECRET_IN_HOST:-}\"",
+	})
+	if err != nil || run.State != domain.RunWaitingApproval {
+		t.Fatalf("verification escaped sandbox: %v, %s", err, run.State)
+	}
+}
+
+type toolchainCLI struct{ name string }
+
+func (a toolchainCLI) Name() string { return a.name }
+func (a toolchainCLI) Command(r adapters.Request) (adapters.Cmd, error) {
+	return adapters.Cmd{Path: a.name, Args: []string{"--version"}, Dir: r.Workdir}, nil
+}
+func (a toolchainCLI) Classify(code int, tail string) (domain.FailureClass, adapters.LaneSignal, string) {
+	return (adapters.Codex{}).Classify(code, tail)
+}
+
+func TestSandboxedWriteRunHasGoAndNpmToolchains(t *testing.T) {
+	if err := sandbox.Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skipf("npm unavailable: %v", err)
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go unavailable: %v", err)
+	}
+	for _, cli := range []string{"claude", "codex"} {
+		t.Run(cli, func(t *testing.T) {
+			if _, err := exec.LookPath(cli); err != nil {
+				t.Skipf("%s unavailable: %v", cli, err)
+			}
+			root := t.TempDir()
+			repo := filepath.Join(root, "repo")
+			if err := os.Mkdir(repo, 0700); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, repo, "init", "-q")
+			for name, body := range map[string]string{
+				"go.mod":          "module example.invalid/fixture\n\ngo 1.25.0\n",
+				"fixture_test.go": "package fixture\nimport \"testing\"\nfunc TestFixture(t *testing.T) {}\n",
+				"package.json":    `{"scripts":{"test":"node -e \"process.exit(0)\""}}`,
+			} {
+				if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			gitRun(t, repo, "add", ".")
+			gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "base")
+			r := Runner{RunDir: filepath.Join(root, "runs"), Backoff: []time.Duration{}}
+			run := domain.Run{ID: cli, Mode: domain.RunWrite, State: domain.RunQueued}
+			err := r.ExecuteWrite(context.Background(), &run, toolchainCLI{name: cli}, adapters.Request{Mode: domain.RunWrite, Prompt: "check", Timeout: 20 * time.Second}, WriteOptions{
+				Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+				TestCommand: "go test ./... && npm test", TestTimeout: 30 * time.Second,
+			})
+			if err != nil || run.State != domain.RunDone {
+				t.Fatalf("%s sandboxed toolchains: %v, %s", cli, err, run.State)
+			}
+			if _, err := os.Stat(filepath.Join(root, "runs", cli, "sandbox")); !os.IsNotExist(err) {
+				t.Fatalf("per-run cache and session state were retained: %v", err)
+			}
+		})
+	}
+}
+
+func TestLiveSandboxedCLIWriteRun(t *testing.T) {
+	if os.Getenv("FAZTUDO_LIVE_SANDBOX") != "1" {
+		t.Skip("set FAZTUDO_LIVE_SANDBOX=1 for model-backed smoke test")
+	}
+	if err := sandbox.Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skipf("npm unavailable: %v", err)
+	}
+	for _, tc := range []struct {
+		name    string
+		adapter adapters.Adapter
+	}{{"claude", adapters.Claude{}}, {"codex", adapters.Codex{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := exec.LookPath(tc.name); err != nil {
+				t.Skipf("%s unavailable: %v", tc.name, err)
+			}
+			root := t.TempDir()
+			repo := filepath.Join(root, "repo")
+			if err := os.Mkdir(repo, 0700); err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, repo, "init", "-q")
+			for name, body := range map[string]string{
+				"go.mod":          "module example.invalid/fixture\n\ngo 1.25.0\n",
+				"fixture_test.go": "package fixture\nimport \"testing\"\nfunc TestFixture(t *testing.T) {}\n",
+				"package.json":    `{"scripts":{"test":"node -e \"process.exit(0)\""}}`,
+				"README.md":       "Before.\n",
+			} {
+				if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			gitRun(t, repo, "add", ".")
+			gitRun(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "base")
+			r := Runner{RunDir: filepath.Join(root, "runs"), Backoff: []time.Duration{}}
+			run := domain.Run{ID: tc.name, Mode: domain.RunWrite, State: domain.RunQueued}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			err := r.ExecuteWrite(ctx, &run, tc.adapter, adapters.Request{Mode: domain.RunWrite, Prompt: "Change README.md to say After. Run go test ./... and npm test. Do not commit.", Timeout: 2 * time.Minute}, WriteOptions{
+				Repo: repo, Worktrees: worktree.Manager{BaseDir: filepath.Join(root, "trees")}, SandboxMode: "required", Network: true,
+				TestCommand: "go test ./... && npm test", TestTimeout: time.Minute,
+			})
+			if err != nil || run.State != domain.RunWaitingApproval {
+				t.Fatalf("%s live write: %v, state=%s, reason=%s", tc.name, err, run.State, run.FailureReason)
+			}
+		})
 	}
 }
 func TestRetryAndSanitizedEnv(t *testing.T) {

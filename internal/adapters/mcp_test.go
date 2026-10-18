@@ -64,22 +64,22 @@ func TestClaudeAndCodexMCPConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if containsToken(codex, token) {
-		t.Fatal("codex copied the mcp token into an env field or a non-header arg")
+	if strings.Contains(strings.Join(codex.Args, "\n"), token) {
+		t.Fatal("codex MCP token appears in process arguments")
 	}
 	sawURL, sawHeader := false, false
 	for _, arg := range codex.Args {
 		if strings.Contains(arg, "mcp_servers.faztudo.url=") {
 			sawURL = strings.Contains(arg, mcp.URL)
 		}
-		if strings.Contains(arg, "mcp_servers.faztudo.http_headers=") {
-			sawHeader = strings.Contains(arg, "Bearer "+token)
+		if strings.Contains(arg, "mcp_servers.faztudo.bearer_token_env_var=") {
+			sawHeader = strings.Contains(arg, "FAZTUDO_MCP_TOKEN")
 		}
 	}
 	if !sawURL || !sawHeader || codex.Args[len(codex.Args)-1] != "hello" {
 		t.Fatal("codex mcp flags")
 	}
-	if len(codex.EnvAllow) != 1 || codex.EnvAllow[0] != "CODEX_HOME" || len(codex.EnvAdd) != 0 || len(codex.Remove) != 0 {
+	if len(codex.EnvAllow) != 2 || codex.EnvAllow[0] != "CODEX_HOME" || codex.EnvAllow[1] != "FAZTUDO_MCP_TOKEN" || codex.EnvAdd["FAZTUDO_MCP_TOKEN"] != token || len(codex.Remove) != 0 {
 		t.Fatal("codex environment changed")
 	}
 }

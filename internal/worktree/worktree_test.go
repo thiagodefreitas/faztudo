@@ -20,6 +20,22 @@ func gitTest(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+func TestHostGitIgnoresRepositoryFsmonitor(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "init", "-q")
+	gitTest(t, repo, "config", "core.fsmonitor", "touch "+filepath.Join(dir, "escaped"))
+	if _, err := run(context.Background(), repo, "status", "--short"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "escaped")); !os.IsNotExist(err) {
+		t.Fatalf("host git ran fsmonitor: %v", err)
+	}
+}
 func TestWorktreeDiffVerifyCleanup(t *testing.T) {
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")

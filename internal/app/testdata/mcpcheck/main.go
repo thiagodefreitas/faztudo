@@ -79,40 +79,27 @@ func checkClaude(args []string) error {
 }
 
 func checkCodex(args []string) error {
-	var header string
+	var bearerKey string
 	sawURL := false
 	for _, arg := range args {
 		if strings.Contains(arg, "mcp_servers.faztudo.url=") {
 			sawURL = true
 		}
-		if strings.Contains(arg, "mcp_servers.faztudo.http_headers=") {
-			header = arg
+		if strings.Contains(arg, "mcp_servers.faztudo.bearer_token_env_var=") {
+			bearerKey = arg
 		}
 	}
 	if !sawURL {
 		return fmt.Errorf("missing url key")
 	}
-	if header == "" {
-		return fmt.Errorf("missing header key")
+	if bearerKey == "" || !strings.Contains(bearerKey, "FAZTUDO_MCP_TOKEN") {
+		return fmt.Errorf("missing bearer env key")
 	}
-	const marker = `Authorization="Bearer `
-	i := strings.Index(header, marker)
-	if i < 0 {
-		return fmt.Errorf("missing bearer")
-	}
-	rest := header[i+len(marker):]
-	end := strings.IndexByte(rest, '"')
-	if end <= 0 {
-		return fmt.Errorf("missing bearer")
-	}
-	token := rest[:end]
-	if err := notInEnv(token); err != nil {
-		return err
+	token := os.Getenv("FAZTUDO_MCP_TOKEN")
+	if token == "" {
+		return fmt.Errorf("missing bearer in environment")
 	}
 	for _, arg := range args {
-		if strings.Contains(arg, "http_headers=") {
-			continue
-		}
 		if strings.Contains(arg, token) {
 			return fmt.Errorf("token in argv")
 		}

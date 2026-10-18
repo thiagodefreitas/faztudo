@@ -565,6 +565,16 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if adapter == nil {
 		return fmt.Errorf("no adapter for %s", lane.CLI)
 	}
+	network := true
+	if mode == domain.RunWrite {
+		for _, configured := range a.Config.Lanes.Lane {
+			if configured.ID == lane.ID && configured.SandboxNetwork != nil {
+				network = *configured.SandboxNetwork
+				break
+			}
+		}
+	}
+	mcpReachable := mcpReachableForRun(mode, a.Config.Runs.Sandbox, network)
 	runStarted := time.Now().UTC()
 	a.Registry.RecordRun(lane.ID)
 	prompt, err := a.prompt(ctx, m)
@@ -578,7 +588,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if mode == domain.RunWrite {
 		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
 	}
-	if mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
+	if mcpReachable && mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
 		prompt += "\n\n" + mcpPromptNote
 		if note := a.delegationNote(ctx, agent, m); note != "" {
 			prompt += "\n\n" + note
@@ -610,7 +620,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		workdir = a.Paths.DataDir
 	}
 	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout, AllowedTools: a.allowedTools(lane.ID)}
-	if mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
+	if mcpReachable && mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
 		token, issueErr := a.MCP.Issue(run.ID, agent.ID, channel.ID)
 		if issueErr != nil {
 			err = issueErr
@@ -621,16 +631,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	if err == nil {
 		if mode == domain.RunWrite {
-			network := true
-			for _, configured := range a.Config.Lanes.Lane {
-				if configured.ID == lane.ID && configured.SandboxNetwork != nil {
-					network = *configured.SandboxNetwork
-					break
-				}
-			}
 			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{
 				Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand,
-				SandboxMode: a.Config.Runs.Sandbox, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax,
+				SandboxMode: a.Config.Runs.Sandbox, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly,
 				OnFallback: func(message string) { a.notice(ctx, channel.ID, "warn", message) },
 			})
 		} else {
@@ -693,6 +696,10 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		}
 	}
 	return err
+}
+
+func mcpReachableForRun(mode domain.RunMode, sandboxMode string, network bool) bool {
+	return mode != domain.RunWrite || sandboxMode == "off" || network
 }
 
 func mcpCLI(name string) bool {
@@ -1042,9 +1049,8 @@ func (a *App) ResolveApproval(ctx context.Context, approval domain.Approval, opt
 			return "", err
 		}
 		if _, err := git(ctx, w.Path, "diff", "--cached", "--quiet"); err != nil {
-			// A normal commit, not plumbing, so the repository's own hooks
-			// (secret scanning, message rules) see agent changes before they
-			// land. The author is the human's Git identity: they approved it.
+			// The author is the human's Git identity: they approved it.
+			// Hooks are disabled because the run could have changed Git metadata.
 			message := strings.TrimSpace(commitMessage)
 			if message == "" {
 				message = strings.TrimSpace(approval.CommitMessage)
@@ -1184,7 +1190,11 @@ var (
 )
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-C", dir}
+	if len(args) > 0 && args[0] == "diff" {
+		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
+	}
+	cmd := exec.CommandContext(ctx, "git", append(flags, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -1193,7 +1203,7 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func gitHumanCommit(ctx context.Context, dir, message string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "commit", "-q", "-m", message)
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-C", dir, "commit", "-q", "-m", message)
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
 		if !strings.HasPrefix(key, "GIT_AUTHOR_") && !strings.HasPrefix(key, "GIT_COMMITTER_") {

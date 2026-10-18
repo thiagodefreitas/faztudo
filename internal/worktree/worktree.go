@@ -19,7 +19,13 @@ type Manager struct{ BaseDir string }
 type Worktree struct{ Repo, Path, Branch, BaseCommit string }
 
 func run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// Repository configuration may have been changed by an agent. Never run
+	// its executable Git extensions in the host process.
+	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null"}
+	if len(args) > 0 && args[0] == "diff" {
+		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
+	}
+	cmd := exec.CommandContext(ctx, "git", append(flags, args...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

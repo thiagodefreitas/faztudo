@@ -152,7 +152,11 @@ type WriteOptions struct {
 	Network     bool
 	MemoryMax   string
 	TasksMax    int
+	ReadOnly    []string
 	OnFallback  func(string)
+	runStateDir string
+	sandboxArgs []string
+	sandboxEnv  map[string]string
 }
 
 func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, opts WriteOptions) error {
@@ -188,7 +192,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if diff == "" {
 			// Nothing to approve. The run is done, unless the channel's test
 			// command fails on the untouched tree.
-			if err := opts.Worktrees.Verify(ctx, w, opts.TestCommand, verifyTimeout); err != nil {
+			if err := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts); err != nil {
 				return err
 			}
 			if err := opts.Worktrees.Cleanup(context.Background(), w); err != nil {
@@ -201,7 +205,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
 			return err
 		}
-		if err := opts.Worktrees.Verify(ctx, w, opts.TestCommand, verifyTimeout); err != nil {
+		if err := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts); err != nil {
 			return err
 		}
 		_, after, err := opts.Worktrees.Diff(ctx, w)
@@ -267,7 +271,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 	}
 	defer removePaths(command.Remove)
 	if write != nil && write.SandboxMode != "" && write.SandboxMode != "off" {
-		command, err = sandboxCommand(ctx, command, adapter.Name(), req, *write)
+		write.runStateDir = filepath.Join(r.RunDir, run.ID, "sandbox")
+		defer os.RemoveAll(write.runStateDir)
+		command, err = sandboxCommand(ctx, command, adapter.Name(), req, write)
 		if err != nil {
 			return err
 		}
@@ -784,6 +790,7 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 			if err = r.emitRun(ctx, &m.Run, events.RunUpdated, m.Run); err != nil {
 				return result, err
 			}
+			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
 		} else {
 			if r.claimRecoveredID(m.Run.ID) {
 				if r.Capacity != nil {
@@ -830,6 +837,7 @@ func (r *Runner) CancelRecovered(id string) bool {
 
 func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 	defer r.releaseID(m.Run.ID)
+	defer os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
 	defer func() {
 		r.mu.Lock()
 		delete(r.recovered, m.Run.ID)

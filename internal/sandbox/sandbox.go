@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +20,8 @@ type Options struct {
 	CLI        string
 	Executable string
 	Network    bool
-	// ReadOnly holds per-run files such as a temporary MCP config.
+	StateDir   string
+	// ReadOnly holds toolchain roots and per-run files such as an MCP config.
 	ReadOnly []string
 }
 
@@ -40,7 +42,7 @@ func Build(o Options) ([]string, error) {
 		}
 	}
 	args = append(args, "--dir", "/etc")
-	for _, p := range []string{"/etc/hosts", "/etc/resolv.conf", "/etc/nsswitch.conf", "/etc/passwd", "/etc/group", "/etc/ssl", "/etc/pki", "/etc/gitconfig", "/etc/localtime"} {
+	for _, p := range []string{"/etc/hosts", "/etc/resolv.conf", "/etc/nsswitch.conf", "/etc/passwd", "/etc/group", "/etc/ssl", "/etc/pki", "/etc/gitconfig", "/etc/localtime", "/etc/alternatives", "/etc/ld.so.cache", "/etc/os-release"} {
 		if _, err := os.Stat(p); err == nil {
 			args = append(args, "--ro-bind", p, p)
 		}
@@ -64,10 +66,43 @@ func Build(o Options) ([]string, error) {
 		dirs[path] = true
 		return nil
 	}
-	for _, path := range []string{o.Worktree, o.GitDir} {
+	if err := bind(o.Worktree, "--bind"); err != nil {
+		return nil, err
+	}
+	if err := bind(o.GitDir, "--ro-bind"); err != nil {
+		return nil, err
+	}
+	// Git's shared configuration, hooks and attributes remain read-only.
+	// A linked worktree needs its own index and HEAD, and object and ref
+	// updates still need writable storage while the agent runs.
+	for _, rel := range []string{"objects", "refs", "logs", "packed-refs"} {
+		path := filepath.Join(o.GitDir, rel)
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("git bind path is a symlink: %s", path)
+		}
 		if err := bind(path, "--bind"); err != nil {
 			return nil, err
 		}
+	}
+	admin := filepath.Join(o.GitDir, "worktrees", filepath.Base(o.Worktree))
+	if info, err := os.Lstat(admin); err == nil && info.IsDir() {
+		source := admin
+		if o.StateDir != "" {
+			source = filepath.Join(o.StateDir, "git-admin")
+			if err := copyGitAdmin(admin, source); err != nil {
+				return nil, err
+			}
+		}
+		args = append(args, "--bind", source, admin)
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
 	}
 	paths := authPaths(o.Home, o.CLI)
 	paths = append(paths, o.ReadOnly...)
@@ -82,12 +117,69 @@ func Build(o Options) ([]string, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("sandbox bind path is a symlink: %s", path)
 		}
-		mode := "--bind"
-		if contains(o.ReadOnly, path) {
-			mode = "--ro-bind"
-		}
-		if err := bind(path, mode); err != nil {
+		if err := bind(path, "--ro-bind"); err != nil {
 			return nil, err
+		}
+	}
+	// OAuth refresh is the narrow exception to read-only credentials. These
+	// files contain credentials, not executable CLI settings or hooks.
+	for _, path := range refreshPaths(o.Home, o.CLI) {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("credential path is not a regular file: %s", path)
+		}
+		if err := bind(path, "--bind"); err != nil {
+			return nil, err
+		}
+	}
+	if o.StateDir != "" {
+		if err := bind(o.StateDir, "--bind"); err != nil {
+			return nil, err
+		}
+		for _, rel := range sessionPaths(o.CLI) {
+			target := filepath.Join(o.Home, rel)
+			info, err := os.Lstat(target)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if !info.IsDir() {
+				return nil, fmt.Errorf("session path is not a directory: %s", target)
+			}
+			source := filepath.Join(o.StateDir, "sessions", rel)
+			if err := os.MkdirAll(source, 0700); err != nil {
+				return nil, err
+			}
+			args = append(args, "--bind", source, target)
+		}
+		for _, rel := range sessionFiles(o.CLI) {
+			target := filepath.Join(o.Home, rel)
+			info, err := os.Lstat(target)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("session file is not regular: %s", target)
+			}
+			source := filepath.Join(o.StateDir, "sessions", rel)
+			if err := os.MkdirAll(filepath.Dir(source), 0700); err != nil {
+				return nil, err
+			}
+			if err := copyGitAdminFile(target, source); err != nil {
+				return nil, err
+			}
+			args = append(args, "--bind", source, target)
 		}
 	}
 	if o.Executable != "" && !systemPath(o.Executable) {
@@ -112,6 +204,52 @@ func Build(o Options) ([]string, error) {
 	return args, nil
 }
 
+// A run gets a copy of its Git administration directory. Git can update its
+// index, while config.worktree and commondir edits never reach host-side Git.
+func copyGitAdmin(source, target string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(target, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("git admin path is a symlink: %s", path)
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(dest, 0700)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("git admin path is not a regular file: %s", path)
+		}
+		return copyGitAdminFile(path, dest)
+	})
+}
+
+func copyGitAdminFile(source, target string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
 func within(base, path string) bool {
 	return path == base || strings.HasPrefix(path, base+string(os.PathSeparator))
 }
@@ -125,13 +263,57 @@ func systemPath(path string) bool {
 	return false
 }
 
-func contains(paths []string, path string) bool {
-	for _, p := range paths {
-		if p == path {
-			return true
+func refreshPaths(home, cli string) []string {
+	switch cli {
+	case "claude":
+		return []string{filepath.Join(home, ".claude", ".credentials.json")}
+	case "codex":
+		return []string{filepath.Join(home, ".codex", "auth.json")}
+	case "grok":
+		return []string{filepath.Join(home, ".grok", "auth.json")}
+	case "kimi":
+		var paths []string
+		for _, pattern := range []string{".kimi-code/credentials/*", ".kimi-code/oauth/*"} {
+			matches, _ := filepath.Glob(filepath.Join(home, pattern))
+			paths = append(paths, matches...)
 		}
+		return paths
+	case "agy":
+		return []string{filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")}
+	case "opencode":
+		return []string{filepath.Join(home, ".local", "share", "opencode", "auth.json")}
 	}
-	return false
+	return nil
+}
+
+func sessionFiles(cli string) []string {
+	switch cli {
+	case "codex":
+		return []string{".codex/session_index.jsonl", ".codex/history.jsonl", ".codex/log.txt"}
+	case "grok":
+		return []string{".grok/active_sessions.json", ".grok/active_sessions.lock", ".grok/auth.json.lock"}
+	case "kimi":
+		return []string{".kimi-code/session_index.jsonl"}
+	}
+	return nil
+}
+
+func sessionPaths(cli string) []string {
+	switch cli {
+	case "claude":
+		return []string{".claude/projects", ".claude/todos", ".claude/tasks", ".claude/debug", ".claude/shell-snapshots", ".claude/sessions"}
+	case "codex":
+		return []string{".codex/sessions", ".codex/tmp", ".codex/log"}
+	case "grok":
+		return []string{".grok/sessions"}
+	case "kimi":
+		return []string{".kimi-code/sessions", ".kimi-code/logs"}
+	case "agy":
+		return []string{".gemini/antigravity/sessions"}
+	case "opencode":
+		return []string{".local/share/opencode/session"}
+	}
+	return nil
 }
 
 func authPaths(home, cli string) []string {
@@ -174,11 +356,13 @@ func Probe(ctx context.Context, network bool) error {
 }
 
 // Check verifies the run's actual mount layout before starting an agent.
-func Check(ctx context.Context, args []string) error {
+func Check(ctx context.Context, args []string, executable string, environment []string) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	check := append(append([]string(nil), args...), "--", "/bin/true")
-	out, err := exec.CommandContext(ctx, "bwrap", check...).CombinedOutput()
+	check := append(append([]string(nil), args...), "--", executable, "--version")
+	cmd := exec.CommandContext(ctx, "bwrap", check...)
+	cmd.Env = environment
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bubblewrap mount setup failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}

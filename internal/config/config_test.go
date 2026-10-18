@@ -57,9 +57,14 @@ func TestConserveAt(t *testing.T) {
 
 func TestSandboxConfig(t *testing.T) {
 	c := Defaults()
-	if c.Runs.Sandbox != "off" || c.Runs.SandboxMemoryMax != "4G" || c.Runs.SandboxTasksMax != 512 {
+	if c.Runs.Sandbox != "auto" || c.Runs.SandboxMemoryMax != "4G" || c.Runs.SandboxTasksMax != 512 {
 		t.Fatalf("sandbox defaults: %+v", c.Runs)
 	}
+	c.Runs.SandboxReadOnly = []string{"relative/toolchain"}
+	if err := c.Validate(); err == nil {
+		t.Fatal("accepted relative sandbox_read_only path")
+	}
+	c.Runs.SandboxReadOnly = nil
 	for _, mode := range []string{"auto", "required", "off"} {
 		c.Runs.Sandbox = mode
 		if err := c.Validate(); err != nil {
