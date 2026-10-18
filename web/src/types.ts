@@ -46,6 +46,7 @@ export interface Message {
   author_id: ID
   body: string
   mentions: ID[]
+  options?: string[]
   run_id?: ID
   created_at: string
   edited_at?: string

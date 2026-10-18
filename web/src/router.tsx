@@ -8,8 +8,8 @@ import {
 } from "@tanstack/react-router"
 import { ApiError, api } from "./api/client"
 import { DevicesPage, LoginPage, PairPage } from "./components/auth"
-import { isDirect } from "./lib/direct"
 import { ChannelPage } from "./components/channel"
+import { InboxPage } from "./components/inbox"
 import { LanesPage } from "./components/lanes"
 import { Shell } from "./components/shell"
 import { qk } from "./state/keys"
@@ -77,22 +77,15 @@ const devicesRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  loader: async ({ context }) => {
-    const channels = await withAuthRedirect(() =>
-      context.queryClient.ensureQueryData({
-        queryKey: qk.channels,
-        queryFn: () => api.channels(),
-      }),
-    )
-    const first = channels.find((channel) => !isDirect(channel)) ?? channels[0]
-    if (!first) return
-    throw redirect({
-      to: "/c/$channelId",
-      params: { channelId: first.id },
-      replace: true,
-    })
-  },
-  component: HomePage,
+  loader: ({ context }) =>
+    withAuthRedirect(() =>
+      Promise.all([
+        context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+        context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+      ]),
+    ),
+  component: InboxPage,
 })
 
 const channelRoute = createRoute({
@@ -146,10 +139,6 @@ const officeRoute = createRoute({
     ),
   component: lazyRouteComponent(() => import("./components/office/scene"), "OfficePage"),
 })
-
-function HomePage() {
-  return <p className="p-6 text-[14px] text-muted">No channels yet.</p>
-}
 
 const routeTree = rootRoute.addChildren([
   indexRoute,

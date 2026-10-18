@@ -80,7 +80,9 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <p className="px-3 py-3 text-[14px] font-semibold tracking-tight">{WORKSPACE_NAME}</p>
+      <Link to="/" onClick={onNavigate} className="px-3 py-3 text-[14px] font-semibold tracking-tight" aria-label={`${WORKSPACE_NAME}, all chats`}>
+        {WORKSPACE_NAME}
+      </Link>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         <div className="flex items-center justify-between pb-1 pl-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Channels</p>

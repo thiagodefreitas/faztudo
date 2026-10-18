@@ -311,6 +311,23 @@ func TestToolsStayInsideTheRun(t *testing.T) {
 		t.Fatal("ask_human was not stored on the run")
 	}
 
+	choice := call[messageOut](t, c1, "ask_human", map[string]any{"question": "which one", "options": []string{" fast ", "safe"}})
+	if len(choice.Options) != 2 || choice.Options[0] != "fast" || choice.Options[1] != "safe" {
+		t.Fatalf("choice options %v", choice.Options)
+	}
+	if kept, err := s.Message(ctx, choice.ID); err != nil || len(kept.Options) != 2 {
+		t.Fatal("options were not stored on the message")
+	}
+	if len(asked.Options) != 0 {
+		t.Fatal("ask_human without options gained some")
+	}
+	for _, bad := range [][]string{{"only"}, {"a", "b", "c", "d", "e", "f"}, {"a", " "}, {"a", strings.Repeat("x", 81)}} {
+		res, err := c1.CallTool(ctx, &sdkmcp.CallToolParams{Name: "ask_human", Arguments: map[string]any{"question": "q", "options": bad}})
+		if err != nil || !res.IsError {
+			t.Fatalf("options %v were accepted", bad)
+		}
+	}
+
 	approval := call[approvalOut](t, c1, "request_approval", map[string]any{
 		"title":  "Ship it",
 		"detail": "synthetic",

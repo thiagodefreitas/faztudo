@@ -79,6 +79,7 @@ type Message struct {
 	AuthorID   ID         `json:"author_id"`
 	Body       string     `json:"body"`
 	Mentions   []ID       `json:"mentions"`
+	Options    []string   `json:"options,omitempty"`
 	RunID      ID         `json:"run_id,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	EditedAt   *time.Time `json:"edited_at,omitempty"`

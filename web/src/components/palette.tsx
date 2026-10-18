@@ -10,6 +10,8 @@ import { CreateChannelDialog } from "./channel-dialogs"
 
 // The channel page listens for this to open its settings dialog.
 export const OPEN_SETTINGS_EVENT = "faztudo:open-settings"
+// The inbox search button asks the palette to open.
+export const OPEN_PALETTE_EVENT = "faztudo:open-palette"
 
 const itemClass =
   "flex min-h-9 cursor-default items-center gap-2 rounded px-2 text-[13px] text-ink aria-selected:bg-accent-soft"
@@ -35,8 +37,15 @@ export function CommandPalette() {
         setOpen((value) => !value)
       }
     }
+    function onOpen() {
+      setOpen(true)
+    }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener(OPEN_PALETTE_EVENT, onOpen)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener(OPEN_PALETTE_EVENT, onOpen)
+    }
   }, [])
 
   function run(action: () => void) {

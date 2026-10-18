@@ -1,7 +1,6 @@
-import * as Dialog from "@radix-ui/react-dialog"
-import { getRouteApi } from "@tanstack/react-router"
+import * as Menu from "@radix-ui/react-dropdown-menu"
+import { Link, getRouteApi, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { ApiError, api } from "../api/client"
 import { directPeer, isDirect } from "../lib/direct"
@@ -15,11 +14,14 @@ import { Composer } from "./composer"
 import { MessageList } from "./message-list"
 import { RunPanel } from "./run-panel"
 import { ChannelSettingsDialog } from "./channel-dialogs"
-import { WorkspaceNav } from "./sidebar"
+import { AgentAvatar } from "./agent-avatar"
+import { TeamIcon } from "./team-icon"
 import { ThreadPanel } from "./thread-panel"
 import { OPEN_SETTINGS_EVENT } from "./palette"
 
 const channelApi = getRouteApi("/c/$channelId")
+
+const MENU_ITEM = "flex min-h-10 cursor-default items-center rounded px-2 text-[13px] text-ink outline-none data-[highlighted]:bg-accent-soft"
 
 // The header shows the folder name only, so screenshots do not leak home paths.
 export function repoName(path: string): string {
@@ -42,7 +44,6 @@ export function ChannelPage() {
   const me = useMe()
   const navigate = useNavigate()
   const channel = channels.data?.find((item) => item.id === channelId)
-  const [navOpen, setNavOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
@@ -122,23 +123,29 @@ export function ChannelPage() {
   return (
     <div className="flex min-h-0 flex-1">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-2 border-b border-line px-3 py-2 md:gap-3">
-          <Dialog.Root open={navOpen} onOpenChange={setNavOpen}>
-            <Dialog.Trigger className="min-h-10 shrink-0 rounded-md border border-line px-3 text-[12px] md:hidden">Channels</Dialog.Trigger>
-            <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
-              <Dialog.Content className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-sidebar p-2 shadow-lg">
-                <Dialog.Title className="px-2 pt-2 text-[13px] font-medium">Channels</Dialog.Title>
-                <WorkspaceNav onNavigate={() => setNavOpen(false)} />
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[15px] font-semibold">
-              <span className="text-faint">{direct ? "@ " : "# "}</span>
-              {title}
-            </h1>
-            {channel.topic && <p className="truncate text-[13px] text-muted">{channel.topic}</p>}
+        <header className="flex items-center gap-2 px-3 py-2 max-md:pt-3 md:gap-3 md:border-b md:border-line">
+          <Link
+            to="/"
+            aria-label="Back to chats"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-sm md:hidden"
+          >
+            <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m12 4-6 6 6 6" />
+            </svg>
+          </Link>
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 max-md:h-10 max-md:rounded-full max-md:border max-md:border-line max-md:bg-surface max-md:px-3 max-md:shadow-sm">
+            {direct && peer ? (
+              <AgentAvatar member={peer} size={28} decorative />
+            ) : (
+              <TeamIcon channel={channel} members={members.data ?? []} excludeId={me.data?.id} size={20} />
+            )}
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-[15px] font-semibold">
+                <span className="text-faint">{direct ? "@ " : "# "}</span>
+                {title}
+              </h1>
+              {channel.topic && <p className="truncate text-[13px] text-muted max-md:hidden">{channel.topic}</p>}
+            </div>
           </div>
           {defaultAgent && (
             <p className="hidden shrink-0 text-[12px] text-faint sm:block" title="Default agent for this channel">
@@ -158,10 +165,37 @@ export function ChannelPage() {
             onClick={() => setSettingsOpen(true)}
             aria-keyshortcuts="Control+Comma Meta+Comma"
             title="Channel settings (Ctrl+, or Cmd+,)"
-            className="min-h-10 shrink-0 rounded-md border border-line px-3 text-[12px] hover:bg-sidebar md:min-h-8"
+            className="hidden min-h-8 shrink-0 rounded-md border border-line px-3 text-[12px] hover:bg-sidebar md:block"
           >
             Settings <kbd className="ml-1 hidden font-mono text-[11px] text-faint sm:inline">Ctrl+,</kbd>
           </button>
+          <Menu.Root>
+            <Menu.Trigger
+              aria-label="More"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-sm md:hidden"
+            >
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="currentColor">
+                <circle cx="4.5" cy="10" r="1.6" />
+                <circle cx="10" cy="10" r="1.6" />
+                <circle cx="15.5" cy="10" r="1.6" />
+              </svg>
+            </Menu.Trigger>
+            <Menu.Portal>
+              <Menu.Content align="end" sideOffset={6} className="z-50 min-w-44 rounded-md border border-line bg-surface p-1 shadow-lg">
+                <Menu.Item onSelect={() => setSettingsOpen(true)} className={MENU_ITEM}>
+                  Settings
+                </Menu.Item>
+                <Menu.Item onSelect={() => setSettingsOpen(true)} className={MENU_ITEM}>
+                  Members
+                </Menu.Item>
+                <Menu.Item asChild>
+                  <Link to="/lanes" className={MENU_ITEM}>
+                    Lanes
+                  </Link>
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Portal>
+          </Menu.Root>
           <ChannelSettingsDialog channel={channel} agents={agents} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
         <MessageList

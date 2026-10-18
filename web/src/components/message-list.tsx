@@ -1,22 +1,28 @@
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api/client"
+import { collapseAgentChat, participants } from "../lib/agent-chat"
+import { answeredChoice, choiceBody } from "../lib/choices"
 import { continuesGroup } from "../lib/group"
+import { ulid } from "../lib/id"
 import { formatClock } from "../lib/time"
 import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
-import { useMe, useMembers, useMessages, useNotices, usePending, useRuns, type PendingMessage } from "../state/queries"
-import type { Member, Message, NoticeItem, Run } from "../types"
+import { useChannels, useMe, useMembers, useMessages, useNotices, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
+import type { Member, Message, NoticeItem, Run, ThreadPage } from "../types"
+import type { ChannelRef } from "../lib/channel-links"
 import { AgentAvatar } from "./agent-avatar"
+import { ChoiceCard } from "./choice-card"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
 
 type Row =
   | { kind: "message"; key: string; at: string; message: Message }
+  | { kind: "agents"; key: string; at: string; messages: Message[] }
   | { kind: "notice"; key: string; at: string; notice: NoticeItem }
   | { kind: "pending"; key: string; at: string; pending: PendingMessage }
 
@@ -32,6 +38,8 @@ export function MessageList({
   const qc = useQueryClient()
   const messagesQuery = useMessages(channelId)
   const members = useMembers()
+  const channelList = useChannels()
+  const channelRefs = useMemo(() => channelList.data?.map(({ id, name }) => ({ id, name })), [channelList.data])
   const me = useMe()
   const runs = useRuns()
   const notices = useNotices()
@@ -54,7 +62,16 @@ export function MessageList({
   })
 
   const rows: Row[] = [
-    ...messages.map((message) => ({ kind: "message" as const, key: message.id, at: message.created_at, message })),
+    ...collapseAgentChat(messages, members.data ?? []).map((segment) =>
+      segment.kind === "message"
+        ? { kind: "message" as const, key: segment.message.id, at: segment.message.created_at, message: segment.message }
+        : {
+            kind: "agents" as const,
+            key: `agents:${segment.messages[0]?.id}`,
+            at: segment.messages[0]?.created_at ?? "",
+            messages: segment.messages,
+          },
+    ),
     ...(notices.data ?? [])
       .filter((notice) => notice.channel_id === channelId)
       .map((notice) => ({ kind: "notice" as const, key: notice.id, at: notice.ts, notice })),
@@ -150,6 +167,8 @@ export function MessageList({
               if (!row) return null
               const before = rows[item.index - 1]
               const grouped = row.kind === "message" && before?.kind === "message" && continuesGroup(before.message, row.message)
+              const after = rows[item.index + 1]
+              const lastInGroup = !(row.kind === "message" && after?.kind === "message" && continuesGroup(row.message, after.message))
               const author = row.kind === "message" ? members.data?.find((member) => member.id === row.message.author_id) : undefined
               return (
                 <div
@@ -165,11 +184,15 @@ export function MessageList({
                       channelId={channelId}
                       author={author}
                       grouped={grouped}
+                      lastInGroup={lastInGroup}
+                      mine={row.message.author_id === me.data?.id}
+                      channels={channelRefs}
                       fresh={now - Date.parse(row.message.created_at) < 8000}
                       run={runs.data?.find((entry) => entry.id === row.message.run_id)}
                       onOpenThread={onOpenThread}
                     />
                   )}
+                  {row.kind === "agents" && <AgentLine messages={row.messages} members={members.data ?? []} channels={channelRefs} />}
                   {row.kind === "notice" && <NoticeRow notice={row.notice} />}
                   {row.kind === "pending" && <PendingRow item={row.pending} onRetry={onRetry} />}
                 </div>
@@ -196,6 +219,9 @@ function MessageRow({
   channelId,
   author,
   grouped,
+  lastInGroup,
+  mine,
+  channels,
   fresh,
   run,
   onOpenThread,
@@ -204,6 +230,9 @@ function MessageRow({
   channelId: string
   author: Member | undefined
   grouped: boolean
+  lastInGroup: boolean
+  mine: boolean
+  channels: ChannelRef[] | undefined
   fresh: boolean
   run: Run | undefined
   onOpenThread: ((message: Message) => void) | undefined
@@ -211,23 +240,26 @@ function MessageRow({
   const replies = message.reply_count ?? 0
   const authorName = author?.display_name ?? "Member"
   const time = formatClock(message.created_at)
+  // Below 640px messages are bubbles: mine on the right, the others on the
+  // left with the avatar at the bottom of the group and the name above it.
   return (
-    <article className={cx("group/msg flex gap-2.5", fresh && "fz-rise")}>
-      <div className="w-8 shrink-0">
+    <article className={cx("group/msg flex gap-2.5 max-sm:items-end", mine && "max-sm:flex-row-reverse", fresh && "fz-rise")}>
+      <div className={cx("w-8 shrink-0", mine && "max-sm:hidden")}>
         {grouped ? (
           <time
-            className="block pt-0.5 text-center font-mono text-[10px] leading-5 text-faint opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100"
+            className="block pt-0.5 text-center font-mono text-[10px] leading-5 text-faint opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 max-sm:hidden"
             dateTime={message.created_at}
           >
             {time}
           </time>
         ) : (
-          <AgentAvatar member={author} size={28} decorative className="mt-0.5" />
+          <AgentAvatar member={author} size={28} decorative className="mt-0.5 max-sm:hidden" />
         )}
+        {lastInGroup && <AgentAvatar member={author} size={28} decorative className="sm:hidden" />}
       </div>
-      <div className="min-w-0 flex-1">
+      <div className={cx("min-w-0 flex-1", mine && "max-sm:flex max-sm:flex-col max-sm:items-end")}>
         {!grouped && (
-          <header className="flex items-baseline gap-2">
+          <header className={cx("flex items-baseline gap-2", mine && "max-sm:hidden")}>
             <p className="text-[13px] font-semibold">{authorName}</p>
             <time className="font-mono text-[11px] text-faint" dateTime={message.created_at}>
               {time}
@@ -235,9 +267,17 @@ function MessageRow({
             {message.edited_at && <span className="text-[11px] text-faint">edited</span>}
           </header>
         )}
-        <div className={cx("text-[14px]", !grouped && "mt-0.5")}>
-          <Markdown text={message.body} />
+        <div
+          className={cx(
+            "text-[14px]",
+            !grouped && "mt-0.5",
+            "max-sm:w-fit max-sm:max-w-[88%] max-sm:rounded-2xl max-sm:px-3 max-sm:py-1.5",
+            mine ? "max-sm:rounded-br-md max-sm:bg-accent-soft" : "max-sm:rounded-bl-md max-sm:border max-sm:border-line max-sm:bg-surface",
+          )}
+        >
+          <Markdown text={message.body} channels={channels} />
         </div>
+        {message.options && message.options.length > 0 && <MessageChoices message={message} channelId={channelId} />}
         {run && <RunCard run={run} channelId={channelId} />}
         {onOpenThread && (
           <p className="mt-0.5 flex items-center gap-3 text-[12px]">
@@ -262,6 +302,100 @@ function MessageRow({
         )}
       </div>
     </article>
+  )
+}
+
+// The options of an ask_human message. The answer is a thread reply from the
+// person, so it also shows for anyone else who opens the channel.
+function MessageChoices({ message, channelId }: { message: Message; channelId: string }) {
+  const qc = useQueryClient()
+  const members = useMembers()
+  const thread = useThread(channelId, message.id)
+  const [picked, setPicked] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const options = message.options ?? []
+  const answered = answeredChoice(options, thread.replies, members.data ?? []) ?? picked
+
+  function choose(index: number) {
+    const option = options[index]
+    if (option === undefined || answered !== null) return
+    setPicked(index)
+    setError(null)
+    api.postMessage(channelId, { body: choiceBody(index, option), thread_id: message.id, idempotency_key: ulid() }).then(
+      (reply) => {
+        qc.setQueryData<ThreadPage | undefined>(qk.thread(message.id), (page) =>
+          page ? { ...page, replies: mergeById([reply], page.replies) } : page,
+        )
+      },
+      () => {
+        setPicked(null)
+        setError("Could not send the answer. Try again.")
+      },
+    )
+  }
+
+  return <ChoiceCard options={options} answered={answered} onChoose={choose} error={error} />
+}
+
+// "Coder", "Coder and Reviewer", "A, B and C", each with a small avatar.
+function NameList({ people }: { people: Member[] }) {
+  return people.map((person, index) => (
+    <Fragment key={person.id}>
+      {index === 0 ? "" : index === people.length - 1 ? " and " : ", "}
+      <span className="inline-flex items-center gap-1 align-middle">
+        <AgentAvatar member={person} size={16} decorative />
+        <span className="font-medium text-ink">{person.display_name}</span>
+      </span>
+    </Fragment>
+  ))
+}
+
+// Agents talking to each other collapse into one quiet line. Click to read.
+function AgentLine({ messages, members, channels }: { messages: Message[]; members: Member[]; channels: ChannelRef[] | undefined }) {
+  const [open, setOpen] = useState(false)
+  const people = participants(messages, members)
+  const [from, ...rest] = people
+  return (
+    <div className="ml-0 sm:ml-[42px]">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-10 w-full items-center gap-1 text-left text-[12px] text-muted hover:text-ink md:min-h-7"
+      >
+        {messages.length === 1 && from ? (
+          <span>
+            <NameList people={[from]} /> messaged <NameList people={rest} />
+          </span>
+        ) : (
+          <span>
+            {messages.length} messages between <NameList people={people} />
+          </span>
+        )}
+        <span aria-hidden="true" className="ml-1 text-faint">
+          {open ? "Hide" : "Show"}
+        </span>
+      </button>
+      {open && (
+        <ol className="fz-rise mb-1 flex flex-col gap-2 border-l-2 border-line pl-3">
+          {messages.map((message) => {
+            const writer = members.find((member) => member.id === message.author_id)
+            return (
+              <li key={message.id} className="text-[13px]">
+                <p className="flex items-center gap-1.5 text-[12px] text-muted">
+                  <AgentAvatar member={writer} size={16} decorative />
+                  <span className="font-medium text-ink">{writer?.display_name ?? "Member"}</span>
+                  <time className="font-mono text-faint" dateTime={message.created_at}>
+                    {formatClock(message.created_at)}
+                  </time>
+                </p>
+                <Markdown text={message.body} channels={channels} />
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
   )
 }
 

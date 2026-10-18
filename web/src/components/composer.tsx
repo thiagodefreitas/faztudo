@@ -101,7 +101,7 @@ export function Composer({
 
   return (
     <form
-      className="shrink-0 bg-surface px-3 pb-3 pt-2 md:px-4"
+      className="shrink-0 px-3 pb-3 pt-2 md:bg-surface md:px-4"
       onSubmit={(event) => {
         event.preventDefault()
         send()
@@ -134,7 +134,18 @@ export function Composer({
             ))}
           </ul>
         )}
-        <div className="flex items-end gap-2 rounded-2xl border border-line bg-canvas p-1.5 pl-3 transition-colors duration-150 focus-within:border-accent">
+        <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface p-1.5 pl-3 transition-colors duration-150 focus-within:border-accent max-md:rounded-3xl max-md:pl-1.5 max-md:shadow-lg md:bg-canvas">
+        <button
+          type="button"
+          disabled
+          aria-label="Attachments soon"
+          title="Attachments soon"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-faint md:hidden"
+        >
+          <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M10 4v12M4 10h12" />
+          </svg>
+        </button>
         <label className="block min-w-0 flex-1">
           <span className="sr-only">{label}</span>
           <textarea

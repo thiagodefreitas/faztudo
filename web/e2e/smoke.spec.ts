@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test"
 test("posts a mention, streams a run, and answers the approval", async ({ page }) => {
   mkdirSync("docs-shots", { recursive: true })
   await page.goto("/")
+  await page.getByTestId("inbox-list").getByRole("link", { name: /faztudo-dev/ }).click()
   await expect(page.getByRole("heading", { name: "# faztudo-dev" })).toBeVisible()
   await expect(page.getByText("Building the run card and approvals")).toBeVisible()
   await expect(page.getByText("got exhausted, want conserve").first()).toBeVisible()
@@ -33,7 +34,7 @@ test("posts a mention, streams a run, and answers the approval", async ({ page }
   await page.getByRole("button", { name: "Close" }).click()
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole("button", { name: "Channels" }).click()
-  await page.getByRole("link", { name: /general/ }).click()
+  await page.getByRole("link", { name: "Back to chats" }).click()
+  await page.getByTestId("inbox-list").getByRole("link", { name: /general/ }).click()
   await expect(page.getByRole("heading", { name: "# general" })).toBeVisible()
 })

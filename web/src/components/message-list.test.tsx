@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { qk } from "../state/keys"
 import type { Member, Message } from "../types"
@@ -34,12 +35,25 @@ function message(id: string, author: Member, at: string, body: string): Message 
   return { id, channel_id: "c1", author_id: author.id, body, mentions: [], created_at: at }
 }
 
-function renderList(messages: Message[] = []) {
+const reviewer: Member = {
+  id: "01ARZ3NDEKTSV4RRFFQ69G5AA3",
+  kind: "agent",
+  handle: "reviewer",
+  display_name: "Reviewer",
+  presence: "online",
+  agent: { lanes: ["codex/default"] },
+}
+
+function renderList(messages: Message[] = [], replies: Message[] = []) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
   client.setQueryData(qk.messages("c1"), messages)
-  client.setQueryData(qk.members, [ada, coder])
+  for (const root of messages.filter((item) => item.options)) {
+    client.setQueryData(qk.thread(root.id), { root, replies })
+  }
+  client.setQueryData(qk.channels, [])
+  client.setQueryData(qk.members, [ada, coder, reviewer])
   client.setQueryData(qk.runs, [])
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.notices, [])
@@ -65,10 +79,43 @@ describe("MessageList", () => {
       message("01CRZ3NDEKTSV4RRFFQ69G5CC4", ada, "2026-10-18T10:20:00.000Z", "fourth"),
     ])
     // Headers: Ada, Coder, Ada again after the gap. The second Ada line is grouped.
-    expect(screen.getAllByTestId("avatar")).toHaveLength(3)
+    // The phone layout adds its own avatar at the end of each group.
+    const headers = screen.getAllByTestId("avatar").filter((el) => el.getAttribute("class")?.includes("max-sm:hidden"))
+    expect(headers).toHaveLength(3)
     const transcript = screen.getByTestId("transcript")
     expect(within(transcript).getAllByText("Ada")).toHaveLength(2)
     expect(within(transcript).getAllByText("Coder")).toHaveLength(1)
     expect(screen.getByText("second")).toBeInTheDocument()
+  })
+
+  it("collapses agent-to-agent messages into one line that expands", async () => {
+    const note = { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "patch is ready"), mentions: [reviewer.id] }
+    renderList([note])
+    expect(screen.queryByText("patch is ready")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: /Coder messaged Reviewer/ }))
+    expect(screen.getByText("patch is ready")).toBeInTheDocument()
+  })
+
+  it("counts several agent messages in one line", () => {
+    const base = { mentions: [reviewer.id] }
+    renderList([
+      { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "one"), ...base },
+      { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC2", coder, "2026-10-18T10:01:00.000Z", "two"), ...base },
+      { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC3", coder, "2026-10-18T10:02:00.000Z", "three"), ...base },
+    ])
+    expect(screen.getByRole("button", { name: /3 messages between Coder and Reviewer/ })).toBeInTheDocument()
+  })
+
+  it("never collapses a message that mentions a human", () => {
+    renderList([{ ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "@ada look"), mentions: [ada.id] }])
+    expect(screen.getByText("@ada look")).toBeInTheDocument()
+  })
+
+  it("renders the options of a question and marks the answered one", () => {
+    const ask = { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "@ada which?"), mentions: [ada.id], options: ["fast", "safe"] }
+    const answer = { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC2", ada, "2026-10-18T10:01:00.000Z", "B: safe"), thread_id: ask.id }
+    renderList([ask], [answer])
+    expect(screen.getByRole("button", { name: /B\s*safe/ })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /A\s*fast/ })).toBeDisabled()
   })
 })

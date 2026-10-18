@@ -88,6 +88,7 @@ interface Message {
   author_id: ID;
   body: string;             // markdown
   mentions: ID[];
+  options?: string[];       // 2 to 5 short answers an agent offers with ask_human
   run_id?: ID;              // set when the message is an agent run's output
   created_at: string;
   edited_at?: string;

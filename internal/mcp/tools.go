@@ -18,6 +18,10 @@ const (
 	maxBodyBytes = 65536
 	maxContext   = 50
 	maxOptions   = 8
+
+	minChoices     = 2
+	maxChoices     = 5
+	maxChoiceBytes = 80
 )
 
 var optionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
@@ -28,7 +32,8 @@ type postIn struct {
 }
 
 type askIn struct {
-	Question string `json:"question" jsonschema:"question for the human"`
+	Question string   `json:"question" jsonschema:"question for the human"`
+	Options  []string `json:"options,omitempty" jsonschema:"optional short answers shown as buttons. 2 to 5 entries, each up to 80 bytes"`
 }
 
 type optionIn struct {
@@ -56,6 +61,7 @@ type messageOut struct {
 	AuthorID  string   `json:"author_id"`
 	Body      string   `json:"body"`
 	Mentions  []string `json:"mentions"`
+	Options   []string `json:"options,omitempty"`
 	RunID     string   `json:"run_id,omitempty"`
 }
 
@@ -94,15 +100,15 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 		Description: "Post a message in this run's channel as this run's agent. Does not modify the work tree.",
 		Annotations: hints,
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in postIn) (*sdkmcp.CallToolResult, messageOut, error) {
-		out, err := h.post(ctx, grant, in.Body, in.ThreadID, true)
+		out, err := h.post(ctx, grant, in.Body, in.ThreadID, nil, true)
 		return nil, out, err
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "ask_human",
-		Description: "Post a question mentioning the human members. Returns immediately and does not wait. Does not modify the work tree.",
+		Description: "Post a question mentioning the human members. Optional options (2 to 5 short strings) show as lettered buttons and the answer arrives as a thread reply. Returns immediately and does not wait. Does not modify the work tree.",
 		Annotations: hints,
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in askIn) (*sdkmcp.CallToolResult, messageOut, error) {
-		out, err := h.ask(ctx, grant, in.Question)
+		out, err := h.ask(ctx, grant, in.Question, in.Options)
 		return nil, out, err
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
@@ -131,7 +137,7 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 	})
 }
 
-func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, fanout bool) (messageOut, error) {
+func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, choices []string, fanout bool) (messageOut, error) {
 	if strings.TrimSpace(body) == "" {
 		return messageOut{}, errors.New("body required")
 	}
@@ -159,6 +165,7 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 		AuthorID:  grant.AgentID,
 		Body:      body,
 		Mentions:  ids,
+		Options:   choices,
 		RunID:     grant.RunID,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -188,9 +195,36 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 	return messageView(msg), nil
 }
 
-func (h *Handler) ask(ctx context.Context, grant Grant, question string) (messageOut, error) {
+// cleanChoices validates the optional answers of ask_human. No options is
+// valid. One option, more than five, or an empty or long one is not.
+func cleanChoices(options []string) ([]string, error) {
+	if len(options) == 0 {
+		return nil, nil
+	}
+	if len(options) < minChoices || len(options) > maxChoices {
+		return nil, errors.New("options must have 2 to 5 entries")
+	}
+	out := make([]string, 0, len(options))
+	for _, option := range options {
+		option = strings.TrimSpace(option)
+		if option == "" {
+			return nil, errors.New("option must not be empty")
+		}
+		if len(option) > maxChoiceBytes {
+			return nil, errors.New("option too long")
+		}
+		out = append(out, option)
+	}
+	return out, nil
+}
+
+func (h *Handler) ask(ctx context.Context, grant Grant, question string, options []string) (messageOut, error) {
 	if strings.TrimSpace(question) == "" {
 		return messageOut{}, errors.New("question required")
+	}
+	choices, err := cleanChoices(options)
+	if err != nil {
+		return messageOut{}, err
 	}
 	members, err := h.store.Members(ctx)
 	if err != nil {
@@ -214,7 +248,7 @@ func (h *Handler) ask(ctx context.Context, grant Grant, question string) (messag
 	}
 	b.WriteByte(' ')
 	b.WriteString(question)
-	return h.post(ctx, grant, b.String(), "", false)
+	return h.post(ctx, grant, b.String(), "", choices, false)
 }
 
 func (h *Handler) requestApproval(ctx context.Context, grant Grant, in approvalIn) (approvalOut, error) {
@@ -332,6 +366,7 @@ func messageView(msg domain.Message) messageOut {
 		AuthorID:  msg.AuthorID,
 		Body:      msg.Body,
 		Mentions:  mentions,
+		Options:   msg.Options,
 		RunID:     msg.RunID,
 	}
 }

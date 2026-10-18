@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { api } from "../api/client"
 import type { Approval, Message, NoticeItem, OutputLine, ThreadPage } from "../types"
 import { qk } from "./keys"
@@ -49,16 +49,34 @@ export function useApprovals() {
   })
 }
 
-export function useMessages(channelId: string) {
-  const qc = useQueryClient()
-  return useQuery({
+function messagesQuery(qc: QueryClient, channelId: string) {
+  return {
     queryKey: qk.messages(channelId),
     queryFn: async () => {
       const server = await api.messages(channelId, { limit: 100 })
       const local = qc.getQueryData<typeof server>(qk.messages(channelId)) ?? []
       return sortMessages(mergeById(server, local))
     },
+  }
+}
+
+export function useMessages(channelId: string) {
+  const qc = useQueryClient()
+  return useQuery(messagesQuery(qc, channelId))
+}
+
+// The newest top-level message of each channel, for the inbox. It shares the
+// cache of useMessages, so opening a channel afterwards costs no request.
+export function useLastMessages(channelIds: string[]): Map<string, Message> {
+  const qc = useQueryClient()
+  const results = useQueries({ queries: channelIds.map((id) => messagesQuery(qc, id)) })
+  const out = new Map<string, Message>()
+  results.forEach((result, index) => {
+    const last = result.data?.filter((message) => !message.thread_id).at(-1)
+    const id = channelIds[index]
+    if (last && id) out.set(id, last)
   })
+  return out
 }
 
 function mergeLines(server: OutputLine[], local: OutputLine[]): OutputLine[] {

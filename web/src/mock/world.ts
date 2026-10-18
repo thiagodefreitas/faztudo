@@ -769,6 +769,23 @@ export class MockWorld {
       mentions: [],
       created_at: iso(now - 2 * 60 * minute),
     })
+    this.insertMessage({
+      id: IDS.msgAsk,
+      channel_id: IDS.general,
+      author_id: IDS.coder,
+      body: "@ada which test command should the lane use?",
+      mentions: [IDS.ada],
+      options: ["go test ./...", "make check", "Skip verification"],
+      created_at: iso(now - 90 * minute),
+    })
+    this.insertMessage({
+      id: IDS.msgAgents,
+      channel_id: IDS.general,
+      author_id: IDS.coder,
+      body: "@reviewer the lane health patch is ready for a look.",
+      mentions: [IDS.reviewer],
+      created_at: iso(now - 80 * minute),
+    })
     const general = this.channels.find((channel) => channel.id === IDS.general)
     if (general) {
       general.unread = 2

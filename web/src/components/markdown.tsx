@@ -11,7 +11,9 @@ import tsx from "refractor/tsx"
 import typescript from "refractor/typescript"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Children, isValidElement, useState, type ReactNode } from "react"
+import { Link } from "@tanstack/react-router"
+import { Children, isValidElement, useMemo, useState, type ReactNode } from "react"
+import { channelIdOf, channelLinks, type ChannelRef } from "../lib/channel-links"
 import { cx } from "../lib/cx"
 
 refractor.register(bash)
@@ -79,6 +81,14 @@ function Code({ className, children }: { className?: string; children?: ReactNod
 }
 
 function Anchor({ href, children }: { href?: string; children?: ReactNode }) {
+  const channelId = channelIdOf(href)
+  if (channelId) {
+    return (
+      <Link to="/c/$channelId" params={{ channelId }}>
+        {children}
+      </Link>
+    )
+  }
   const external = href ? /^https?:/i.test(href) : false
   return (
     <a href={href} {...(external ? { target: "_blank", rel: "noreferrer" } : {})}>
@@ -115,9 +125,12 @@ function Pre({ children }: { children?: ReactNode }) {
   )
 }
 
-const remarkPlugins = [remarkGfm]
+const gfm = [remarkGfm]
 
-export function Markdown({ text }: { text: string }) {
+// `channels` turns "#name" into a link to that channel. Callers without a
+// channel list get plain text.
+export function Markdown({ text, channels }: { text: string; channels?: ChannelRef[] | undefined }) {
+  const remarkPlugins = useMemo(() => (channels ? [remarkGfm, channelLinks(channels)] : gfm), [channels])
   return (
     <div className="markdown">
       <ReactMarkdown remarkPlugins={remarkPlugins} components={{ code: Code, a: Anchor, pre: Pre }}>
