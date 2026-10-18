@@ -1,13 +1,14 @@
 # Getting started
 
-faztudo is pre-alpha. The first release, v0.1.0, is not published yet; until
-then you can build from source (see the end of this page).
+faztudo is an alpha; the current release is 0.1.0. This page installs it from
+a release first. Building from source is at the end.
 
 ## Requirements
 
 - Linux (x86_64 or arm64). macOS and Windows may work through the browser
   later, but are not tested.
 - git.
+- bubblewrap (`bwrap`). Write runs are sandboxed with it.
 - At least one agent command line tool, signed in: Claude Code, Codex, Grok,
   Kimi, Antigravity or OpenCode.
 
@@ -47,6 +48,32 @@ The archive also contains `systemd/faztudo.service`, the unit described under
 `git` and `bubblewrap` from your distribution: write runs are sandboxed and
 refuse to start without bubblewrap, unless you set `sandbox = "auto"` (see
 Configuration).
+
+## Check bubblewrap and Ubuntu 24.04
+
+Write runs refuse to start when the sandbox cannot be built. That is on
+purpose. Ubuntu 24.04 and newer restrict unprivileged user namespaces through
+AppArmor, which can stop bubblewrap even when it is installed. Check it:
+
+```bash
+faztudo doctor
+```
+
+Look at these lines:
+
+```
+bubblewrap: /usr/bin/bwrap
+unprivileged user namespaces: available
+systemd user scopes: available
+```
+
+If the namespaces line shows an error, bubblewrap cannot run as you. On Ubuntu
+24.04 you can allow it with an AppArmor profile for `bwrap`, or by lowering
+`kernel.apparmor_restrict_unprivileged_userns`; both change how your machine
+is protected, so read your distribution's notes first. Read-only runs still
+work without it. If you accept unsandboxed write runs, set `sandbox = "auto"`
+under `[runs]` in `config.toml`. The "systemd user scopes" line only matters
+for the memory and task limits.
 
 ## Install and run
 
@@ -166,5 +193,23 @@ LAN mode on, sign in with a LAN session instead.
 
 ## Build from source
 
-See [CONTRIBUTING.md](https://github.com/thiagodefreitas/faztudo/blob/main/CONTRIBUTING.md).
+You need Go 1.25 or newer, Node.js 22, npm, git and bubblewrap.
+
+```bash
+git clone https://github.com/thiagodefreitas/faztudo.git
+cd faztudo
+make build            # builds the web app and bin/faztudo
+bin/faztudo init
+bin/faztudo doctor
+bin/faztudo serve
+```
+
+More in
+[CONTRIBUTING.md](https://github.com/thiagodefreitas/faztudo/blob/main/CONTRIBUTING.md).
+
+## Next
+
+- [Tasks and approvals](tasks-and-approvals.md): give an agent a task and
+  decide in the inbox.
+- [Projects](projects.md): group channels and a team, and read the digest.
 

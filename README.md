@@ -15,6 +15,23 @@ approval before anything is merged.
 
 The name is Portuguese for "does everything". It does not, yet.
 
+## What's in 0.1.0
+
+0.1.0 is the first release you can install. It is an alpha: it works, and
+formats may still change. This is what you get:
+
+- Chat with channels, threads, direct messages, search, pins and files, plus
+  a catch-up card and filters for busy channels.
+- Runs on Claude Code, Codex, Grok, Kimi, Antigravity and OpenCode, with write
+  runs in their own git worktree and a human decision before any merge.
+- Tasks with a board, and an approvals inbox for every pending decision.
+- Projects with settings, archiving and a daily digest, and team channels.
+- Write runs sandboxed with bubblewrap, and refused when the sandbox cannot
+  start.
+- A 2D and a 3D office, and a phone app over your own network.
+
+The full list is in the [changelog](CHANGELOG.md).
+
 <p align="center">
   <img src="docs/images/chat.png" alt="A faztudo channel: each run card opens with one plain sentence (Coder changed 1 file, tests passed; Reviewer failed with the test output), a live strip of who is working and what waits for you, and the sidebar grouped by project" width="860">
 </p>
@@ -29,10 +46,10 @@ The name is Portuguese for "does everything". It does not, yet.
   <a href="docs/images/inbox-phone.png">phone inbox</a>
 </p>
 
-> **Status: pre-alpha, developed in the open, no release yet.** The chat,
-> runs, approvals, Lanes dashboard, Office page and LAN mode for phones work
-> today, and faztudo is built inside itself. Expect rough edges and changing
-> formats. Issues and ideas are welcome. See the [roadmap](docs/roadmap.md).
+> **Status: alpha, version 0.1.0.** The chat, runs, approvals, tasks,
+> projects, Lanes dashboard, Office and LAN mode for phones work today, and
+> faztudo is built inside itself. Expect rough edges and changing formats.
+> Issues and ideas are welcome. See the [roadmap](docs/roadmap.md).
 
 ## Why it is different
 
@@ -59,6 +76,24 @@ The name is Portuguese for "does everything". It does not, yet.
   service, no telemetry. Optional LAN mode serves the web app over HTTPS to
   your phone, with a password and QR code pairing.
 
+## Features
+
+- **Catch-up and filters.** Opening a busy channel shows what happened since
+  you left, a New divider, and filters for mentions, runs, decisions and files.
+- **Tasks and the board.** Give an agent a directive with scope, checks and
+  acceptance, and follow it from Todo to Done. See
+  [tasks and approvals](docs/tasks-and-approvals.md).
+- **Approvals inbox.** Every pending decision across channels in one list,
+  with the diff, an editable commit message and one-key answers.
+- **Projects.** Settings, archiving and a digest of what merged, failed and
+  waits for you. See [projects](docs/projects.md).
+- **Team channels.** Channels with several agents, where only the assigned
+  ones run.
+- **Fail-closed sandbox.** Write runs use bubblewrap and do not start without
+  it, unless you choose `sandbox = "auto"`.
+- **2D and 3D office.** Every agent at a desk, acting out what it is doing.
+- **Phone app.** An installable web app over HTTPS on your LAN.
+
 ## What works today, and what is planned
 
 | area | state |
@@ -75,7 +110,7 @@ The name is Portuguese for "does everything". It does not, yet.
 | Director, departments, projects with settings and digest, Chief of Staff, routines | works |
 | LAN mode: HTTPS, password, phone pairing, installable phone app | works; had an independent security review |
 | 2D office and a first 3D office with the same characters | works |
-| Packages: tarball and .deb with a systemd user unit | works |
+| Packages: tarball and .deb with a systemd user unit, on GitHub releases | works |
 | Signal bridge | planned (M3) |
 | Agent computers (persistent sandboxes) | planned (M4) |
 | Discord bridge, custom adapters | planned (M5) |
@@ -84,22 +119,25 @@ The name is Portuguese for "does everything". It does not, yet.
 
 ## Quick start
 
-There are no release packages yet, so build from source. You need Go 1.25 or
-newer, Node.js 22, npm, git and at least one signed-in agent CLI.
+You need Linux, git, bubblewrap and at least one signed-in agent CLI.
+
+Download the `.deb` or the `.tar.gz` for your machine from the
+[releases page](https://github.com/thiagodefreitas/faztudo/releases), together
+with `checksums.txt`, then check and install:
 
 ```bash
-git clone https://github.com/thiagodefreitas/faztudo.git
-cd faztudo
-make build            # builds the web app and bin/faztudo
-bin/faztudo init      # writes ~/.config/faztudo and finds your agent CLIs
-bin/faztudo doctor    # checks git, each agent CLI and its version, the port
-bin/faztudo serve     # serves http://127.0.0.1:7457
+sha256sum --check --ignore-missing checksums.txt
+sudo apt install ./faztudo_X.Y.Z_linux_amd64.deb    # or unpack the tarball
+faztudo init      # writes ~/.config/faztudo and finds your agent CLIs
+faztudo doctor    # checks git, bubblewrap, each agent CLI and the port
+faztudo serve     # serves http://127.0.0.1:7457 and opens the browser
 ```
 
 Then create a channel, point it at a local git repository and type
 `@codex what does this repository do?`. The
 [getting started guide](docs/getting-started.md) walks through it, including
-LAN mode for your phone.
+building from source (Go 1.25, Node.js 22, `make build`) and LAN mode for your
+phone.
 
 ## How it works
 
@@ -126,6 +164,8 @@ to the database, the logs or this repository. See [SECURITY.md](SECURITY.md).
 - [Documentation site](https://thiagodefreitas.github.io/faztudo/)
 - [Wiki pages in this repository](docs/wiki/Home.md): using faztudo, lanes,
   phone access, troubleshooting, FAQ and glossary
+- [Tasks and approvals](docs/tasks-and-approvals.md) and
+  [projects](docs/projects.md)
 - [Roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
   [API](docs/api.md), [configuration](docs/configuration.md)
 
