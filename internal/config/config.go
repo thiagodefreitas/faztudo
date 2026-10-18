@@ -95,8 +95,10 @@ type Lane struct {
 	// AllowedTools lists tools a claude run may use without asking, passed
 	// as --allowedTools. Unset keeps the write-run default; an empty list
 	// allows none.
-	AllowedTools   []string `toml:"allowed_tools"`
-	SandboxNetwork *bool    `toml:"sandbox_network"`
+	AllowedTools []string `toml:"allowed_tools"`
+	// Sandbox overrides runs.sandbox for write runs on this lane. Empty inherits it.
+	Sandbox        string `toml:"sandbox"`
+	SandboxNetwork *bool  `toml:"sandbox_network"`
 }
 type Persona struct {
 	Handle      string   `toml:"handle"`
@@ -246,6 +248,9 @@ func (c Config) Validate() error {
 		}
 		if l.Capacity < 1 {
 			return fmt.Errorf("lane[%d].capacity: must be positive", i)
+		}
+		if l.Sandbox != "" && l.Sandbox != "auto" && l.Sandbox != "off" && l.Sandbox != "required" {
+			return fmt.Errorf("lane[%d].sandbox: must be auto, off or required", i)
 		}
 		if l.ConserveAt != nil && (*l.ConserveAt < 1 || *l.ConserveAt > 100) {
 			return fmt.Errorf("lane[%d].conserve_at: must be between 1 and 100", i)

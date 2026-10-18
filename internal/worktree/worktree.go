@@ -28,11 +28,22 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 	return runGit(ctx, dir, nil, args...)
 }
 
+// HostGit applies the same restrictions to host commands on the trusted
+// checkout, including the final merge that checks out an agent's changes.
+func HostGit(ctx context.Context, dir string, args ...string) (string, error) {
+	return runGit(ctx, dir, nil, args...)
+}
+
 // runGit runs host-side git. Repository configuration may have been changed
 // by an agent, so never run its executable Git extensions in the host process.
 func runGit(ctx context.Context, dir string, prefix []string, args ...string) (string, error) {
 	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null"}
 	flags = append(flags, prefix...)
+	filters, err := disabledFilters(ctx, dir, flags)
+	if err != nil {
+		return "", err
+	}
+	flags = append(flags, filters...)
 	if len(args) > 0 && args[0] == "diff" {
 		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
 	}
@@ -46,11 +57,51 @@ func runGit(ctx context.Context, dir string, prefix []string, args ...string) (s
 	return strings.TrimSpace(string(out)), nil
 }
 
+// disabledFilters reads the effective repo, global and system configuration
+// before any host command touches agent-controlled paths. Attributes in the
+// worktree may select a configured driver, so each driver's executable
+// commands are overridden with empty values for this invocation.
+func disabledFilters(ctx context.Context, dir string, flags []string) ([]string, error) {
+	args := append(append([]string(nil), flags...), "config", "--includes", "--null", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process|required)$`)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_ATTR_NOSYSTEM=1")
+	out, err := cmd.Output()
+	if err != nil {
+		var exited *exec.ExitError
+		if errors.As(err, &exited) && exited.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list git filters: %w", err)
+	}
+	seen := map[string]bool{}
+	var overrides []string
+	for _, key := range strings.Split(string(out), "\x00") {
+		if key == "" {
+			continue
+		}
+		first := strings.IndexByte(key, '.')
+		last := strings.LastIndexByte(key, '.')
+		if first < 0 || last <= first+1 {
+			continue
+		}
+		name := key[first+1 : last]
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		for _, field := range []string{"clean=", "smudge=", "process=", "required=false"} {
+			overrides = append(overrides, "-c", "filter."+name+"."+field)
+		}
+	}
+	return overrides, nil
+}
+
 // runIn runs git on an agent worktree. It never trusts the worktree's own
 // .git: the git directory and work tree are named explicitly, so a .git file
 // or repository the agent put there is not read, and neither is any filter,
-// alias or config defined in it. The agent cannot write the real git
-// directory's config, so a filter driver cannot be defined at all.
+// alias or config defined in it. Drivers from the real repo, global and
+// system configuration are disabled by runGit.
 func runIn(ctx context.Context, w Worktree, args ...string) (string, error) {
 	if w.Admin == "" {
 		return "", errors.New("worktree git directory unknown")
@@ -72,8 +123,12 @@ func (m Manager) Commit(ctx context.Context, w Worktree, message string) error {
 	if err := m.Check(w); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null",
-		"--git-dir="+w.Admin, "--work-tree="+w.Path, "commit", "-q", "-m", message)
+	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null", "--git-dir=" + w.Admin, "--work-tree=" + w.Path}
+	filters, err := disabledFilters(ctx, w.Path, flags)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", append(append(flags, filters...), "commit", "-q", "-m", message)...)
 	cmd.Dir = w.Path
 	cmd.Env = []string{"GIT_ATTR_NOSYSTEM=1"}
 	for _, kv := range os.Environ() {
@@ -116,8 +171,9 @@ func (m Manager) Open(ctx context.Context, repo, path, branch, base string) (Wor
 	return Worktree{Repo: repo, Path: path, Branch: branch, BaseCommit: base, Admin: admin}, nil
 }
 
-// Check fails with ErrTampered unless the worktree's .git is still the exact
-// gitdir file faztudo wrote.
+// Check fails with ErrTampered unless the worktree and admin pointers still
+// contain the exact values faztudo wrote. A config.worktree is forbidden:
+// this manager never writes one and host git must not load agent settings.
 func (m Manager) Check(w Worktree) error {
 	if w.Admin == "" {
 		return errors.New("worktree git directory unknown")
@@ -130,6 +186,27 @@ func (m Manager) Check(w Worktree) error {
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != gitFile(w.Admin) {
 		return fmt.Errorf("%w: its .git file no longer points at the run's git directory; nothing was diffed or merged", ErrTampered)
+	}
+	admin, err := os.Lstat(w.Admin)
+	if err != nil || !admin.IsDir() || admin.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: its git admin directory changed; nothing was diffed or merged", ErrTampered)
+	}
+	for name, expected := range map[string]string{
+		"commondir": "../..\n",
+		"gitdir":    filepath.Join(w.Path, ".git") + "\n",
+	} {
+		p := filepath.Join(w.Admin, name)
+		info, statErr := os.Lstat(p)
+		if statErr != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("%w: git admin %s changed; nothing was diffed or merged", ErrTampered, name)
+		}
+		body, readErr := os.ReadFile(p)
+		if readErr != nil || string(body) != expected {
+			return fmt.Errorf("%w: git admin %s changed; nothing was diffed or merged", ErrTampered, name)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(w.Admin, "config.worktree")); !os.IsNotExist(err) {
+		return fmt.Errorf("%w: git admin config.worktree appeared; nothing was diffed or merged", ErrTampered)
 	}
 	return nil
 }
@@ -161,6 +238,10 @@ func (m Manager) Create(ctx context.Context, repo, id string) (Worktree, error) 
 	if err != nil {
 		_ = m.Cleanup(context.Background(), w)
 		return Worktree{}, fmt.Errorf("worktree git directory: %w", err)
+	}
+	if err := m.Check(w); err != nil {
+		_ = m.Cleanup(context.Background(), w)
+		return Worktree{}, err
 	}
 	return w, nil
 }

@@ -28,6 +28,17 @@ func TestSandboxFallbackPolicy(t *testing.T) {
 	}
 }
 
+func TestCodexUsesOuterSandboxOnly(t *testing.T) {
+	args := []string{"exec", "-s", "workspace-write", "-C", "/tmp/project", "prompt"}
+	got := outerSandboxArgs("codex", args)
+	if strings.Contains(strings.Join(got, " "), "workspace-write") || !strings.Contains(strings.Join(got, " "), "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("codex kept its nested sandbox: %q", got)
+	}
+	if strings.Join(outerSandboxArgs("claude", args), " ") != strings.Join(args, " ") {
+		t.Fatal("changed another CLI")
+	}
+}
+
 func TestToolchainRootsDoNotCoverWritableRunPaths(t *testing.T) {
 	home := t.TempDir()
 	data := filepath.Join(home, "data")

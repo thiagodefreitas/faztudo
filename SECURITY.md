@@ -55,7 +55,8 @@ design assumes that agents make mistakes and that messages from outside
 - **Write-run sandbox.** `runs.sandbox = "auto"` is the default. On Linux,
   write runs use bubblewrap when unprivileged user namespaces work. The
   worktree is writable, except its `.git` file, which is read-only. The shared
-  git directory is read-only except its objects. The run's worktree metadata
+  git directory is read-only except its objects; `objects/info` is read-only
+  too, so a run cannot replace alternates or commit-graph metadata. The run's worktree metadata
   is a private writable copy, and the run's own branch (`fz/<run id>`) lives in
   a private copy of its ref and reflog directory. The agent can commit on its
   branch inside the sandbox but cannot move `main`, any other branch or a tag;
@@ -65,11 +66,15 @@ design assumes that agents make mistakes and that messages from outside
   a `.git` file or repository the agent put in the worktree is never read, and
   neither is any filter, alias or config defined in it. They also disable
   fsmonitor, hooks, external diffs and textconv, and ignore system and global
-  attributes. Before every diff, stage and merge, faztudo checks that the
-  worktree's `.git` is still the exact file it wrote; if not, the run fails as
-  tampered with and nothing is diffed or merged. Filter drivers can only come
-  from your own git configuration (for example Git LFS), which the agent
-  cannot write. The channel's test command runs in the same sandbox with a
+  attributes. They enumerate filter drivers in repo, global and system Git
+  configuration and override their clean, smudge and process commands with
+  empty values, including during worktree creation and the final host merge.
+  Before every diff, stage and merge, faztudo checks the
+  worktree's `.git` and the admin `commondir`, `gitdir` and `config.worktree`
+  against the values it created; a changed pointer or new `config.worktree`
+  fails as tampered with before any diff or merge. A repository that already
+  requires per-worktree Git configuration cannot start a write run. The
+  channel's test command runs in the same sandbox with a
   stripped environment.
   System tools and a small set of `/etc` files are read-only. Toolchain roots
   in home `PATH` entries named `bin`, `shims` or `scripts`, the Go module cache and paths in
@@ -80,13 +85,21 @@ design assumes that agents make mistakes and that messages from outside
   state directory: `config.toml`, `AGENTS.md`, `packages/`, `plugins/`,
   `skills/` and `rules/` are read-only binds of your `~/.codex` (or
   `$CODEX_HOME`), `auth.json` is the one writable host file, and everything
-  else (sqlite databases, `tmp`, sessions) is fresh. Your Codex history,
-  sessions and databases are not visible in the sandbox. Existing OAuth credential files are writable
-  exceptions for Claude (`.claude/.credentials.json`), Codex
-  (`.codex/auth.json`), Grok (`.grok/auth.json`), Kimi
-  (`.kimi-code/credentials/*` and `.kimi-code/oauth/*`), Agy
-  (`.gemini/antigravity-cli/antigravity-oauth-token`) and OpenCode
-  (`.local/share/opencode/auth.json`). The rest of home,
+  else (sqlite databases, `tmp`, sessions) is fresh. The installed package
+  tree is also visible read-only at its original absolute path for Codex's
+  code-mode helper. Your Codex history, sessions and databases are not visible
+  in the sandbox. Inside bubblewrap,
+  Codex's own nested sandbox and approval prompts are disabled; bubblewrap
+  still limits its filesystem and network access. Kimi gets a private writable
+  home over `~/.kimi-code`, with config and tools read-only and its credential
+  and OAuth directories writable for token refresh. Agy has a private writable
+  `~/.gemini/antigravity-cli` state tree with read-only settings and a
+  writable OAuth token. OpenCode's database and logs use private XDG
+  data, while its existing auth file is bound there for refresh. Other host
+  credential exceptions are Claude's `.claude/.credentials.json`, Codex's
+  `.codex/auth.json`, Grok's `.grok/auth.json`, Agy's
+  `.gemini/antigravity-cli/antigravity-oauth-token` and OpenCode's
+  `.local/share/opencode/auth.json`. The rest of home,
   including `~/.ssh`, is hidden. SSH agent, desktop and DBus sockets are not
   bound. Network stays on by default so CLIs can reach their APIs; a lane
   turns it off with `sandbox_network = false`. Such a run gets no MCP config
@@ -96,8 +109,9 @@ design assumes that agents make mistakes and that messages from outside
   sandboxed, just without those limits. Run `faztudo doctor` to check
   bubblewrap, unprivileged user namespaces and systemd user scope availability.
 - **Honest limits.** The sandbox shares the host kernel, and the CLI still
-  runs as your user. It can change its worktree, shared git objects (a bad
-  object is only reachable through a ref, and refs are read-only), writable
+  runs as your user. It can change its worktree and shared git objects;
+  deleting or corrupting an existing object can damage the repository despite
+  read-only refs. It can also change writable
   credential exceptions and session state, and access the network
   when allowed. Repository content and the channel test command remain
   untrusted, but execute inside the sandbox. Disabling host-side git hooks
@@ -106,20 +120,22 @@ design assumes that agents make mistakes and that messages from outside
   token through the process environment, not argv. It does not
   isolate the CLI from another process running as your user. In `auto` mode,
   a missing or unusable sandbox falls back to an unsandboxed run with one
-  channel notice. Set `runs.sandbox = "required"` to refuse that run instead.
+  channel notice. Set `runs.sandbox = "required"` or `lane.sandbox = "required"`
+  to refuse that run instead. A lane's `sandbox` setting takes precedence over
+  the global setting for write runs.
   Read runs are unchanged. A sandboxed run ends if its parent exits; recovery
   records an interrupted run rather than resuming its process.
-- **Which CLIs run in the sandbox.** Claude: verified live (a write run that
-  runs `go test` and `npm test`). Codex: given its own `CODEX_HOME` after it
-  failed to start on the read-only `~/.codex`; the mount layout is tested with
-  bubblewrap, and the model-backed run is the same live test. Grok, Kimi, Agy
-  and OpenCode have their config read-only with per-run session directories;
-  they keep more mutable state (databases, logs, caches) than that covers, so
-  one may fail to start in the sandbox. None of those four has been checked
-  live. Check one with `FAZTUDO_LIVE_SANDBOX=1 go test ./internal/runner -run
-  TestLiveSandboxedCLIWriteRun -v`. The check at the start of every run only
-  proves the CLI answers `--version` inside the mounts, so a CLI that fails
-  later fails that run; it does not fall back to an unsandboxed one.
+- **Which CLIs run in the sandbox.** Claude, Codex, Grok and Agy passed the
+  live write-run fixture, including `go test` and `npm test`. Kimi started
+  inside its private home and reached its provider, but its five-hour usage
+  limit stopped the run before it could answer. OpenCode wrote its database
+  and logs in private XDG data but timed out waiting for its selected provider;
+  a short prompt also timed out outside bubblewrap. Its model-backed write run
+  remains unverified. Recheck with `FAZTUDO_LIVE_SANDBOX=1 go test
+  ./internal/runner -run TestLiveSandboxedCLIWriteRun -v`. The check at the
+  start of every run only proves the CLI answers `--version` inside the mounts;
+  a CLI that fails later fails that run without falling back to an unsandboxed
+  one.
 - **Stripped environment.** Agent processes start with known secret variables
   removed from their environment.
 - **Local token limit.** An unsandboxed agent runs as you and can read the

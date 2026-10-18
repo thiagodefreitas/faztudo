@@ -42,6 +42,9 @@ func TestCodexGetsAPerRunHome(t *testing.T) {
 	if hasBind(args, "--ro-bind", codex) || hasBind(args, "--bind", codex) {
 		t.Fatalf("the host codex directory is mounted as is: %v", args)
 	}
+	if !hasBind(args, "--ro-bind", filepath.Join(codex, "packages")) {
+		t.Fatal("Codex code-mode host at its absolute package path is unavailable")
+	}
 	for _, rel := range []string{"config.toml", "AGENTS.md", "packages", "plugins", "skills"} {
 		if !hasMount(args, "--ro-bind", filepath.Join(codex, rel), filepath.Join(run, rel)) {
 			t.Fatalf("%s is not a read-only bind: %v", rel, args)
@@ -105,7 +108,7 @@ func TestCodexStateIsFreshAndOnlyAuthIsShared(t *testing.T) {
 		"test ! -e history.jsonl && test ! -e state_5.sqlite || exit 14; " +
 		"mkdir -p sessions tmp && echo db > state_5.sqlite && echo s > sessions/a.jsonl || exit 15; " +
 		"echo refreshed > auth.json || exit 16; " +
-		"test ! -e \"$HOME/.codex\" || exit 17"
+		"test ! -e \"$HOME/.codex/history.jsonl\" && test ! -e \"$HOME/.codex/state_5.sqlite\" || exit 17"
 	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", script)...)
 	cmd.Dir = worktree
 	if out, err := cmd.CombinedOutput(); err != nil {

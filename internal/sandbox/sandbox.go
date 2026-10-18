@@ -95,6 +95,17 @@ func Build(o Options) ([]string, error) {
 		if err := bind(objects, "--bind"); err != nil {
 			return nil, err
 		}
+		infoPath := filepath.Join(objects, "info")
+		if err := os.MkdirAll(infoPath, 0755); err != nil {
+			return nil, err
+		}
+		info, err := os.Lstat(infoPath)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("unsafe git objects/info path: %s", infoPath)
+		}
+		if err := bind(infoPath, "--ro-bind"); err != nil {
+			return nil, err
+		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -119,11 +130,16 @@ func Build(o Options) ([]string, error) {
 	// Codex runs with a CODEX_HOME of its own (see codexHome); the generic
 	// per-CLI lists name no paths for it.
 	perRunCodex := o.CLI == "codex" && o.StateDir != ""
+	perRunKimi := o.CLI == "kimi" && o.StateDir != ""
+	perRunAgy := o.CLI == "agy" && o.StateDir != ""
 	listed := o.CLI
-	if perRunCodex {
+	if perRunCodex || perRunKimi || perRunAgy {
 		listed = ""
 	}
 	paths := authPaths(o.Home, listed)
+	if perRunAgy {
+		paths = append(paths, filepath.Join(o.Home, ".gemini", "GEMINI.md"), filepath.Join(o.Home, ".gemini", "config"))
+	}
 	paths = append(paths, o.ReadOnly...)
 	for _, path := range paths {
 		info, err := os.Lstat(path)
@@ -142,7 +158,11 @@ func Build(o Options) ([]string, error) {
 	}
 	// OAuth refresh is the narrow exception to read-only credentials. These
 	// files contain credentials, not executable CLI settings or hooks.
-	for _, path := range refreshPaths(o.Home, listed) {
+	refreshCLI := listed
+	if o.CLI == "opencode" && o.StateDir != "" {
+		refreshCLI = ""
+	}
+	for _, path := range refreshPaths(o.Home, refreshCLI) {
 		info, err := os.Lstat(path)
 		if os.IsNotExist(err) {
 			continue
@@ -162,11 +182,74 @@ func Build(o Options) ([]string, error) {
 			return nil, err
 		}
 		if perRunCodex {
+			// Codex's code-mode helper still uses its installed absolute path,
+			// even with CODEX_HOME redirected. Expose only that package tree.
+			original := o.CodexHome
+			if original == "" {
+				original = filepath.Join(o.Home, ".codex")
+			}
+			packages := filepath.Join(original, "packages")
+			if info, err := os.Lstat(packages); err == nil {
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					return nil, fmt.Errorf("unsafe codex packages: %s", packages)
+				}
+				if err := bind(packages, "--ro-bind"); err != nil {
+					return nil, err
+				}
+			} else if !os.IsNotExist(err) {
+				return nil, err
+			}
 			codexArgs, err := codexHome(o)
 			if err != nil {
 				return nil, err
 			}
 			args = append(args, codexArgs...)
+		}
+		if perRunKimi {
+			// Establish the home mount point before the private overlay.
+			if info, err := os.Lstat(filepath.Join(o.Home, ".kimi-code")); err == nil && info.IsDir() {
+				if err := bind(filepath.Join(o.Home, ".kimi-code"), "--ro-bind"); err != nil {
+					return nil, err
+				}
+			}
+			kimiArgs, err := kimiHome(o)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, kimiArgs...)
+		}
+		if perRunAgy {
+			original := filepath.Join(o.Home, ".gemini", "antigravity-cli")
+			if info, err := os.Lstat(original); err == nil && info.IsDir() {
+				if err := bind(original, "--ro-bind"); err != nil {
+					return nil, err
+				}
+			}
+			agyArgs, err := agyHome(o)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, agyArgs...)
+			projects := filepath.Join(o.Home, ".gemini", "config", "projects")
+			if info, err := os.Lstat(projects); err == nil {
+				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+					return nil, fmt.Errorf("unsafe agy projects path: %s", projects)
+				}
+				private := filepath.Join(o.StateDir, "agy-projects")
+				if err := os.MkdirAll(private, 0700); err != nil {
+					return nil, err
+				}
+				args = append(args, "--bind", private, projects)
+			} else if !os.IsNotExist(err) {
+				return nil, err
+			}
+		}
+		if o.CLI == "opencode" {
+			openCodeArgs, err := openCodeAuth(o)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, openCodeArgs...)
 		}
 		for _, rel := range sessionPaths(listed) {
 			target := filepath.Join(o.Home, rel)
@@ -288,6 +371,105 @@ func codexHome(o Options) ([]string, error) {
 		return nil, err
 	}
 	return args, nil
+}
+
+// Kimi has no separate home override. Overlay its home with private state and
+// rebind only settings, its executable and OAuth refresh paths from the host.
+func kimiHome(o Options) ([]string, error) {
+	return privateCLIHome(o, ".kimi-code", "kimi-home",
+		[]string{"config.toml", "device_id", "region", "tui.toml", "bin", "agents", "skills"},
+		[]string{"credentials", "oauth"})
+}
+
+func agyHome(o Options) ([]string, error) {
+	args, err := privateCLIHome(o, filepath.Join(".gemini", "antigravity-cli"), "agy-home",
+		[]string{"bin", "builtin", "settings.json", "keybindings.json", "installation_id", "knowledge"},
+		[]string{"antigravity-oauth-token"})
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range []string{"conversations", "brain", "annotations", "cache", "crashes", "implicit", "log", "presence", "scratch", "updater"} {
+		if err := os.MkdirAll(filepath.Join(o.StateDir, "agy-home", name), 0700); err != nil {
+			return nil, err
+		}
+	}
+	return args, nil
+}
+
+func privateCLIHome(o Options, rel, stateName string, readOnly, credentials []string) ([]string, error) {
+	source := filepath.Join(o.Home, rel)
+	if info, err := os.Lstat(source); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("unsafe CLI home: %s", source)
+	}
+	private := filepath.Join(o.StateDir, stateName)
+	if err := os.MkdirAll(private, 0700); err != nil {
+		return nil, err
+	}
+	args := []string{"--bind", private, source}
+	mount := func(name, mode string) error {
+		from := filepath.Join(source, name)
+		info, err := os.Lstat(from)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("unsafe CLI path: %s", from)
+		}
+		to := filepath.Join(private, name)
+		if info.IsDir() {
+			err = os.MkdirAll(to, 0700)
+		} else {
+			err = os.WriteFile(to, nil, 0600)
+		}
+		if err != nil {
+			return err
+		}
+		args = append(args, mode, from, filepath.Join(source, name))
+		return nil
+	}
+	for _, name := range readOnly {
+		if err := mount(name, "--ro-bind"); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range credentials {
+		if err := mount(name, "--bind"); err != nil {
+			return nil, err
+		}
+	}
+	return args, nil
+}
+
+// OpenCode honors XDG_DATA_HOME. Its sqlite database and logs live in the
+// run's XDG directory; the existing auth file alone can refresh on the host.
+func openCodeAuth(o Options) ([]string, error) {
+	from := filepath.Join(o.Home, ".local", "share", "opencode", "auth.json")
+	info, err := os.Lstat(from)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("unsafe opencode auth path: %s", from)
+	}
+	to := filepath.Join(o.StateDir, "xdg-data", "opencode", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(to, nil, 0600); err != nil {
+		return nil, err
+	}
+	return []string{"--bind", from, to}, nil
 }
 
 var branchPattern = regexp.MustCompile(`^fz/[A-Za-z0-9_-]+$`)

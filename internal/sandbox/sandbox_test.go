@@ -90,7 +90,7 @@ func TestGitMetadataIsReadOnly(t *testing.T) {
 	home := t.TempDir()
 	worktree := filepath.Join(t.TempDir(), "run")
 	git := filepath.Join(t.TempDir(), ".git")
-	for _, p := range []string{worktree, filepath.Join(git, "objects"), filepath.Join(git, "refs"), filepath.Join(git, "logs"), filepath.Join(git, "worktrees", "run")} {
+	for _, p := range []string{worktree, filepath.Join(git, "objects", "info"), filepath.Join(git, "refs"), filepath.Join(git, "logs"), filepath.Join(git, "worktrees", "run")} {
 		if err := os.MkdirAll(p, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -105,6 +105,9 @@ func TestGitMetadataIsReadOnly(t *testing.T) {
 	if !hasBind(args, "--bind", filepath.Join(git, "objects")) {
 		t.Fatal("missing writable git objects")
 	}
+	if !hasBind(args, "--ro-bind", filepath.Join(git, "objects", "info")) {
+		t.Fatal("objects/info is writable")
+	}
 	if !hasMount(args, "--bind", filepath.Join(git, "worktrees", "run"), filepath.Join(git, "worktrees", "run")) {
 		t.Fatal("missing writable git worktree admin")
 	}
@@ -112,6 +115,34 @@ func TestGitMetadataIsReadOnly(t *testing.T) {
 		if hasBind(args, "--bind", filepath.Join(git, p)) {
 			t.Fatalf("git %s is writable", p)
 		}
+	}
+}
+
+func TestSandboxObjectsInfoCannotBeChanged(t *testing.T) {
+	if err := Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	home, root := t.TempDir(), t.TempDir()
+	worktree, git := filepath.Join(root, "run"), filepath.Join(root, "git")
+	for _, p := range []string{worktree, filepath.Join(git, "objects", "info")} {
+		if err := os.MkdirAll(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "claude", Network: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "if echo bad > '" + filepath.Join(git, "objects", "info", "alternates") + "'; then exit 11; fi; echo object > '" + filepath.Join(git, "objects", "new-object") + "'"
+	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", script)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("sandbox objects: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(git, "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatalf("objects/info changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(git, "objects", "new-object")); err != nil {
+		t.Fatalf("object store not writable: %v", err)
 	}
 }
 
@@ -138,6 +169,150 @@ func TestToolchainAndRunStateMounts(t *testing.T) {
 	}
 	if hasBind(args, "--bind", home) {
 		t.Fatal("home writable")
+	}
+}
+
+func TestKimiHasPrivateWritableHome(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	worktree, git, state := filepath.Join(root, "run"), filepath.Join(root, "git"), filepath.Join(root, "state")
+	kimi := filepath.Join(home, ".kimi-code")
+	for _, p := range []string{worktree, git, state, filepath.Join(kimi, "bin"), filepath.Join(kimi, "credentials"), filepath.Join(kimi, "oauth")} {
+		if err := os.MkdirAll(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(kimi, "config.toml"), []byte("settings"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "kimi", StateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMount(args, "--bind", filepath.Join(state, "kimi-home"), kimi) {
+		t.Fatal("kimi state is not private")
+	}
+	if !hasMount(args, "--ro-bind", filepath.Join(kimi, "config.toml"), filepath.Join(kimi, "config.toml")) {
+		t.Fatal("kimi config is writable")
+	}
+	if !hasMount(args, "--bind", filepath.Join(kimi, "credentials"), filepath.Join(kimi, "credentials")) {
+		t.Fatal("kimi cannot refresh credentials")
+	}
+}
+
+func TestOpenCodeAuthFollowsPrivateXDGData(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	worktree, git, state := filepath.Join(root, "run"), filepath.Join(root, "git"), filepath.Join(root, "state")
+	auth := filepath.Join(home, ".local", "share", "opencode", "auth.json")
+	for _, p := range []string{worktree, git, state, filepath.Dir(auth)} {
+		if err := os.MkdirAll(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(auth, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "opencode", StateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMount(args, "--bind", auth, filepath.Join(state, "xdg-data", "opencode", "auth.json")) {
+		t.Fatal("OpenCode auth missing from private XDG data")
+	}
+	if hasBind(args, "--bind", auth) {
+		t.Fatal("OpenCode auth also writable at its old path")
+	}
+}
+
+func TestKimiPrivateHomeMountsWork(t *testing.T) {
+	if err := Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	home, root := t.TempDir(), t.TempDir()
+	worktree, git, state := filepath.Join(root, "run"), filepath.Join(root, "git"), filepath.Join(root, "state")
+	kimi := filepath.Join(home, ".kimi-code")
+	for _, p := range []string{worktree, git, state, filepath.Join(kimi, "bin"), filepath.Join(kimi, "credentials")} {
+		if err := os.MkdirAll(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(kimi, "config.toml"), []byte("original\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kimi, "credentials", "token"), []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "kimi", StateDir: state, Network: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "test \"$(cat " + filepath.Join(kimi, "config.toml") + ")\" = original || exit 11; " +
+		"if echo bad > " + filepath.Join(kimi, "config.toml") + "; then exit 12; fi; " +
+		"echo new > " + filepath.Join(kimi, "credentials", "token") + "; " +
+		"echo private > " + filepath.Join(kimi, "session.db")
+	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", script)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("kimi mount script: %v: %s", err, out)
+	}
+	if got, err := os.ReadFile(filepath.Join(kimi, "config.toml")); err != nil || string(got) != "original\n" {
+		t.Fatalf("host config changed: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(kimi, "credentials", "token")); err != nil || string(got) != "new\n" {
+		t.Fatalf("OAuth refresh failed: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(kimi, "session.db")); !os.IsNotExist(err) {
+		t.Fatalf("host session changed: %v", err)
+	}
+}
+
+func TestAgyPrivateHomeMountsWork(t *testing.T) {
+	if err := Probe(context.Background(), true); err != nil {
+		t.Skipf("bubblewrap unavailable: %v", err)
+	}
+	home, root := t.TempDir(), t.TempDir()
+	worktree, git, state := filepath.Join(root, "run"), filepath.Join(root, "git"), filepath.Join(root, "state")
+	agy := filepath.Join(home, ".gemini", "antigravity-cli")
+	projects := filepath.Join(home, ".gemini", "config", "projects")
+	for _, p := range []string{worktree, git, state, filepath.Join(agy, "bin"), filepath.Join(agy, "conversations"), projects} {
+		if err := os.MkdirAll(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(agy, "settings.json"), []byte("original\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agy, "antigravity-oauth-token"), []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "agy", StateDir: state, Network: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMount(args, "--bind", filepath.Join(state, "agy-home"), agy) {
+		t.Fatal("agy home not private")
+	}
+	if !hasMount(args, "--bind", filepath.Join(state, "agy-projects"), projects) {
+		t.Fatal("agy project config not private")
+	}
+	script := "test \"$(cat " + filepath.Join(agy, "settings.json") + ")\" = original || exit 11; " +
+		"if echo bad > " + filepath.Join(agy, "settings.json") + "; then exit 12; fi; " +
+		"echo new > " + filepath.Join(agy, "antigravity-oauth-token") + "; " +
+		"echo private > " + filepath.Join(agy, "conversations", "new.json") + "; " +
+		"echo private > " + filepath.Join(projects, "new.json")
+	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", script)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("agy mount script: %v: %s", err, out)
+	}
+	if got, err := os.ReadFile(filepath.Join(agy, "settings.json")); err != nil || string(got) != "original\n" {
+		t.Fatalf("host settings changed: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(agy, "antigravity-oauth-token")); err != nil || string(got) != "new\n" {
+		t.Fatalf("OAuth refresh failed: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(agy, "conversations", "new.json")); !os.IsNotExist(err) {
+		t.Fatalf("host conversation changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projects, "new.json")); !os.IsNotExist(err) {
+		t.Fatalf("host project config changed: %v", err)
 	}
 }
 

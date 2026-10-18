@@ -37,14 +37,16 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 	if err != nil {
 		return fallback(err)
 	}
-	git := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-C", worktree, "rev-parse", "--git-common-dir")
+	// Resolve the common directory through the trusted checkout. The run's
+	// worktree .git file is agent-controlled once an unsandboxed fallback starts.
+	git := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-C", opts.Repo, "rev-parse", "--git-common-dir")
 	out, err := git.Output()
 	if err != nil {
 		return fallback(fmt.Errorf("find git directory: %w", err))
 	}
 	gitDir := strings.TrimSpace(string(out))
 	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktree, gitDir)
+		gitDir = filepath.Join(opts.Repo, gitDir)
 	}
 	gitDir, err = filepath.Abs(gitDir)
 	if err != nil {
@@ -65,6 +67,7 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		"GOCACHE":          filepath.Join(opts.runStateDir, "go-cache"),
 		"NPM_CONFIG_CACHE": filepath.Join(opts.runStateDir, "npm-cache"),
 		"XDG_CACHE_HOME":   filepath.Join(opts.runStateDir, "xdg-cache"),
+		"XDG_DATA_HOME":    filepath.Join(opts.runStateDir, "xdg-data"),
 		"XDG_STATE_HOME":   filepath.Join(opts.runStateDir, "xdg-state"),
 	}
 	for _, path := range cache {
@@ -102,6 +105,7 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 	if err := sandbox.Check(ctx, args, program, stripEnv(os.Environ(), nil, cache, envKeys(cache)...)); err != nil {
 		return fallback(err)
 	}
+	command.Args = outerSandboxArgs(cli, command.Args)
 	opts.sandboxArgs = append([]string(nil), args...)
 	opts.sandboxEnv = cache
 	if command.EnvAdd == nil {
@@ -124,6 +128,27 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		command.Path, _ = exec.LookPath("systemd-run")
 	}
 	return command, nil
+}
+
+// Codex's own workspace sandbox needs user namespaces and conflicts with the
+// outer bubblewrap mount plan. Only after bubblewrap passes Probe and Check do
+// we disable that nested sandbox; bubblewrap still encloses the whole CLI.
+func outerSandboxArgs(cli string, args []string) []string {
+	if cli != "codex" {
+		return args
+	}
+	out := make([]string, 0, len(args)+1)
+	for i := 0; i < len(args); i++ {
+		if (args[i] == "-s" || args[i] == "--sandbox") && i+1 < len(args) {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	if len(out) > 0 && out[0] == "exec" {
+		out = append(out[:1], append([]string{"--dangerously-bypass-approvals-and-sandbox"}, out[1:]...)...)
+	}
+	return out
 }
 
 func envKeys(values map[string]string) []string {

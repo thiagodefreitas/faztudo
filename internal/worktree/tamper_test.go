@@ -121,3 +121,140 @@ func TestIntactWorktreePassesTheTamperCheck(t *testing.T) {
 		t.Fatal("retargeted .git passed the check")
 	}
 }
+
+func TestHostGitDisablesConfiguredWorktreeFilters(t *testing.T) {
+	root := t.TempDir()
+	repo, _ := repoWithCommit(t, root)
+	m := Manager{BaseDir: filepath.Join(root, "worktrees")}
+	w, err := m.Create(context.Background(), repo, "filtered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "filter-ran")
+	gitTest(t, repo, "config", "filter.pwn.clean", "touch "+marker+"; cat")
+	gitTest(t, repo, "config", "filter.pwn.smudge", "touch "+marker+"; cat")
+	gitTest(t, repo, "config", "filter.pwn.process", "touch "+marker+"; cat")
+	for name, body := range map[string]string{".gitattributes": "* filter=pwn\n", "added.txt": "hello\n", "tracked.txt": "new\n"} {
+		if err := os.WriteFile(filepath.Join(w.Path, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := m.Diff(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("diff ran configured filter: %v", err)
+	}
+	if err := m.Stage(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("stage ran configured filter: %v", err)
+	}
+	if err := m.Commit(context.Background(), w, "change"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("host ran configured filter: %v", err)
+	}
+}
+
+func TestHostGitDisablesGlobalAndSystemFilters(t *testing.T) {
+	for _, source := range []string{"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"} {
+		t.Run(source, func(t *testing.T) {
+			root := t.TempDir()
+			repo, _ := repoWithCommit(t, root)
+			m := Manager{BaseDir: filepath.Join(root, "worktrees")}
+			w, err := m.Create(context.Background(), repo, "filtered")
+			if err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(root, "filter-ran")
+			configPath := filepath.Join(root, "git-config")
+			if err := os.WriteFile(configPath, []byte("[filter \"pwn\"]\nclean = touch "+marker+"; cat\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(source, configPath)
+			if err := os.WriteFile(filepath.Join(w.Path, ".gitattributes"), []byte("* filter=pwn\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(w.Path, "added.txt"), []byte("hello\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := m.Diff(context.Background(), w); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("host ran %s filter: %v", source, err)
+			}
+		})
+	}
+}
+
+func TestWorktreeCreationDoesNotRunConfiguredSmudgeFilter(t *testing.T) {
+	root := t.TempDir()
+	repo, _ := repoWithCommit(t, root)
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("tracked.txt filter=pwn\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", ".gitattributes")
+	gitTest(t, repo, "commit", "-q", "-m", "attributes")
+	marker := filepath.Join(root, "smudge-ran")
+	gitTest(t, repo, "config", "filter.pwn.smudge", "touch "+marker+"; cat")
+	m := Manager{BaseDir: filepath.Join(root, "worktrees")}
+	if _, err := m.Create(context.Background(), repo, "smudge"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("worktree creation ran smudge filter: %v", err)
+	}
+}
+
+func TestHostMergeDoesNotRunConfiguredSmudgeFilter(t *testing.T) {
+	root := t.TempDir()
+	repo, _ := repoWithCommit(t, root)
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("tracked.txt filter=pwn\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", ".gitattributes")
+	gitTest(t, repo, "commit", "-q", "-m", "attributes")
+	main := gitTest(t, repo, "branch", "--show-current")
+	gitTest(t, repo, "checkout", "-q", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("new\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitTest(t, repo, "add", "tracked.txt")
+	gitTest(t, repo, "commit", "-q", "-m", "feature")
+	gitTest(t, repo, "checkout", "-q", main)
+	marker := filepath.Join(root, "merge-smudge-ran")
+	gitTest(t, repo, "config", "filter.pwn.smudge", "touch "+marker+"; cat")
+	if _, err := HostGit(context.Background(), repo, "merge", "--ff-only", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("host merge ran smudge filter: %v", err)
+	}
+}
+
+func TestWorktreeAdminTamperingRejected(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{{"commondir", "../../fake\n"}, {"gitdir", "/tmp/fake/.git\n"}, {"config.worktree", "[filter \"pwn\"]\nclean = touch /tmp/pwned\n"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			repo, _ := repoWithCommit(t, root)
+			m := Manager{BaseDir: filepath.Join(root, "worktrees")}
+			w, err := m.Create(context.Background(), repo, "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(w.Admin, tc.name), []byte(tc.body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Check(w); err == nil || !strings.Contains(err.Error(), "tampered") {
+				t.Fatalf("accepted changed %s: %v", tc.name, err)
+			}
+			if _, _, err := m.Diff(context.Background(), w); err == nil || !strings.Contains(err.Error(), "tampered") {
+				t.Fatalf("diff accepted %s: %v", tc.name, err)
+			}
+		})
+	}
+}

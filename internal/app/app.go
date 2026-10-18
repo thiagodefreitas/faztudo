@@ -608,6 +608,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		return fmt.Errorf("no adapter for %s", lane.CLI)
 	}
 	network := true
+	sandboxMode := laneSandboxMode(a.Config.Runs.Sandbox, a.Config.Lanes.Lane, lane.ID)
 	if mode == domain.RunWrite {
 		for _, configured := range a.Config.Lanes.Lane {
 			if configured.ID == lane.ID && configured.SandboxNetwork != nil {
@@ -616,7 +617,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			}
 		}
 	}
-	mcpReachable := mcpReachableForRun(mode, a.Config.Runs.Sandbox, network)
+	mcpReachable := mcpReachableForRun(mode, sandboxMode, network)
 	runStarted := time.Now().UTC()
 	a.Registry.RecordRun(lane.ID)
 	prompt, err := a.prompt(ctx, m)
@@ -675,7 +676,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		if mode == domain.RunWrite {
 			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{
 				Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand,
-				SandboxMode: a.Config.Runs.Sandbox, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly,
+				SandboxMode: sandboxMode, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly,
 				OnFallback: func(message string) { a.notice(ctx, channel.ID, "warn", message) },
 			})
 		} else {
@@ -773,6 +774,15 @@ func (a *App) recordRunUsage(ctx context.Context, run *domain.Run, cli, dir stri
 
 func mcpReachableForRun(mode domain.RunMode, sandboxMode string, network bool) bool {
 	return mode != domain.RunWrite || sandboxMode == "off" || network
+}
+
+func laneSandboxMode(global string, configured []config.Lane, id string) string {
+	for _, lane := range configured {
+		if lane.ID == id && lane.Sandbox != "" {
+			return lane.Sandbox
+		}
+	}
+	return global
 }
 
 func mcpCLI(name string) bool {
@@ -1272,14 +1282,5 @@ var (
 )
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-C", dir}
-	if len(args) > 0 && args[0] == "diff" {
-		args = append([]string{"diff", "--no-ext-diff", "--no-textconv"}, args[1:]...)
-	}
-	cmd := exec.CommandContext(ctx, "git", append(flags, args...)...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return worktree.HostGit(ctx, dir, args...)
 }

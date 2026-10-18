@@ -62,7 +62,7 @@ func (f refsFixture) run(t *testing.T, script string) {
 }
 
 func TestSharedRefsAreReadOnlyExceptTheRunBranch(t *testing.T) {
-	if err := Probe(context.Background(), true); err != nil {
+	if err := Probe(context.Background(), false); err != nil {
 		t.Skipf("bubblewrap unavailable: %v", err)
 	}
 	f := newRefsFixture(t)

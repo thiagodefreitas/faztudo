@@ -77,24 +77,32 @@ helper listener on `lan.ca_listen` (default `0.0.0.0:7459`). Run
 With `auto`, write runs use bubblewrap on Linux when it and unprivileged user
 namespaces work. It posts one channel notice per run if it falls back to the
 old process mode. `required` refuses the run instead; `off` disables the
-sandbox. Existing config files that explicitly say `sandbox = "off"` keep
+sandbox. Each `[[lane]]` may set `sandbox = "auto"`, `"off"` or `"required"`
+to override `[runs].sandbox` for write runs on that lane. Without it, the
+global value applies. Existing config files that explicitly say `sandbox = "off"` keep
 that setting until you change it. The worktree is writable, except its `.git`
 file. The shared git directory is read-only except its objects. The run's
 worktree metadata is a writable copy, isolated from host Git, and the run's
 own branch `fz/<run id>` is a private writable copy of its ref and reflog, so
 the agent can commit but cannot move `main` or any other ref.
-The channel test command runs inside the same sandbox. Host-side git commands
+`objects/info` stays read-only while Git can write new objects. The channel
+test command runs inside the same sandbox. Host-side git commands
 on an agent worktree name its real git directory and work tree explicitly, and
-disable fsmonitor, hooks, external diffs, textconv and global attributes; a
-worktree whose `.git` file was changed fails the run as tampered with.
+disable fsmonitor, hooks, external diffs, textconv and configured Git filters.
+Worktree creation and the final merge disable those filters too;
+a changed `.git` file or worktree admin pointer fails the run as tampered with.
 Codex runs with a `CODEX_HOME` under the run's state directory: your
 `config.toml`, `AGENTS.md`, `packages/`, `plugins/`, `skills/` and `rules/` are
-read-only, `auth.json` is writable, and the rest is fresh. Other CLI config and
-sign-in paths are read-only except existing OAuth credential files: Claude's
-`.claude/.credentials.json`, Codex's `.codex/auth.json`, Grok's
-`.grok/auth.json`, Kimi's `.kimi-code/credentials/*` and
-`.kimi-code/oauth/*`, Agy's `.gemini/antigravity-cli/antigravity-oauth-token`,
-and OpenCode's `.local/share/opencode/auth.json`. Session state and build
+read-only, `auth.json` is writable, and the rest is fresh. Codex's own sandbox
+is disabled only inside bubblewrap. Kimi and Agy use private writable homes
+with read-only settings and tools. Kimi's credential and OAuth directories are
+writable for token refresh; Agy's project config has private writable state.
+OpenCode uses private XDG data for its database and logs, with its auth file
+bound for refresh. Other CLI config and sign-in paths are read-only except
+existing OAuth credential files: Claude's `.claude/.credentials.json`,
+Codex's `.codex/auth.json`, Grok's `.grok/auth.json`, Agy's
+`.gemini/antigravity-cli/antigravity-oauth-token`, and OpenCode's
+`.local/share/opencode/auth.json`. Session state and build
 caches are writable in a private per-run directory. Home `PATH` entries named
 `bin`, `shims` or `scripts` and the Go module cache are read-only. Go and Node
 version directories are mounted as roots. Add absolute paths to
@@ -123,6 +131,7 @@ cost_class = "premium"
 capacity = 1
 conserve_at = 80
 sandbox_network = true       # default; false hides the network in write runs
+# sandbox = "required"      # optional override of [runs].sandbox for this lane
 # plan_limit_tokens = 1000000 # optional manual limit for token-based usage (claude, grok)
 # usd_per_million_input = 2.0  # optional estimate, not billing; also prices each run's tokens
 # usd_per_million_output = 8.0
