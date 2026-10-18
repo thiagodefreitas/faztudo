@@ -1,22 +1,50 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { Billboard, Edges, Html, OrbitControls } from "@react-three/drei"
-import { Canvas, useFrame } from "@react-three/fiber"
+import { Canvas } from "@react-three/fiber"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { Group, MeshStandardMaterial } from "three"
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib"
 import { api } from "../../../api/client"
 import type { ThemeChoice } from "../../../lib/theme"
+import { onStreamEvent } from "../../../state/bus"
 import { useOpenDirect } from "../../../state/direct"
 import { qk } from "../../../state/keys"
 import { replaceById } from "../../../state/merge"
-import type { Approval, Channel, Department, Member } from "../../../types"
+import type { Approval, Channel, Department, Lane, Member, Run, StreamEvent } from "../../../types"
 import { AgentAvatar } from "../../agent-avatar"
 import { WorkspaceNav } from "../../sidebar"
 import { avatarState } from "../avatar"
-import { DESK_H, DESK_W, layoutRoom, type PlacedZone, type Rect, type Seat } from "../layout"
+import { layoutRoom, type PlacedZone, type Rect, type Seat } from "../layout"
 import { DeskDetailPanel, Legend, OfficeViewToggle } from "../scene"
 import { type DeskInfo, useOfficeDesks, useReducedMotion } from "../state"
+import {
+  createAnimationQueue,
+  enqueueOfficeEvent,
+  type HandoffAnimation,
+  type MergeAnimation,
+  type OfficeAnimationQueue,
+  pruneAnimationQueue,
+} from "./animations"
+import {
+  CharacterSeatGroup,
+  InstancedDeskFurniture,
+  LaneMeterStrip3D,
+  TaskBoard3D,
+  WalkingHandoffActor3D,
+} from "./character-mesh"
+import {
+  deriveCharacterIdentity,
+  deriveCharacterPose,
+  deriveLaneMeterBars,
+  deriveTaskBoardNotes,
+  deriveTimeOfDayLighting,
+  type LaneMeterBar,
+  type TaskBoardNote,
+  type TimeOfDayLighting,
+} from "./poses"
+
+export * from "./animations"
+export * from "./poses"
 
 // Convert 2D SVG layout units (1200 wide) into compact 3D world meters.
 export const SCALE_3D = 0.02
@@ -117,200 +145,6 @@ export function toWorld(rect: Rect, roomWidth: number, roomHeight: number): { x:
   return { x, z, w, d }
 }
 
-function DeskMesh({
-  seat,
-  roomWidth,
-  roomHeight,
-  palette,
-  selected,
-  reducedMotion,
-  onSelect,
-}: {
-  seat: Seat
-  roomWidth: number
-  roomHeight: number
-  palette: ScenePalette
-  selected: boolean
-  reducedMotion: boolean
-  onSelect: (desk: DeskInfo) => void
-}) {
-  const { desk, scale, facing = "down" } = seat
-  const { member, state, outOfQuota, palette: hue } = desk
-  const dimmed = state === "out_of_quota" || outOfQuota
-  const working = state === "working"
-  const faceUp = facing === "up"
-  const label = member.display_name.trim() || member.handle
-
-  const world = toWorld(
-    { x: seat.x, y: seat.y, w: DESK_W * scale, h: DESK_H * scale },
-    roomWidth,
-    roomHeight,
-  )
-
-  const agentGroupRef = useRef<Group>(null)
-  const screenMatRef = useRef<MeshStandardMaterial>(null)
-
-  useFrame(({ clock }) => {
-    if (reducedMotion) return
-    const t = clock.getElapsedTime()
-    if (agentGroupRef.current) {
-      if (working) {
-        agentGroupRef.current.position.y = Math.sin(t * 4) * 0.04
-        agentGroupRef.current.rotation.y = 0
-      } else if (state === "idle" && !dimmed) {
-        agentGroupRef.current.position.y = 0
-        agentGroupRef.current.rotation.y = Math.sin(t * 0.9 + seat.x * 0.05) * 0.18
-      } else {
-        agentGroupRef.current.position.y = 0
-        agentGroupRef.current.rotation.y = 0
-      }
-    }
-    if (screenMatRef.current && working) {
-      screenMatRef.current.emissiveIntensity = 1.05 + Math.sin(t * 3.2) * 0.35
-    }
-  })
-
-  const monitorColor =
-    state === "working"
-      ? hue.accent
-      : state === "waiting_approval"
-        ? palette.warn
-        : state === "failed"
-          ? palette.danger
-          : palette.code
-  const monitorEmissive =
-    state === "working"
-      ? hue.accent
-      : state === "waiting_approval"
-        ? palette.warn
-        : state === "failed"
-          ? palette.danger
-          : palette.line
-  const monitorIntensity =
-    state === "working" ? 1.15 : state === "waiting_approval" || state === "failed" ? 0.5 : 0.12
-
-  const deskW = 1.68 * scale
-  const deskD = 0.92 * scale
-  const baseH = 0.36 * scale
-  const topH = 0.06 * scale
-  const deskH = baseH + topH
-  const zSign = faceUp ? -1 : 1
-  const deskOffsetZ = 0.14 * scale * zSign
-  const agentOffsetZ = -0.44 * scale * zSign
-
-  return (
-    <group
-      position={[world.x, 0, world.z]}
-      onClick={(event) => {
-        event.stopPropagation()
-        onSelect(desk)
-      }}
-    >
-      {/* Selection ring on the floor */}
-      {selected && (
-        <mesh position={[0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[deskW + 0.5, deskD + 0.95]} />
-          <meshBasicMaterial color={palette.accent} transparent opacity={0.28} />
-        </mesh>
-      )}
-
-      {/* Desk base in brand line color */}
-      <mesh position={[0, baseH / 2, deskOffsetZ]} castShadow receiveShadow>
-        <boxGeometry args={[deskW * 0.94, baseH, deskD * 0.9]} />
-        <meshStandardMaterial
-          color={palette.line}
-          roughness={0.8}
-          transparent={dimmed}
-          opacity={dimmed ? 0.5 : 1}
-        />
-      </mesh>
-
-      {/* Visible desk top surface in brand surface color with crisp line edge */}
-      <mesh position={[0, baseH + topH / 2, deskOffsetZ]} castShadow receiveShadow>
-        <boxGeometry args={[deskW, topH, deskD]} />
-        <meshStandardMaterial
-          color={palette.surface}
-          roughness={0.55}
-          transparent={dimmed}
-          opacity={dimmed ? 0.55 : 1}
-        />
-        <Edges threshold={15} color={palette.line} />
-      </mesh>
-
-      {/* Hue accent strip along the desk top edge */}
-      <mesh position={[0, deskH + 0.008, deskOffsetZ - 0.34 * scale * zSign]}>
-        <boxGeometry args={[deskW * 0.82, 0.024, 0.065]} />
-        <meshBasicMaterial color={desk.isDirector ? palette.accent : hue.accent} />
-      </mesh>
-
-      {/* Monitor stand and bezel */}
-      <mesh position={[0, deskH + 0.06 * scale, deskOffsetZ]} castShadow>
-        <boxGeometry args={[0.14 * scale, 0.12 * scale, 0.1 * scale]} />
-        <meshStandardMaterial color={palette.line} roughness={0.75} />
-      </mesh>
-      <mesh position={[0, deskH + 0.25 * scale, deskOffsetZ]} castShadow>
-        <boxGeometry args={[0.66 * scale, 0.38 * scale, 0.06 * scale]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.6} />
-        <Edges threshold={15} color={palette.line} />
-      </mesh>
-      {/* Monitor screen face */}
-      <mesh position={[0, deskH + 0.25 * scale, deskOffsetZ - 0.033 * scale * zSign]}>
-        <planeGeometry args={[0.58 * scale, 0.3 * scale]} />
-        <meshStandardMaterial
-          ref={screenMatRef}
-          color={monitorColor}
-          emissive={monitorEmissive}
-          emissiveIntensity={monitorIntensity}
-          roughness={0.25}
-        />
-      </mesh>
-      {/* Soft glow halo on desk surface when working */}
-      {working && (
-        <mesh position={[0, deskH + 0.004, deskOffsetZ - 0.14 * scale * zSign]} rotation={[-Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.52 * scale, 24]} />
-          <meshBasicMaterial color={hue.accent} transparent opacity={0.28} />
-        </mesh>
-      )}
-
-      {/* Agent rounded capsule clearly visible above the desk edge + billboarded AgentAvatar and name */}
-      <group ref={agentGroupRef} position={[0, 0, agentOffsetZ]}>
-        <mesh position={[0, 0.56 * scale, 0]} castShadow receiveShadow>
-          <capsuleGeometry args={[0.25 * scale, 0.44 * scale, 6, 12]} />
-          <meshStandardMaterial
-            color={desk.isDirector ? palette.accent : hue.accent}
-            roughness={0.45}
-            transparent={dimmed}
-            opacity={dimmed ? 0.5 : 1}
-          />
-        </mesh>
-
-        <Billboard position={[0, 1.32 * scale, 0]}>
-          <Html center transform={false} zIndexRange={[10, 0]}>
-            <button
-              type="button"
-              data-testid={`desk3d-${member.id}`}
-              aria-label={`${label}, ${desk.stateLabel}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onSelect(desk)
-              }}
-              className="group flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg px-1.5 py-0.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              <AgentAvatar member={member} size={28} state={avatarState(state)} decorative />
-              <span
-                data-testid={`desk3d-label-${member.id}`}
-                className="max-w-28 truncate rounded border border-line bg-surface/95 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-ink shadow-xs"
-              >
-                {label}
-              </span>
-            </button>
-          </Html>
-        </Billboard>
-      </group>
-    </group>
-  )
-}
-
 function RoomWorld({
   width,
   height,
@@ -318,11 +152,19 @@ function RoomWorld({
   rug,
   seats,
   palette,
+  theme,
+  lighting,
+  taskNotes,
+  laneBars,
+  handoffs,
+  mergesByMember,
+  now,
   selectedId,
   reducedMotion,
   cameraPose,
   resetSignal,
   onSelect,
+  onOpenApproval,
 }: {
   width: number
   height: number
@@ -330,19 +172,43 @@ function RoomWorld({
   rug: Rect | null
   seats: Seat[]
   palette: ScenePalette
+  theme: ThemeChoice
+  lighting: TimeOfDayLighting
+  taskNotes: TaskBoardNote[]
+  laneBars: LaneMeterBar[]
+  handoffs: HandoffAnimation[]
+  mergesByMember: ReadonlyMap<string, MergeAnimation>
+  now: number
   selectedId: string | null
   reducedMotion: boolean
   cameraPose: CameraPose
   resetSignal: number
   onSelect: (desk: DeskInfo) => void
+  onOpenApproval?: ((desk: DeskInfo) => void) | undefined
 }) {
   const floorW = width * SCALE_3D
   const floorD = height * SCALE_3D
-  const wallH = 1.15
+  const wallH = 1.25
   const wallT = 0.22
   const gridSize = Math.ceil(Math.max(floorW, floorD))
   const gridDivisions = Math.max(12, Math.round(gridSize / 0.8))
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
+
+  const seatsByMember = useMemo(() => {
+    const map = new Map<string, Seat>()
+    for (const seat of seats) {
+      map.set(seat.desk.member.id, seat)
+    }
+    return map
+  }, [seats])
+
+  const walkingIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const h of handoffs) {
+      ids.add(h.fromMemberId)
+    }
+    return ids
+  }, [handoffs])
 
   useEffect(() => {
     if (resetSignal === 0) return
@@ -355,15 +221,15 @@ function RoomWorld({
 
   return (
     <group>
-      {/* Soft hemisphere light plus one key light with gentle shadows */}
+      {/* Day/twilight/night hemisphere light plus key light with gentle shadows */}
       <hemisphereLight
-        args={[palette.hemiSky, palette.hemiGround, palette.hemiIntensity]}
+        args={[lighting.hemiSky, lighting.hemiGround, lighting.hemiIntensity]}
         position={[0, 18, 0]}
       />
       <directionalLight
-        color={palette.keyLight}
-        position={[7, 15, 9]}
-        intensity={palette.keyIntensity}
+        color={lighting.keyLight}
+        position={lighting.sunPosition}
+        intensity={lighting.keyIntensity}
         castShadow
         shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0004}
@@ -391,16 +257,22 @@ function RoomWorld({
         <meshStandardMaterial color={palette.sidebar} roughness={0.85} />
         <Edges threshold={15} color={palette.line} />
       </mesh>
-      <mesh position={[-floorW / 2 + wallT / 2, wallH * 0.35, 0]} receiveShadow>
-        <boxGeometry args={[wallT, wallH * 0.7, floorD]} />
+      <mesh position={[-floorW / 2 + wallT / 2, wallH * 0.45, 0]} receiveShadow>
+        <boxGeometry args={[wallT, wallH * 0.9, floorD]} />
         <meshStandardMaterial color={palette.sidebar} roughness={0.85} />
         <Edges threshold={15} color={palette.line} />
       </mesh>
-      <mesh position={[floorW / 2 - wallT / 2, wallH * 0.35, 0]} receiveShadow>
-        <boxGeometry args={[wallT, wallH * 0.7, floorD]} />
+      <mesh position={[floorW / 2 - wallT / 2, wallH * 0.45, 0]} receiveShadow>
+        <boxGeometry args={[wallT, wallH * 0.9, floorD]} />
         <meshStandardMaterial color={palette.sidebar} roughness={0.85} />
         <Edges threshold={15} color={palette.line} />
       </mesh>
+
+      {/* Back wall task board with one sticky note per active run */}
+      <TaskBoard3D notes={taskNotes} floorD={floorD} wallT={wallT} palette={palette} />
+
+      {/* Side wall lane meter strip with one bar per lane in its health color */}
+      <LaneMeterStrip3D bars={laneBars} floorW={floorW} wallT={wallT} palette={palette} />
 
       {/* Zone mats, pod mats, and faint department/pod floor labels */}
       {zones.map((zone) => {
@@ -459,19 +331,47 @@ function RoomWorld({
         )
       })()}
 
-      {/* Desks and agents */}
+      {/* Instanced static desk, monitor, and office chair geometry */}
+      <InstancedDeskFurniture seats={seats} roomWidth={width} roomHeight={height} palette={palette} />
+
+      {/* Characters seated at desks */}
       {seats.map((seat) => (
-        <DeskMesh
+        <CharacterSeatGroup
           key={seat.desk.member.id}
           seat={seat}
           roomWidth={width}
           roomHeight={height}
           palette={palette}
+          theme={theme}
           selected={selectedId === seat.desk.member.id}
           reducedMotion={reducedMotion}
+          walkingOut={walkingIds.has(seat.desk.member.id)}
+          mergeAnim={mergesByMember.get(seat.desk.member.id) ?? null}
+          now={now}
           onSelect={onSelect}
+          onOpenApproval={onOpenApproval}
         />
       ))}
+
+      {/* Active handoff walkers carrying paper to target desk and back */}
+      {handoffs.map((anim) => {
+        const fromSeat = seatsByMember.get(anim.fromMemberId)
+        const toSeat = seatsByMember.get(anim.toMemberId)
+        if (!fromSeat || !toSeat) return null
+        return (
+          <WalkingHandoffActor3D
+            key={anim.id}
+            anim={anim}
+            fromSeat={fromSeat}
+            toSeat={toSeat}
+            roomWidth={width}
+            roomHeight={height}
+            theme={theme}
+            now={now}
+            reducedMotion={reducedMotion}
+          />
+        )
+      })}
 
       <OrbitControls
         ref={controlsRef}
@@ -492,12 +392,16 @@ function RoomWorld({
 export interface Office3DSceneProps {
   desks: DeskInfo[]
   channels: Channel[]
+  lanes?: readonly Lane[] | undefined
+  runs?: readonly Run[] | undefined
   departments?: readonly Department[]
+  events?: readonly StreamEvent[] | undefined
   now: number
   theme?: ThemeChoice
   reducedMotion?: boolean
   webglAvailable?: boolean
   initialSelectedId?: string
+  onOpenApproval?: (desk: DeskInfo) => void
   onResolveApproval?: (approval: Approval, option: string, commitMessage?: string) => void | Promise<unknown>
   onMessage?: (member: Member) => void
 }
@@ -505,24 +409,93 @@ export interface Office3DSceneProps {
 export function Office3DScene({
   desks,
   channels,
+  lanes: lanesProp,
+  runs: runsProp,
   departments,
+  events: eventsProp,
   now,
   theme = "light",
   reducedMotion = false,
   webglAvailable: webglProp,
   initialSelectedId,
+  onOpenApproval,
   onResolveApproval,
   onMessage,
 }: Office3DSceneProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
   const [resetSignal, setResetSignal] = useState(0)
+  const [streamQueue, setStreamQueue] = useState<OfficeAnimationQueue>(() => createAnimationQueue())
+
+  const members = useMemo(() => desks.map((d) => d.member), [desks])
+  const runs = useMemo(
+    () =>
+      runsProp ??
+      desks
+        .map((d) => d.currentRun)
+        .filter((r): r is Run => r !== null),
+    [runsProp, desks],
+  )
+  const lanes = useMemo(() => {
+    if (lanesProp && lanesProp.length > 0) return [...lanesProp]
+    const seen = new Set<string>()
+    const list: Lane[] = []
+    for (const desk of desks) {
+      if (desk.lane && !seen.has(desk.lane.id)) {
+        seen.add(desk.lane.id)
+        list.push(desk.lane)
+      }
+    }
+    return list
+  }, [lanesProp, desks])
+
+  const latestContextRef = useRef({ members, runs, now })
+  useEffect(() => {
+    latestContextRef.current = { members, runs, now }
+  }, [members, runs, now])
+
+  useEffect(() => {
+    return onStreamEvent((event) => {
+      const ctx = latestContextRef.current
+      setStreamQueue((prev) => enqueueOfficeEvent(prev, event, { ...ctx, now: Date.now() }))
+    })
+  }, [])
+
+  const activeQueue = useMemo(() => {
+    let q = pruneAnimationQueue(streamQueue, now)
+    if (eventsProp) {
+      for (const ev of eventsProp) {
+        q = enqueueOfficeEvent(q, ev, { members, runs, now })
+      }
+    }
+    return pruneAnimationQueue(q, now)
+  }, [streamQueue, eventsProp, members, runs, now])
+
+  const handoffs = useMemo(
+    () => activeQueue.items.filter((item): item is HandoffAnimation => item.kind === "handoff"),
+    [activeQueue],
+  )
+  const mergesByMember = useMemo(() => {
+    const map = new Map<string, MergeAnimation>()
+    for (const item of activeQueue.items) {
+      if (item.kind === "merge") {
+        map.set(item.memberId, item)
+      }
+    }
+    return map
+  }, [activeQueue])
+
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
   const webglAvailable = useMemo(() => webglProp ?? isWebGLAvailable(), [webglProp])
   const room = useMemo(() => layoutRoom(desks, { departments }), [desks, departments])
   const cameraPose = useMemo(() => defaultCameraPose(room.width, room.height), [room.width, room.height])
   const palette = SCENE_PALETTES[theme]
-  const workingCount = desks.filter((desk) => desk.state === "working").length
-  const frameloop = reducedMotion || workingCount === 0 ? "demand" : "always"
+  const lighting = useMemo(() => deriveTimeOfDayLighting(now, theme), [now, theme])
+  const taskNotes = useMemo(() => deriveTaskBoardNotes(desks), [desks])
+  const laneBars = useMemo(() => deriveLaneMeterBars(lanes, theme), [lanes, theme])
+
+  const hasAnimatedCharacters = desks.some((desk) => deriveCharacterPose(desk, { reducedMotion }).animated)
+  const frameloop =
+    reducedMotion || (!hasAnimatedCharacters && activeQueue.items.length === 0) ? "demand" : "always"
 
   useEffect(() => {
     if (!selectedDesk) return
@@ -540,6 +513,11 @@ export function Office3DScene({
     setSelectedId((prev) => (prev === desk.member.id ? prev : desk.member.id))
   }
 
+  function handleApproval(desk: DeskInfo) {
+    setSelectedId(desk.member.id)
+    onOpenApproval?.(desk)
+  }
+
   function handleResetView() {
     setResetSignal((count) => count + 1)
   }
@@ -552,6 +530,13 @@ export function Office3DScene({
             <span className="inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
             <span className="font-medium text-ink">3D studio floor</span>
             <span className="font-mono text-faint">{desks.length} desks</span>
+            <span
+              data-testid="office3d-day-period"
+              data-period={lighting.period}
+              className="rounded bg-sidebar px-1.5 py-0.5 font-mono text-[10px] text-muted"
+            >
+              {lighting.period}
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-muted">Drag to orbit, scroll to zoom, click a desk for details</span>
@@ -565,6 +550,66 @@ export function Office3DScene({
             </button>
           </div>
         </div>
+
+        {/* Wall summary strip for task board notes, lane meter bars, and active event animations */}
+        {(taskNotes.length > 0 || laneBars.length > 0 || handoffs.length > 0) && (
+          <div className="flex flex-wrap items-center gap-3 text-[11px]">
+            {taskNotes.length > 0 && (
+              <div
+                data-testid="office3d-task-board"
+                aria-label="Back wall task board"
+                className="flex flex-wrap items-center gap-1.5"
+              >
+                <span className="font-mono text-[10px] uppercase tracking-wider text-faint">Tasks</span>
+                {taskNotes.map((note) => (
+                  <span
+                    key={note.id}
+                    data-testid={`task-note3d-${note.id}`}
+                    data-hue={note.hue}
+                    style={{ borderColor: note.accent, backgroundColor: note.bg }}
+                    className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-sans text-[11px] text-ink"
+                  >
+                    <span className="font-mono font-semibold">@{note.handle}</span>
+                    <span className="max-w-44 truncate">{note.title}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {laneBars.length > 0 && (
+              <div
+                data-testid="office3d-lane-strip"
+                aria-label="Side wall lane meter"
+                className="flex flex-wrap items-center gap-1.5"
+              >
+                <span className="font-mono text-[10px] uppercase tracking-wider text-faint">Lanes</span>
+                {laneBars.map((bar) => (
+                  <span
+                    key={bar.id}
+                    data-testid={`lane-bar3d-${bar.id}`}
+                    data-health={bar.health}
+                    className="inline-flex items-center gap-1 rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted"
+                  >
+                    <span
+                      style={{ backgroundColor: bar.color }}
+                      className="inline-block h-2 w-2 rounded-xs"
+                      aria-hidden="true"
+                    />
+                    <span>{bar.id}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {handoffs.map((anim) => (
+              <span
+                key={anim.id}
+                data-testid={`handoff-walk3d-${anim.id}`}
+                className="inline-flex items-center gap-1 rounded bg-accent-soft px-2 py-0.5 font-mono text-[10px] text-accent"
+              >
+                @{anim.fromHandle} -&gt; @{anim.toHandle}
+              </span>
+            ))}
+          </div>
+        )}
 
         {desks.length === 0 ? (
           <p className="py-12 text-center text-[13px] text-muted">No workspace members yet.</p>
@@ -590,23 +635,59 @@ export function Office3DScene({
               </div>
             )}
             <div className="mt-1 flex flex-wrap justify-center gap-2">
-              {room.seats.map((seat) => (
-                <button
-                  key={seat.desk.member.id}
-                  type="button"
-                  data-testid={`fallback-desk-${seat.desk.member.id}`}
-                  onClick={() => handleSelect(seat.desk)}
-                  className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[12px] text-ink hover:bg-sidebar"
-                >
-                  <AgentAvatar
-                    member={seat.desk.member}
-                    size={20}
-                    state={avatarState(seat.desk.state)}
-                    decorative
-                  />
-                  <span>{seat.desk.member.display_name || seat.desk.member.handle}</span>
-                </button>
-              ))}
+              {room.seats.map((seat) => {
+                const identity = deriveCharacterIdentity(seat.desk, theme)
+                const pose = deriveCharacterPose(seat.desk, { reducedMotion })
+                const mergeAnim = mergesByMember.get(seat.desk.member.id)
+                return (
+                  <div key={seat.desk.member.id} className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      data-testid={`fallback-desk-${seat.desk.member.id}`}
+                      data-pose={pose.pose}
+                      data-cli={identity.cli}
+                      data-role-pin={identity.rolePin ?? undefined}
+                      data-quota-note={pose.quotaNote ?? undefined}
+                      onClick={() => handleSelect(seat.desk)}
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1 text-[12px] text-ink hover:bg-sidebar"
+                    >
+                      <AgentAvatar
+                        member={seat.desk.member}
+                        size={20}
+                        state={avatarState(seat.desk.state)}
+                        decorative
+                      />
+                      <span>{seat.desk.member.display_name || seat.desk.member.handle}</span>
+                      {pose.quotaNote && (
+                        <span
+                          data-testid={`quota-note3d-${seat.desk.member.id}`}
+                          className="font-mono text-[10px] text-danger"
+                        >
+                          ({pose.quotaNote})
+                        </span>
+                      )}
+                      {mergeAnim && (
+                        <span
+                          data-testid={`merge-check3d-${seat.desk.member.id}`}
+                          className="font-mono text-[11px] font-bold text-ok"
+                        >
+                          merged
+                        </span>
+                      )}
+                    </button>
+                    {pose.showApprovalCard && (
+                      <button
+                        type="button"
+                        data-testid={`approval-card3d-${seat.desk.member.id}`}
+                        onClick={() => handleApproval(seat.desk)}
+                        className="min-h-8 rounded-md border border-warn bg-warn-soft px-2 py-1 text-[11px] font-medium text-warn hover:bg-surface"
+                      >
+                        Approval waiting
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         ) : (
@@ -629,11 +710,19 @@ export function Office3DScene({
                 rug={room.rug}
                 seats={room.seats}
                 palette={palette}
+                theme={theme}
+                lighting={lighting}
+                taskNotes={taskNotes}
+                laneBars={laneBars}
+                handoffs={handoffs}
+                mergesByMember={mergesByMember}
+                now={now}
                 selectedId={selectedDesk?.member.id ?? null}
                 reducedMotion={reducedMotion}
                 cameraPose={cameraPose}
                 resetSignal={resetSignal}
                 onSelect={handleSelect}
+                onOpenApproval={handleApproval}
               />
             </Canvas>
             <Legend />
@@ -648,6 +737,7 @@ export function Office3DScene({
           now={now}
           reducedMotion={reducedMotion}
           onClose={() => setSelectedId(null)}
+          onOpenApproval={onOpenApproval}
           onResolveApproval={onResolveApproval}
           onMessage={onMessage}
         />
@@ -657,7 +747,7 @@ export function Office3DScene({
 }
 
 export function Office3DPage() {
-  const { desks, channels, departments, isPending, now, theme } = useOfficeDesks()
+  const { desks, channels, lanes, runs, departments, isPending, now, theme } = useOfficeDesks()
   const reducedMotion = useReducedMotion()
   const openDirect = useOpenDirect()
   const qc = useQueryClient()
@@ -698,6 +788,8 @@ export function Office3DPage() {
         <Office3DScene
           desks={desks}
           channels={channels}
+          lanes={lanes}
+          runs={runs}
           departments={departments}
           now={now}
           theme={theme}

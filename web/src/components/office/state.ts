@@ -10,6 +10,7 @@ import { useApprovals, useChannels, useLanes, useLastMessages, useMembers, useOr
 import type { Approval, Channel, Department, ID, Lane, Member, Message, Org, Run, RunState } from "../../types"
 
 export const FAIL_WINDOW_MS = 10 * 60 * 1000
+export const DONE_WINDOW_MS = 10 * 60 * 1000
 
 export type DeskState = "idle" | "working" | "queued" | "waiting_approval" | "failed" | "out_of_quota"
 
@@ -66,6 +67,8 @@ export interface DeskInfo {
   lane: Lane | undefined
   laneId: string | undefined
   outOfQuota: boolean
+  resetTimeText?: string | undefined
+  doneRecently?: boolean | undefined
   currentRun: Run | null
   runTitle: string | undefined
   pendingApproval: Approval | null
@@ -196,6 +199,28 @@ function isFailedWithinWindow(run: Run, now: number): boolean {
   return now - at <= FAIL_WINDOW_MS
 }
 
+export function isDoneWithinWindow(run: Run | null | undefined, now: number): boolean {
+  if (!run || run.state !== "done") return false
+  const raw = run.ended_at ?? run.started_at
+  if (!raw) return true
+  const at = Date.parse(raw)
+  if (Number.isNaN(at)) return true
+  return now - at >= 0 && now - at <= DONE_WINDOW_MS
+}
+
+export function formatResetTime(resetsAt: string | undefined): string | undefined {
+  if (!resetsAt) return undefined
+  const trimmed = resetsAt.trim()
+  if (!trimmed) return undefined
+  if (/^\d{1,2}:\d{2}(?:\s?[AP]M)?$/i.test(trimmed)) return trimmed
+  const isoMatch = trimmed.match(/T(\d{2}:\d{2})/)
+  if (isoMatch?.[1]) return isoMatch[1]
+  const at = Date.parse(trimmed)
+  if (Number.isNaN(at)) return undefined
+  const date = new Date(at)
+  return `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`
+}
+
 export function formatRunTitle(body: string | undefined, maxWords = 6, maxChars = 38): string | undefined {
   if (!body) return undefined
   // Strip leading @mention or /lane <cli/name> override so the task words come first.
@@ -250,6 +275,8 @@ export function deriveMemberDesk({
   const primaryLaneId = activeRun?.lane_id ?? member.agent?.lanes[0] ?? lastTerminalRun?.lane_id
   const lane = primaryLaneId ? lanes.find((item) => item.id === primaryLaneId) : undefined
   const outOfQuota = lane?.health === "exhausted" || lane?.health === "unavailable"
+  const resetWindow = lane?.windows.find((w) => Boolean(w.resets_at))
+  const resetTimeText = formatResetTime(resetWindow?.resets_at)
 
   let state: DeskState = "idle"
   if (pendingApproval !== null || waitingRun !== null) {
@@ -263,6 +290,9 @@ export function deriveMemberDesk({
   } else if (outOfQuota) {
     state = "out_of_quota"
   }
+
+  const busyFor = state === "idle" ? laneBorrower(member, runs, members) : null
+  const doneRecently = state === "idle" && busyFor === null && isDoneWithinWindow(lastTerminalRun, now)
 
   const hue = resolveMemberHue(member, lane)
   const palette = AGENT_HUES[theme][hue]
@@ -284,12 +314,14 @@ export function deriveMemberDesk({
     lane,
     laneId: lane?.id ?? primaryLaneId,
     outOfQuota,
+    resetTimeText,
+    doneRecently,
     currentRun,
     runTitle,
     pendingApproval,
     approvalChannelId,
     elapsedText,
-    busyFor: state === "idle" ? laneBorrower(member, runs, members) : null,
+    busyFor,
   }
 }
 
@@ -336,6 +368,9 @@ export function useReducedMotion(): boolean {
 export function useOfficeDesks(): {
   desks: DeskInfo[]
   channels: Channel[]
+  lanes: Lane[]
+  runs: Run[]
+  members: Member[]
   org: Org | undefined
   departments: Department[]
   isPending: boolean
@@ -353,6 +388,8 @@ export function useOfficeDesks(): {
   const { choice: theme } = useTheme()
 
   const runList = runs.data ?? []
+  const laneList = lanes.data ?? []
+  const memberList = members.data ?? []
   const activeChannelIds = [
     ...new Set(
       runList
@@ -377,10 +414,10 @@ export function useOfficeDesks(): {
   }
 
   const desks = deriveOfficeDesks({
-    members: members.data ?? [],
+    members: memberList,
     runs: runList,
     approvals: approvals.data ?? [],
-    lanes: lanes.data ?? [],
+    lanes: laneList,
     triggerMessages,
     now,
     theme,
@@ -389,9 +426,12 @@ export function useOfficeDesks(): {
   return {
     desks,
     channels: channels.data ?? [],
+    lanes: laneList,
+    runs: runList,
+    members: memberList,
     org: org.data,
     departments: org.data?.departments ?? [],
-    isPending: members.isPending && (members.data ?? []).length === 0,
+    isPending: members.isPending && memberList.length === 0,
     now,
     theme,
   }

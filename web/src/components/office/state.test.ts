@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest"
 import type { Approval, Department, Lane, Member, Run } from "../../types"
 import { layoutRoom } from "./layout"
-import { deriveMemberDesk, deriveOfficeDesks, FAIL_WINDOW_MS, formatRunTitle, laneBorrower, resolveMemberHue } from "./state"
+import {
+  deriveMemberDesk,
+  deriveOfficeDesks,
+  DONE_WINDOW_MS,
+  FAIL_WINDOW_MS,
+  formatResetTime,
+  formatRunTitle,
+  laneBorrower,
+  resolveMemberHue,
+} from "./state"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
 
@@ -289,5 +298,51 @@ describe("layoutRoom", () => {
 
     const directorSeat = room.seats.find((seat) => seat.desk.isDirector)
     expect(directorSeat?.facing).toBe("up")
+  })
+
+  it("derives doneRecently when the last run finished within DONE_WINDOW_MS and extracts resetTimeText", () => {
+    const recentDone = makeRun({
+      id: "run-done",
+      state: "done",
+      ended_at: new Date(now - 2 * 60_000).toISOString(),
+    })
+    const deskDone = deriveMemberDesk({
+      member: claudeAgent,
+      runs: [recentDone],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+    })
+    expect(deskDone.state).toBe("idle")
+    expect(deskDone.doneRecently).toBe(true)
+
+    const staleDone = makeRun({
+      id: "run-stale-done",
+      state: "done",
+      ended_at: new Date(now - DONE_WINDOW_MS - 10_000).toISOString(),
+    })
+    const deskStale = deriveMemberDesk({
+      member: claudeAgent,
+      runs: [staleDone],
+      approvals: [],
+      lanes: [healthyLane],
+      now,
+    })
+    expect(deskStale.doneRecently).toBe(false)
+
+    const laneWithReset: Lane = {
+      ...exhaustedLane,
+      windows: [{ name: "5h", used_pct: 100, source: "error", resets_at: "2026-10-18T14:30:00.000Z" }],
+    }
+    const quotaDesk = deriveMemberDesk({
+      member: codexAgent,
+      runs: [],
+      approvals: [],
+      lanes: [laneWithReset],
+      now,
+    })
+    expect(quotaDesk.state).toBe("out_of_quota")
+    expect(quotaDesk.resetTimeText).toBe("14:30")
+    expect(formatResetTime("16:45")).toBe("16:45")
   })
 })
