@@ -190,8 +190,14 @@ func TestLocalBearerFailuresAreLimited(t *testing.T) {
 	if got := localRequest(a, "GET", "/api/v1/me", "", "wrong", nil).Code; got != 429 {
 		t.Fatalf("sixth auth status = %d", got)
 	}
-	if a.LocalLimiter.Attempt("127.0.0.1:12345") {
-		t.Fatal("failed bearer attempts did not fill rate limit")
+	// Another loopback address shares the same allowance.
+	req := httptest.NewRequest("GET", "http://127.0.0.1:7457/api/v1/me", nil)
+	req.RemoteAddr = "127.0.0.2:40000"
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec := httptest.NewRecorder()
+	a.ServeHTTP(rec, req)
+	if rec.Code != 429 {
+		t.Fatalf("another loopback address was not limited: %d", rec.Code)
 	}
 }
 
