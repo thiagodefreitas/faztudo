@@ -189,12 +189,19 @@ export function reduce(state: Snapshot, event: StreamEvent): Snapshot {
     case "approval.requested":
     case "approval.resolved": {
       if (!isApproval(event.payload)) return next
-      next.approvals = upsert(state.approvals, event.payload)
+      const incoming = event.payload
+      const known = state.approvals.find((item) => item.id === incoming.id)
+      // Resolved is final: a replayed request must not reopen it.
+      if (known && known.state !== "pending" && incoming.state === "pending") return next
+      next.approvals = upsert(state.approvals, incoming)
       return next
     }
     case "lane.updated": {
       if (!isLane(event.payload)) return next
-      next.lanes = upsert(state.lanes, event.payload)
+      const incoming = event.payload
+      // The API list decides which lanes exist; events only refine them.
+      if (!state.lanes.some((item) => item.id === incoming.id)) return next
+      next.lanes = upsert(state.lanes, incoming)
       return next
     }
     case "lane.switched": {

@@ -104,6 +104,26 @@ describe("reduce", () => {
     expect(state.approvals[0]?.state).toBe("resolved")
   })
 
+  it("never lets approval.requested undo a resolved approval", () => {
+    const approval = {
+      id: "01DRZ3NDEKTSV4RRFFQ69G5DD9", run_id: runId, channel_id: channelId,
+      requested_by: "01ARZ3NDEKTSV4RRFFQ69G5AA2", title: "Merge", detail: "",
+      options: [{ key: "merge", label: "Merge", style: "primary" as const }],
+      state: "resolved" as const,
+    }
+    const start = { ...emptySnapshot(), approvals: [approval] }
+    const state = reduce(start, envelope(5, "approval.requested", { ...approval, state: "pending" }))
+    expect(state.approvals[0]?.state).toBe("resolved")
+  })
+
+  it("updates only lanes the API already listed", () => {
+    const lane = { id: "agy/default", cli: "agy", cost_class: "free", capacity: 1, running: 0, health: "ok", windows: [], runs_today: 0 }
+    const empty = reduce(emptySnapshot(), envelope(1, "lane.updated", lane))
+    expect(empty.lanes).toEqual([])
+    const known = reduce({ ...emptySnapshot(), lanes: [lane as never] }, envelope(2, "lane.updated", { ...lane, running: 1 }))
+    expect(known.lanes[0]?.running).toBe(1)
+  })
+
   it("records a lane switch as a notice and moves the run", () => {
     let state = reduce(emptySnapshot(), envelope(1, "run.created", run))
     state = reduce(

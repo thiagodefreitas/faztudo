@@ -2,7 +2,7 @@ import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstac
 import { api } from "../api/client"
 import type { Approval, Attachment, Message, NoticeItem, OutputLine, ThreadPage } from "../types"
 import { qk } from "./keys"
-import { mergeById } from "./merge"
+import { mergeApprovals, mergeById, mergeLanes } from "./merge"
 import { sortMessages } from "./reduce"
 
 export function useMe() {
@@ -29,7 +29,7 @@ export function useLanes() {
   const qc = useQueryClient()
   return useQuery({
     queryKey: qk.lanes,
-    queryFn: async () => mergeById(await api.lanes(), qc.getQueryData(qk.lanes) ?? []),
+    queryFn: async () => mergeLanes(await api.lanes(), qc.getQueryData(qk.lanes) ?? []),
   })
 }
 
@@ -73,7 +73,7 @@ export function useApprovals() {
   const qc = useQueryClient()
   return useQuery({
     queryKey: qk.approvals,
-    queryFn: async () => mergeById(await api.approvals(), qc.getQueryData(qk.approvals) ?? []),
+    queryFn: async () => mergeApprovals(await api.approvals(), qc.getQueryData(qk.approvals) ?? []),
   })
 }
 
