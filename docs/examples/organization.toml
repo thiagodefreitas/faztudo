@@ -1,0 +1,253 @@
+# Example organization configuration for faztudo (lanes.toml)
+#
+# This file is a complete, commented starting point based on the maintainer's
+# organization layout. It defines:
+#   - Six agent lanes (claude, codex, grok, kimi, agy, opencode)
+#   - A Chief of Staff to triage unaddressed messages in #general
+#   - Four departments: Engineering, Quality, Product, and Operations
+#   - Dedicated specialist personas for architecture, code, testing, reviews,
+#     security, documentation, research, and releases
+#   - Department leads with a Claude or Codex lane first (required for the
+#     delegate MCP tool)
+#   - One project (faztudo) with four assigned departments, the four-channel
+#     pattern (dev, review, docs, release), and raw CLI specialists
+#   - A daily debrief routine, switched off by default
+#
+# Copy this file to ~/.config/faztudo/lanes.toml, or adapt the sections you need.
+
+# =============================================================================
+# Lanes
+# =============================================================================
+# A lane pairs an agent CLI on your machine with a model and capacity.
+# Remove or adjust lanes to match the CLIs installed on your system.
+
+[[lane]]
+id = "claude/default"
+cli = "claude"
+cost_class = "premium"
+capacity = 1
+
+[[lane]]
+id = "codex/default"
+cli = "codex"
+cost_class = "standard"
+capacity = 1
+
+[[lane]]
+id = "grok/default"
+cli = "grok"
+cost_class = "standard"
+capacity = 1
+
+[[lane]]
+id = "kimi/default"
+cli = "kimi"
+cost_class = "cheap"
+capacity = 1
+
+[[lane]]
+id = "agy/default"
+cli = "agy"
+cost_class = "standard"
+capacity = 1
+
+[[lane]]
+id = "opencode/default"
+cli = "opencode"
+cost_class = "standard"
+capacity = 1
+
+# =============================================================================
+# Personas
+# =============================================================================
+# Each persona has a handle, a display name, a role, a description used by leads
+# and the Chief of Staff for routing, standing instructions, a mode (read or write),
+# and a prioritized lane chain.
+#
+# Leads must list a claude or codex lane first because delegation uses the
+# faztudo MCP delegate tool, which requires an MCP-capable CLI.
+
+# Chief of Staff: receives unaddressed messages in #general and routes them.
+# Also serves as the lead for the Product department.
+[[persona]]
+handle = "chief"
+display_name = "Chief of Staff"
+role = "Routes requests and leads Product"
+description = "Reads unaddressed messages in general channels, determines the owning department or specialist, and delegates the work. Leads the Product team."
+instructions = "Route each unaddressed request to one specialist or lead using the delegate tool. State who was selected and why in one short line."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+chief_of_staff = true
+channels = ["general"]
+
+# Engineering Lead: plans technical work and delegates to engineering specialists.
+[[persona]]
+handle = "techlead"
+display_name = "Tech Lead"
+role = "Leads Engineering and coordinates technical work"
+description = "Coordinates engineering tasks, plans system implementations, and breaks larger requests into specialist tasks."
+instructions = "Break complex technical requests into focused tasks. Delegate to specialists with clear requirements and scope."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+
+# Engineering: Architect
+[[persona]]
+handle = "architect"
+display_name = "Architect"
+role = "Plans system design and interfaces"
+description = "Designs system architecture, plans schema or interface changes, and evaluates technical tradeoffs before code is written."
+instructions = "State what will change and why before code is written. Keep designs concrete and concise."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+
+# Engineering: Coder
+[[persona]]
+handle = "coder"
+display_name = "Coder"
+role = "Implements code changes"
+description = "Writes and modifies backend and application code in the repository, keeping diffs small and focused."
+instructions = "Keep diffs small and focused. Run the test command before finishing."
+mode = "write"
+lanes = ["codex/default", "claude/default", "kimi/default", "agy/default", "opencode/default"]
+
+# Engineering: Frontend
+[[persona]]
+handle = "frontend"
+display_name = "Frontend"
+role = "Builds user interfaces and web layouts"
+description = "Builds user interface components, styles, and client-side interactions with clean HTML, CSS, and TypeScript."
+instructions = "Follow existing UI conventions and design tokens. Keep markup accessible and responsive."
+mode = "write"
+lanes = ["codex/default", "claude/default", "agy/default"]
+
+# Engineering & Quality: Tester (member of both Engineering and Quality)
+[[persona]]
+handle = "tester"
+display_name = "Tester"
+role = "Writes and runs automated tests"
+description = "Writes automated tests, reproduces bug reports with failing tests, and checks test suite coverage."
+instructions = "Write the smallest test that fails without the change. Report the exact test command and output."
+mode = "write"
+lanes = ["codex/default", "claude/default", "grok/default"]
+
+# Quality Lead: Reviewer
+[[persona]]
+handle = "reviewer"
+display_name = "Reviewer"
+role = "Reviews diffs, plans, and leads Quality"
+description = "Reviews code diffs and plans for correctness, test coverage, and clarity. Leads the Quality department."
+instructions = "Review for correctness first, then tests, then clarity. Cite exact file names and line numbers."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+
+# Quality: Security
+[[persona]]
+handle = "security"
+display_name = "Security"
+role = "Audits code and dependencies for security flaws"
+description = "Audits pull requests, dependencies, and configurations for vulnerabilities, unsafe inputs, and secret leaks."
+instructions = "Look for injection, authorization flaws, secret leaks, and missing input or bounds checks."
+mode = "read"
+lanes = ["claude/default", "codex/default"]
+
+# Product: Writer
+[[persona]]
+handle = "writer"
+display_name = "Writer"
+role = "Writes documentation and guides"
+description = "Writes and updates user documentation, guides, release notes, and README text in plain language."
+instructions = "Write in plain words. Check every claim against the code."
+mode = "write"
+lanes = ["claude/default", "codex/default", "grok/default"]
+
+# Product: Researcher
+[[persona]]
+handle = "researcher"
+display_name = "Researcher"
+role = "Researches tools, libraries, and technical background"
+description = "Investigates libraries, tools, protocols, and technical background questions."
+instructions = "Provide factual findings with sources and clear tradeoffs. Avoid speculative claims."
+mode = "read"
+lanes = ["claude/default", "codex/default", "grok/default"]
+
+# Operations Lead: Release
+[[persona]]
+handle = "release"
+display_name = "Release"
+role = "Prepares release artifacts and leads Operations"
+description = "Prepares release packages, verifies builds and checksums, manages release checklists, and leads Operations."
+instructions = "Verify builds, packaging, and checksums. Keep release steps reproducible and recorded."
+mode = "write"
+lanes = ["claude/default", "codex/default", "opencode/default"]
+
+# =============================================================================
+# Departments
+# =============================================================================
+# A department is a named team with a lead and member specialists.
+# Mentioning @<department> in chat routes to its lead.
+#
+# Department channels:
+# In the web app, create team channels for department discussions:
+#   - engineering
+#   - quality
+#   - product
+#   - operations
+# Channels not listed under a project allow any agent to run.
+
+[[department]]
+handle = "engineering"
+display_name = "Engineering"
+lead = "techlead"
+members = ["architect", "coder", "frontend", "tester"]
+
+[[department]]
+handle = "quality"
+display_name = "Quality"
+lead = "reviewer"
+members = ["tester", "security"]
+
+[[department]]
+handle = "product"
+display_name = "Product"
+lead = "chief"
+members = ["writer", "researcher"]
+
+[[department]]
+handle = "operations"
+display_name = "Operations"
+lead = "release"
+members = ["release"]
+
+# =============================================================================
+# Projects
+# =============================================================================
+# A project binds channels and a repository path to assigned departments and
+# specialists. Only assigned agents may run in its channels.
+#
+# Listing the raw CLI names in specialists allows direct mentions such as
+# @claude or @codex to continue working in project channels.
+
+[[project]]
+handle = "faztudo"
+name = "Faztudo"
+repo_path = "~/code/myproject"
+lead = "techlead"
+channels = ["faztudo-dev", "faztudo-review", "faztudo-docs", "faztudo-release"]
+departments = ["engineering", "quality", "product", "operations"]
+specialists = ["claude", "codex", "grok", "kimi", "agy", "opencode"]
+
+# =============================================================================
+# Routines
+# =============================================================================
+# Routines execute prompts on a schedule or on a message trigger.
+# A daily debrief routine summarizes runs, approvals, and lane health on weekdays.
+# It is disabled by default until switched on in the app.
+
+[[routine]]
+handle = "daily-debrief"
+name = "Daily debrief"
+persona = "chief"
+channel = "general"
+schedule = "0 18 * * 1-5"
+template = "debrief"
+enabled = false

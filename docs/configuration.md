@@ -181,7 +181,9 @@ app.
 
 A department is a team of agents with a lead. A project groups channels and a
 repository, and has the departments and single specialists assigned to it.
-See [organization](organization.md) for the idea.
+See [organization](organization.md) for the idea, and
+[docs/examples/organization.toml](https://github.com/thiagodefreitas/faztudo/blob/main/docs/examples/organization.toml)
+for a worked example.
 
 ```toml
 [[department]]

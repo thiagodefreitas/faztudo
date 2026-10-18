@@ -130,6 +130,8 @@ posts what its team did, what is blocked, and what needs the Director.
 `faztudo init` offers starting organizations, for example "software team"
 (the Engineering department above) or "solo" (Chief of Staff plus a coder and
 a reviewer). A template is a TOML file, so people can share their own.
+See [docs/examples/organization.toml](https://github.com/thiagodefreitas/faztudo/blob/main/docs/examples/organization.toml)
+for a complete, commented configuration people can copy.
 
 ## Configuration sketch
 
@@ -173,3 +175,26 @@ instructions = "Review for correctness first, then tests, then clarity."
 lanes = ["claude/opus", "codex/default"]
 mode = "read"
 ```
+
+## Start a new project from an existing one
+
+To set up another project based on an existing configuration:
+
+1. **Copy the project block** in `lanes.toml`.
+2. **Change the project details**: change `handle`, `name`, `repo_path`, and `channels` to match the new repository.
+3. **Pick departments**: choose the departments to assign to the project, plus any direct specialists (such as raw CLI names so direct mentions work).
+4. **Create the channels in the app**: use **New team channel**, select kind **project**, set the repository path, and enter the test command.
+5. **Restart faztudo**: faztudo loads the updated project definition from `lanes.toml` on startup.
+6. **Check the project home**: open the project home (`/p/<handle>`) to verify the lead, assigned departments, channels, and team membership.
+
+### The four-channel pattern
+
+A standard project uses four dedicated channels:
+
+- `dev` (such as `myproject-dev`): for write runs, active coding, bug fixes, and feature implementations.
+- `review` (such as `myproject-review`): for read-only reviews of diffs and plans without touching files.
+- `docs` (such as `myproject-docs`): for documentation, user guides, and release notes.
+- `release` (such as `myproject-release`): for release checklists, packaging, version bumps, and deployment coordination.
+
+Separating channels by function keeps context focused and prevents write-run output and test noise from cluttering review or documentation discussions.
+
