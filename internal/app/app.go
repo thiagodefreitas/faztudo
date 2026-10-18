@@ -792,6 +792,7 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 		fmt.Fprintf(&b, "@%s: %s\n", handles[msg.AuthorID], body)
 	}
 	fmt.Fprintf(&b, "\nRequest:\n%s", m.Body)
+	b.WriteString("\n\nStart your answer with a summary of one or two plain sentences (no heading), then give the detail.")
 	return b.String(), nil
 }
 

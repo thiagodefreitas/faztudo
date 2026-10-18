@@ -214,6 +214,7 @@ export function reduce(state: Snapshot, event: StreamEvent): Snapshot {
           ts: event.ts,
           level: "info",
           text: `Lane switched from ${from} to ${to ?? "unknown"}. ${reason}`.trim(),
+          ...(runId ? { run_id: runId } : {}),
         },
       ]
       return next

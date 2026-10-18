@@ -11,6 +11,7 @@ import { sortMessages } from "../state/reduce"
 import { useChannels, useMe, useMembers, type PendingMessage } from "../state/queries"
 import { toggleChannelMute, useNotifyPrefs } from "../lib/notify-prefs"
 import type { Attachment, Channel, Message } from "../types"
+import { ActivityStrip } from "./activity-strip"
 import { Composer } from "./composer"
 import { MessageList } from "./message-list"
 import { RunPanel } from "./run-panel"
@@ -243,6 +244,11 @@ export function ChannelPage() {
           </Menu.Root>
           <ChannelSettingsDialog channel={channel} agents={agents} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </header>
+        <ActivityStrip
+          key={channelId}
+          channel={channel}
+          onOpenRun={(runId) => void navigate({ to: "/c/$channelId", params: { channelId }, search: { run: runId } })}
+        />
         <MessageList
           key={channelId}
           channelId={channelId}

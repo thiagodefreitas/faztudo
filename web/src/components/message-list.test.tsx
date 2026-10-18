@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
 import { qk } from "../state/keys"
-import type { Member, Message } from "../types"
+import type { Member, Message, NoticeItem } from "../types"
 import { MessageList } from "./message-list"
 
 // jsdom has no layout, so the virtualizer would render no rows.
@@ -49,7 +49,7 @@ const reviewer: Member = {
 function renderList(
   messages: Message[] = [],
   replies: Message[] = [],
-  extra: { pinned?: string[]; focusId?: string; onOpenThread?: (message: Message) => void } = {},
+  extra: { pinned?: string[]; focusId?: string; onOpenThread?: (message: Message) => void; notices?: NoticeItem[] } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -72,7 +72,7 @@ function renderList(
   client.setQueryData(qk.members, [ada, coder, reviewer])
   client.setQueryData(qk.runs, [])
   client.setQueryData(qk.me, ada)
-  client.setQueryData(qk.notices, [])
+  client.setQueryData(qk.notices, extra.notices ?? [])
   client.setQueryData(qk.pending("c1"), [])
   render(
     <QueryClientProvider client={client}>
@@ -166,6 +166,44 @@ describe("MessageList", () => {
     expect(pin).toHaveBeenCalledWith(first.id)
     await user.click(screen.getByRole("button", { name: "Unpin" }))
     expect(unpin).toHaveBeenCalledWith(second.id)
+  })
+
+  it("folds a long agent answer and shows a human message whole", async () => {
+    const user = userEvent.setup()
+    const body = Array.from({ length: 30 }, (_, i) => `step ${i + 1}`).join("\n")
+    renderList([
+      message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", body),
+      message("01CRZ3NDEKTSV4RRFFQ69G5CC2", ada, "2026-10-18T11:00:00.000Z", body),
+    ])
+    const buttons = screen.getAllByRole("button", { name: /Show all/ })
+    expect(buttons).toHaveLength(1)
+    await user.click(buttons[0] as HTMLElement)
+    expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument()
+  })
+
+  it("puts an accent rail on a message that mentions me", () => {
+    const ask = { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "@ada ready?"), mentions: [ada.id] }
+    const plain = message("01CRZ3NDEKTSV4RRFFQ69G5CC2", coder, "2026-10-18T11:00:00.000Z", "done")
+    renderList([ask, plain])
+    expect(document.getElementById(`msg-${ask.id}`)).toHaveClass("border-accent")
+    expect(document.getElementById(`msg-${plain.id}`)).not.toHaveClass("border-accent")
+  })
+
+  it("explains a notice on request with the rule that fired", async () => {
+    const user = userEvent.setup()
+    const notice: NoticeItem = {
+      id: "n1",
+      channel_id: "c1",
+      ts: "2026-10-18T10:00:00.000Z",
+      level: "warn",
+      text: "Run on kimi/default failed (403). Retrying @coder on codex/default.",
+    }
+    const plain: NoticeItem = { id: "n2", channel_id: "c1", ts: "2026-10-18T10:01:00.000Z", level: "info", text: "Welcome." }
+    renderList([], [], { notices: [notice, plain] })
+    expect(screen.getAllByRole("button", { name: "Why?" })).toHaveLength(1)
+    expect(screen.queryByText(/next healthy lane/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Why?" }))
+    expect(screen.getByText(/next healthy lane/)).toBeInTheDocument()
   })
 
   it("flashes the message a search result pointed at", () => {

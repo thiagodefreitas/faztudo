@@ -37,6 +37,17 @@ export function useOrg() {
   return useQuery({ queryKey: qk.org, queryFn: () => api.org() })
 }
 
+// The stored rolling summary of a channel. A failure means no catch-up line.
+export function useChannelSummary(channelId: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.summary(channelId),
+    queryFn: () => api.channelSummary(channelId),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  })
+}
+
 export function useRoutines() {
   return useQuery({ queryKey: qk.routines, queryFn: () => api.routines() })
 }

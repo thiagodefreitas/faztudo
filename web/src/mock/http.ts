@@ -53,6 +53,9 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
   if (method === "GET" && parts[0] === "members" && parts.length === 1) return { status: 200, body: world.getMembers() }
   if (method === "GET" && parts[0] === "channels" && parts.length === 1) return { status: 200, body: world.getChannels() }
   if (method === "GET" && parts[0] === "lanes" && parts.length === 1) return { status: 200, body: world.getLanes() }
+  if (method === "GET" && parts[0] === "lanes" && parts[1] === "channel-summary" && parts.length === 3) {
+    return { status: 200, body: { channel_id: parts[2] ?? "", text: "" } }
+  }
   if (method === "GET" && parts[0] === "org" && parts.length === 1) return { status: 200, body: world.getOrg() }
   if (method === "GET" && parts[0] === "routines" && parts.length === 1) return { status: 200, body: world.getRoutines() }
 

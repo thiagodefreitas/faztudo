@@ -5,11 +5,12 @@ import { identityOf } from "../lib/avatar"
 import { cx } from "../lib/cx"
 import { directPeer, findDirect, isDirect } from "../lib/direct"
 import { primaryWindow } from "../lib/lanes"
+import { groupChannels, pendingApprovals } from "../lib/projects"
 import { useTheme } from "../lib/theme"
 import { formatAge } from "../lib/time"
 import { useNow } from "../state/now"
 import { useOpenDirect } from "../state/direct"
-import { useChannels, useLanes, useMe, useMembers, useRuns } from "../state/queries"
+import { useApprovals, useChannels, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
 import { useStreamStatus } from "../state/status"
 import type { Channel, Lane, LaneHealth, Member, Presence, Run } from "../types"
 import { WORKSPACE_NAME } from "../types"
@@ -57,6 +58,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const members = useMembers()
   const lanes = useLanes()
   const runs = useRuns()
+  const org = useOrg()
+  const approvals = useApprovals()
   const me = useMe()
   const openDirect = useOpenDirect()
   const now = useNow()
@@ -68,6 +71,9 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const meId = me.data?.id
   const all = channels.data ?? []
   const rooms = all.filter((channel) => !isDirect(channel))
+  const grouped = groupChannels(rooms, org.data?.projects ?? [])
+  const waiting = pendingApprovals(approvals.data ?? [])
+  const firstWaiting = waiting[0]
   const others = (members.data ?? []).filter((member) => member.id !== meId)
   const people = others.filter((member) => member.kind === "human")
   const agents = others.filter((member) => member.kind === "agent")
@@ -87,6 +93,42 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         {WORKSPACE_NAME}
       </Link>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {firstWaiting && (
+          <Link
+            to="/c/$channelId"
+            params={{ channelId: firstWaiting.channel_id }}
+            search={firstWaiting.run_id ? { run: firstWaiting.run_id } : {}}
+            onClick={onNavigate}
+            className={cx(ROW, "mb-2 justify-between bg-warn-soft font-medium text-warn")}
+          >
+            <span>Needs you</span>
+            <span className="rounded-full bg-warn px-1.5 text-[11px] font-medium text-canvas" aria-label={`${waiting.length} waiting`}>
+              {waiting.length}
+            </span>
+          </Link>
+        )}
+        {grouped.groups.map(({ project, channels }) => (
+          <div key={project.handle} className="mb-3">
+            <Link
+              to="/p/$handle"
+              params={{ handle: project.handle }}
+              onClick={onNavigate}
+              className={cx(
+                ROW,
+                "font-medium",
+                pathname === `/p/${project.handle}` ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas",
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate">{project.name}</span>
+              <span className="text-[11px] font-normal uppercase tracking-wide text-faint">Project</span>
+            </Link>
+            <ul className="flex flex-col gap-px pl-3">
+              {channels.map((channel) => (
+                <ChannelRow key={channel.id} channel={channel} pathname={pathname} onNavigate={onNavigate} />
+              ))}
+            </ul>
+          </div>
+        ))}
         <div className="flex items-center justify-between pb-1 pl-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Channels</p>
           <button
@@ -108,23 +150,9 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
           }}
         />
         <ul className="flex flex-col gap-px">
-          {rooms.map((channel) => {
-            const active = pathname === `/c/${channel.id}`
-            return (
-              <li key={channel.id}>
-                <Link
-                  to="/c/$channelId"
-                  params={{ channelId: channel.id }}
-                  onClick={onNavigate}
-                  className={cx(ROW, active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")}
-                >
-                  <span className="text-faint">#</span>
-                  <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-                  <Unread count={channel.unread} />
-                </Link>
-              </li>
-            )
-          })}
+          {grouped.rest.map((channel) => (
+            <ChannelRow key={channel.id} channel={channel} pathname={pathname} onNavigate={onNavigate} />
+          ))}
         </ul>
         {(people.length > 0 || orphans.length > 0) && (
           <div className="mt-4">
@@ -218,6 +246,24 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
     </div>
+  )
+}
+
+function ChannelRow({ channel, pathname, onNavigate }: { channel: Channel; pathname: string; onNavigate: (() => void) | undefined }) {
+  const active = pathname === `/c/${channel.id}`
+  return (
+    <li>
+      <Link
+        to="/c/$channelId"
+        params={{ channelId: channel.id }}
+        onClick={onNavigate}
+        className={cx(ROW, active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")}
+      >
+        <span className="text-faint">#</span>
+        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
+        <Unread count={channel.unread} />
+      </Link>
+    </li>
   )
 }
 

@@ -7,6 +7,7 @@ import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { useOutput, useRuns } from "../state/queries"
 import { DiffView } from "./diff-view"
+import { RunTimeline } from "./run-timeline"
 
 function useReducedMotion(): boolean {
   return useSyncExternalStore(
@@ -28,7 +29,7 @@ export function RunPanel({
 }: {
   channelId: string
   runId: string
-  view?: "diff"
+  view?: "diff" | "timeline"
 }) {
   const navigate = useNavigate()
   const reduced = useReducedMotion()
@@ -58,11 +59,11 @@ export function RunPanel({
     })
   }
 
-  function show(next: "output" | "diff") {
+  function show(next: "output" | "diff" | "timeline") {
     void navigate({
       to: "/c/$channelId",
       params: { channelId },
-      search: next === "diff" ? { run: runId, view: "diff" } : { run: runId },
+      search: next === "output" ? { run: runId } : { run: runId, view: next },
     })
   }
 
@@ -90,15 +91,24 @@ export function RunPanel({
         </button>
       </header>
       <div className="flex gap-1 border-b border-line px-2 py-1">
-        <Tab pressed={view !== "diff"} onClick={() => show("output")}>
+        <Tab pressed={view === undefined} onClick={() => show("output")}>
           Output
         </Tab>
         <Tab pressed={view === "diff"} onClick={() => show("diff")}>
           Diff
         </Tab>
+        <Tab pressed={view === "timeline"} onClick={() => show("timeline")}>
+          Timeline
+        </Tab>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {view === "diff" ? (
+        {view === "timeline" ? (
+          run ? (
+            <RunTimeline run={run} channelId={channelId} onShowDiff={() => show("diff")} onShowLog={() => show("output")} />
+          ) : (
+            <p className="p-3 text-[13px] text-muted">The run is not loaded yet.</p>
+          )
+        ) : view === "diff" ? (
           <div className="p-2">
             {diff.isPending && <p className="text-[13px] text-muted">Loading diff</p>}
             {diff.isError && <p className="text-[13px] text-muted">The diff is not ready.</p>}

@@ -148,6 +148,34 @@ A write run is shown as `done` only when verification has completed and its
 result (`verification.ok` and `verification.detail`) is visible on the run
 card.
 
+## Chat readability: the sentence, the quiet line, the fold
+
+- **Run card.** A run card leads with one plain sentence built from fields the
+  run already has ("Coder changed 3 files. Tests passed. Waiting for you."),
+  so the state is said in words and not only by the dot. One quiet line below
+  it gives the lane, mode, elapsed time and why the lane was chosen ("codex/default
+  skipped: busy", "retry after kimi/default failed"). The one action that fits
+  the state is the filled button: View diff when done, Retry when failed, Cancel
+  while working; a pending approval brings its own buttons. A live run shows
+  its last three output lines. A failing verification stays open on the card;
+  a passing one, the full output and the Open timeline button sit under Details.
+- **Agent answers.** The run prompt asks every agent to start its answer with a
+  summary of one or two plain sentences. An answer longer than 12 lines shows
+  its first 12 lines (cut at a blank line, never inside a code block), the
+  headings of the hidden part and a Show all button. Messages people write are
+  never folded.
+- **Top of a channel.** One strip shows who is working on what and for how
+  long, the approvals waiting for you, and lanes in trouble. When the channel
+  was opened with unread messages it adds one line from the stored channel
+  summary ("Since you were away"); nothing is generated on open.
+- **Notices.** A notice that a rule produced (lane fallback, a refused lane,
+  a queue, a project assignment, conserve) has a Why? button that names the
+  rule. Plain information has none.
+- **Projects.** The rail groups channels under their project, with a Needs you
+  row that counts pending approvals. `/p/<handle>` is the project home. On a
+  phone, Chats, Projects, Office and More form a bottom bar that a channel
+  hides so the composer keeps the bottom edge.
+
 ## Lane health and usage numbers: color, shape and text
 
 Each lane (`LaneHealth` in `docs/api.md`) combines a distinct icon, a text

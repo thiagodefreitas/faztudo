@@ -7,6 +7,7 @@ import type {
   Channel,
   ChannelCreate,
   ChannelPatch,
+  ChannelSummary,
   Device,
   DiffPage,
   Health,
@@ -81,6 +82,7 @@ export interface Api {
   setRoutineEnabled: (handle: string, enabled: boolean) => Promise<Routine>
   runRoutine: (handle: string) => Promise<{ status: string }>
   lanes: () => Promise<Lane[]>
+  channelSummary: (channelId: ID) => Promise<ChannelSummary>
   patchLane: (id: string, body: LanePatch) => Promise<Lane>
   probeLane: (id: string) => Promise<Lane>
   login: (body: LoginBody) => Promise<Device>
@@ -167,6 +169,7 @@ export function createApi(options: ApiOptions = {}): Api {
     setRoutineEnabled: (handle, enabled) => request("PATCH", `/routines/${encodeURIComponent(handle)}`, { enabled }),
     runRoutine: (handle) => request("POST", `/routines/${encodeURIComponent(handle)}/run`),
     lanes: () => request("GET", "/lanes"),
+    channelSummary: (channelId) => request("GET", `/lanes/channel-summary/${encodeURIComponent(channelId)}`),
     patchLane: (id, body) => request("PATCH", `/lanes/${encodeURIComponent(id)}`, body),
     probeLane: (id) => request("POST", `/lanes/${encodeURIComponent(id)}/probe`),
     login: (body) => request("POST", "/auth/login", body),

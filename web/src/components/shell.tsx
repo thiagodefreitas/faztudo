@@ -1,5 +1,6 @@
 import { Outlet, useRouterState } from "@tanstack/react-router"
 import { useLiveStream } from "../state/live"
+import { BottomTabs, showTabs } from "./bottom-tabs"
 import { Notifier } from "./notifier"
 import { CommandPalette } from "./palette"
 import { SearchDialog } from "./search-dialog"
@@ -25,6 +26,7 @@ export function Shell() {
       <Notifier />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Outlet />
+        {showTabs(pathname) && <BottomTabs pathname={pathname} />}
       </div>
     </div>
   )

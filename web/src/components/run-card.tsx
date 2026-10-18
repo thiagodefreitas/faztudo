@@ -1,15 +1,16 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { api } from "../api/client"
 import { hueFor } from "../lib/avatar"
 import { cx } from "../lib/cx"
+import { runSentence } from "../lib/run-sentence"
+import { switchedWhy } from "../lib/run-timeline"
 import { formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
-import { approvalForRun, useApprovals, useLanes, useMembers, useOutput } from "../state/queries"
+import { approvalForRun, useApprovals, useLanes, useMembers, useNotices, useOutput, useRuns } from "../state/queries"
 import type { Approval, Lane, Member, OutputLine, Run, RunState } from "../types"
 import { ApprovalCard } from "./approval-card"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
@@ -20,26 +21,6 @@ const RING: Partial<Record<RunState, AvatarState>> = {
   verifying: "working",
   waiting_approval: "waiting",
   failed: "failed",
-}
-
-const STATE_LABEL: Record<RunState, string> = {
-  queued: "Queued",
-  running: "Running",
-  waiting_approval: "Needs approval",
-  verifying: "Verifying",
-  done: "Done",
-  failed: "Failed",
-  cancelled: "Cancelled",
-}
-
-const STATE_CLASS: Record<RunState, string> = {
-  queued: "bg-sidebar text-muted",
-  running: "bg-accent-soft text-accent",
-  waiting_approval: "bg-warn-soft text-warn",
-  verifying: "bg-accent-soft text-accent",
-  done: "bg-ok-soft text-ok",
-  failed: "bg-danger-soft text-danger",
-  cancelled: "bg-sidebar text-muted",
 }
 
 const EDGE: Record<RunState, string> = {
@@ -53,6 +34,10 @@ const EDGE: Record<RunState, string> = {
 }
 
 const LIVE = new Set<RunState>(["queued", "running", "waiting_approval", "verifying"])
+const WORKING = new Set<RunState>(["queued", "running", "verifying"])
+
+const BUTTON = "min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2"
+const PRIMARY = "min-h-10 rounded-md border border-accent bg-accent px-3 text-[12px] font-medium text-canvas hover:opacity-90 md:min-h-8 md:px-2"
 
 export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
   const now = useNow()
@@ -60,12 +45,18 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
   const lanes = useLanes()
   const approvals = useApprovals()
   const output = useOutput(run.id)
+  const runs = useRuns()
+  const notices = useNotices()
   const qc = useQueryClient()
   const navigate = useNavigate()
   const agent = members.data?.find((member) => member.id === run.agent_id) ?? null
   const lane = lanes.data?.find((item) => item.id === run.lane_id)
   const approval = approvalForRun(approvals.data, run.id)
   const retryLanes = agent?.agent?.lanes ?? [run.lane_id]
+  const previous = run.retry_of ? runs.data?.find((item) => item.id === run.retry_of) : undefined
+  const why =
+    switchedWhy(notices.data.find((notice) => notice.run_id === run.id)?.text) ??
+    (previous ? `retry after ${previous.lane_id} failed` : undefined)
 
   return (
     <RunCardView
@@ -76,6 +67,14 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
       approval={approval}
       now={now}
       retryLanes={retryLanes}
+      {...(why ? { why } : {})}
+      onTimeline={() => {
+        void navigate({
+          to: "/c/$channelId",
+          params: { channelId },
+          search: { run: run.id, view: "timeline" },
+        })
+      }}
       onViewDiff={() => {
         void navigate({
           to: "/c/$channelId",
@@ -104,6 +103,9 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
   )
 }
 
+// A run card says what happened in one sentence, keeps lane, mode, time and
+// the reason for the lane on one quiet line, offers the one action that fits
+// the state, and folds verification, output and the timeline under Details.
 export function RunCardView({
   run,
   agent,
@@ -112,6 +114,8 @@ export function RunCardView({
   approval,
   now,
   retryLanes,
+  why,
+  onTimeline,
   onViewDiff,
   onCancel,
   onRetry,
@@ -124,91 +128,74 @@ export function RunCardView({
   approval: Approval | null
   now: number
   retryLanes?: string[]
+  /** Why this lane, for example "codex/default skipped: busy". */
+  why?: string
+  onTimeline?: () => void
   onViewDiff: () => void
   onCancel: () => void
   onRetry: (laneId: string) => void
   onResolve: (option: string, commitMessage?: string) => void
 }) {
   const live = LIVE.has(run.state)
-  const [outputOpen, setOutputOpen] = useState(live)
-  const tail = lines.slice(-12)
+  const working = WORKING.has(run.state)
+  const name = agent?.display_name ?? "Agent"
   const ended = live ? undefined : run.ended_at
   const lanes = retryLanes ?? agent?.agent?.lanes ?? []
   const retryable = run.state === "failed" || run.state === "cancelled"
+  const peek = live ? lines.slice(-3) : []
+  const failedChecks = run.verification && !run.verification.ok ? run.verification : null
+  const tail = lines.slice(-12)
+  const detail = [run.mode, formatElapsed(run.started_at, ended, now), why].filter(Boolean).join(" | ")
 
   return (
     <article
-      aria-label={`${agent?.display_name ?? "Agent"} run on ${run.lane_id}`}
+      aria-label={`${name} run on ${run.lane_id}`}
       data-state={run.state}
       className="fz-rise mt-2 flex max-w-2xl overflow-hidden rounded-lg border border-line bg-surface"
     >
       <div className={cx("w-1 shrink-0", hueFor(agent).edge)} aria-hidden="true" />
       <div className="min-w-0 flex-1 p-3">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <AgentAvatar member={agent} size={20} state={RING[run.state]} decorative />
-          <p className="text-[13px] font-semibold">{agent?.display_name ?? "Agent"}</p>
-          <p className="font-mono text-[12px] text-muted">{run.lane_id}</p>
-          <p className="text-[12px] text-faint">{run.mode}</p>
-          <span
-            className={cx(
-              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
-              STATE_CLASS[run.state],
-            )}
-          >
-            <span className={cx("h-1.5 w-1.5 rounded-full", EDGE[run.state], live && "motion-safe:animate-pulse")} aria-hidden="true" />
-            {STATE_LABEL[run.state]}
-          </span>
-          <p className="ml-auto font-mono text-[12px] tabular-nums text-muted">{formatElapsed(run.started_at, ended, now)}</p>
+        <div className="flex items-start gap-2">
+          <AgentAvatar member={agent} size={20} state={RING[run.state]} decorative className="mt-px shrink-0" />
+          <p data-testid="run-sentence" className="min-w-0 flex-1 text-[14px] font-medium leading-5">
+            {runSentence(run, name, approval)}
+          </p>
+          <span className={cx("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", EDGE[run.state], working && "motion-safe:animate-pulse")} aria-hidden="true" />
         </div>
-        <div className="mt-2">
-          <LaneChip lane={lane} now={now} />
-        </div>
-        {run.verification && (
-          <div
-            className={cx(
-              "mt-3 rounded-md border-l-2 px-2.5 py-2",
-              run.verification.ok ? "border-ok bg-ok-soft" : "border-danger bg-danger-soft",
-            )}
-          >
-            <p className="text-[13px] font-medium">{run.verification.ok ? "Passed" : "Failed"}</p>
-            <pre className="mt-1 whitespace-pre-wrap font-mono text-[12px] leading-5">{run.verification.detail}</pre>
+        <p className="mt-0.5 pl-7 text-[12px] text-muted">
+          <span className="font-mono">{run.lane_id}</span> | {detail}
+        </p>
+        {peek.length > 0 && (
+          <pre className="mt-2 ml-7 max-h-16 overflow-hidden rounded-md bg-code px-2 py-1.5 font-mono text-[12px] leading-5">
+            {peek.map((line) => (
+              <span key={line.seq} className={line.stream === "stderr" ? "text-danger" : undefined}>
+                {line.text}
+              </span>
+            ))}
+          </pre>
+        )}
+        {failedChecks && (
+          <div className="mt-2 ml-7 rounded-md border-l-2 border-danger bg-danger-soft px-2.5 py-2">
+            <p className="text-[13px] font-medium">Failed</p>
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-5">{failedChecks.detail}</pre>
           </div>
         )}
-        {run.failure_reason && !run.verification && <p className="mt-2 text-[13px] text-danger">{run.failure_reason}</p>}
-        <details
-          className="mt-3"
-          open={outputOpen}
-          onToggle={(event) => setOutputOpen((event.currentTarget as HTMLDetailsElement).open)}
-        >
-          <summary className="cursor-pointer text-[12px] text-muted">Output</summary>
-          <pre className="mt-1 max-h-40 overflow-auto rounded-md bg-code px-2 py-1.5 font-mono text-[12px] leading-5">
-            {tail.length === 0 ? (
-              <span className="text-faint">No output yet.</span>
-            ) : (
-              tail.map((line) => (
-                <span key={line.seq} className={line.stream === "stderr" ? "text-danger" : undefined}>
-                  {line.text}
-                </span>
-              ))
-            )}
-          </pre>
-        </details>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
           {run.diff_stat && (
-            <button type="button" onClick={onViewDiff} className="min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2">
+            <button type="button" onClick={onViewDiff} className={run.state === "done" ? PRIMARY : BUTTON}>
               {run.diff_stat.files} {run.diff_stat.files === 1 ? "file" : "files"}{" "}
-              <span className="text-ok">+{run.diff_stat.insertions}</span>{" "}
-              <span className="text-danger">-{run.diff_stat.deletions}</span> View diff
+              <span className={run.state === "done" ? undefined : "text-ok"}>+{run.diff_stat.insertions}</span>{" "}
+              <span className={run.state === "done" ? undefined : "text-danger"}>-{run.diff_stat.deletions}</span> View diff
             </button>
           )}
-          {live && (
-            <button type="button" onClick={onCancel} className="min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2">
+          {working && (
+            <button type="button" onClick={onCancel} className={BUTTON}>
               Cancel
             </button>
           )}
           {retryable && lanes.length > 0 && (
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger className="min-h-10 rounded-md border border-line px-3 text-[12px] hover:bg-canvas md:min-h-8 md:px-2">Retry</DropdownMenu.Trigger>
+              <DropdownMenu.Trigger className={run.state === "failed" ? PRIMARY : BUTTON}>Retry</DropdownMenu.Trigger>
               <DropdownMenu.Portal>
                 <DropdownMenu.Content
                   sideOffset={6}
@@ -229,6 +216,35 @@ export function RunCardView({
           )}
         </div>
         {approval && <ApprovalCard approval={approval} onResolve={onResolve} />}
+        <details className="mt-2 pl-7">
+          <summary className="inline-flex min-h-8 cursor-pointer items-center text-[12px] text-muted hover:text-ink">Details</summary>
+          <div className="mt-1 flex flex-col gap-2">
+            <LaneChip lane={lane} now={now} />
+            {run.verification?.ok && (
+              <div className="rounded-md border-l-2 border-ok bg-ok-soft px-2.5 py-2">
+                <p className="text-[13px] font-medium">Passed</p>
+                <pre className="mt-1 whitespace-pre-wrap font-mono text-[12px] leading-5">{run.verification.detail}</pre>
+              </div>
+            )}
+            {run.failure_reason && !run.verification && <p className="text-[13px] text-danger">{run.failure_reason}</p>}
+            <pre className="max-h-40 overflow-auto rounded-md bg-code px-2 py-1.5 font-mono text-[12px] leading-5">
+              {tail.length === 0 ? (
+                <span className="text-faint">No output yet.</span>
+              ) : (
+                tail.map((line) => (
+                  <span key={line.seq} className={line.stream === "stderr" ? "text-danger" : undefined}>
+                    {line.text}
+                  </span>
+                ))
+              )}
+            </pre>
+            {onTimeline && (
+              <button type="button" onClick={onTimeline} className={cx(BUTTON, "self-start")}>
+                Open timeline
+              </button>
+            )}
+          </div>
+        </details>
       </div>
     </article>
   )

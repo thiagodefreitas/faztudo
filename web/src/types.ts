@@ -354,6 +354,17 @@ export interface NoticeItem {
   level: "info" | "warn" | "error"
   text: string
   action?: NoticeAction
+  /** The run a lane notice is about, so its card can say why the lane was picked. */
+  run_id?: ID
+}
+
+/** The rolling summary of a channel (GET /lanes/channel-summary/{id}). */
+export interface ChannelSummary {
+  channel_id: ID
+  lane_id?: string
+  text: string
+  through_message_id?: ID
+  updated_at?: string
 }
 
 export interface Department {

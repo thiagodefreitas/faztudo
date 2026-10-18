@@ -12,6 +12,7 @@ export const qk = {
   lanes: ["lanes"] as const,
   org: ["org"] as const,
   routines: ["routines"] as const,
+  summary: (channelId: string) => ["summary", channelId] as const,
   notices: ["notices"] as const,
   seq: ["seq"] as const,
   pending: (id: string) => ["pending", id] as const,

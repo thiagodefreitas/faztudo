@@ -27,7 +27,7 @@ export interface ChannelSearch {
   thread?: string
   /** A message to scroll to, set by search results. */
   m?: string
-  view?: "diff"
+  view?: "diff" | "timeline"
 }
 
 function validateSearch(search: Record<string, unknown>): ChannelSearch {
@@ -35,7 +35,7 @@ function validateSearch(search: Record<string, unknown>): ChannelSearch {
   if (typeof search.run === "string" && search.run) result.run = search.run
   if (typeof search.thread === "string" && search.thread) result.thread = search.thread
   if (typeof search.m === "string" && search.m) result.m = search.m
-  if (search.view === "diff") result.view = "diff"
+  if (search.view === "diff" || search.view === "timeline") result.view = search.view
   return result
 }
 
@@ -164,6 +164,34 @@ const office3dRoute = createRoute({
   component: lazyRouteComponent(() => import("./components/office/office3d/scene3d"), "Office3DPage"),
 })
 
+function projectLoader({ context }: { context: RouterContext }) {
+  return withAuthRedirect(() =>
+    Promise.all([
+      context.queryClient.ensureQueryData({ queryKey: qk.me, queryFn: () => api.me() }),
+      context.queryClient.ensureQueryData({ queryKey: qk.members, queryFn: () => api.members() }),
+      context.queryClient.ensureQueryData({ queryKey: qk.channels, queryFn: () => api.channels() }),
+      context.queryClient.ensureQueryData({ queryKey: qk.org, queryFn: () => api.org() }),
+      context.queryClient.ensureQueryData({ queryKey: qk.runs, queryFn: () => api.runs() }),
+      context.queryClient.ensureQueryData({ queryKey: qk.approvals, queryFn: () => api.approvals() }),
+      context.queryClient.ensureQueryData({ queryKey: qk.routines, queryFn: () => api.routines() }),
+    ]),
+  )
+}
+
+const projectsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/p",
+  loader: projectLoader,
+  component: lazyRouteComponent(() => import("./components/project-home"), "ProjectsIndexPage"),
+})
+
+const projectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/p/$handle",
+  loader: projectLoader,
+  component: lazyRouteComponent(() => import("./components/project-home"), "ProjectHomePage"),
+})
+
 const organizationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/organization",
@@ -204,6 +232,8 @@ const routeTree = rootRoute.addChildren([
   lanesRoute,
   officeRoute,
   office3dRoute,
+  projectsRoute,
+  projectRoute,
   organizationRoute,
   routinesRoute,
 ])

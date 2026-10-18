@@ -8,6 +8,7 @@ import { continuesGroup } from "../lib/group"
 import { ulid } from "../lib/id"
 import { formatClock } from "../lib/time"
 import { cx } from "../lib/cx"
+import { noticeWhy } from "../lib/notice-why"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { useNow } from "../state/now"
@@ -16,6 +17,8 @@ import { useChannelPins, useChannels, useMe, useMembers, useMessages, useNotices
 import type { Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
 import type { ChannelRef } from "../lib/channel-links"
 import { AgentAvatar } from "./agent-avatar"
+import { AnswerActions } from "./answer-actions"
+import { AnswerBody } from "./answer-body"
 import { AttachmentList } from "./attachments"
 import { ChoiceCard } from "./choice-card"
 import { Markdown } from "./markdown"
@@ -206,6 +209,7 @@ export function MessageList({
                       grouped={grouped}
                       lastInGroup={lastInGroup}
                       mine={row.message.author_id === me.data?.id}
+                      mentionsMe={!!me.data && row.message.author_id !== me.data.id && row.message.mentions.includes(me.data.id)}
                       pinned={pinnedIds.has(row.message.id)}
                       flash={flash === row.message.id}
                       channels={channelRefs}
@@ -243,6 +247,7 @@ function MessageRow({
   grouped,
   lastInGroup,
   mine,
+  mentionsMe,
   pinned,
   flash,
   channels,
@@ -256,6 +261,8 @@ function MessageRow({
   grouped: boolean
   lastInGroup: boolean
   mine: boolean
+  /** Someone else mentioned me, so the row gets an accent rail. */
+  mentionsMe: boolean
   pinned: boolean
   flash: boolean
   channels: ChannelRef[] | undefined
@@ -276,6 +283,7 @@ function MessageRow({
         mine && "max-sm:flex-row-reverse",
         fresh && "fz-rise",
         flash && "bg-accent-soft",
+        mentionsMe && "border-l-2 border-accent pl-2",
       )}
     >
       <div className={cx("w-8 shrink-0", mine && "max-sm:hidden")}>
@@ -304,13 +312,13 @@ function MessageRow({
         )}
         <div
           className={cx(
-            "text-[14px]",
+            "text-[15px]",
             !grouped && "mt-0.5",
             "max-sm:w-fit max-sm:max-w-[88%] max-sm:rounded-2xl max-sm:px-3 max-sm:py-1.5",
             mine ? "max-sm:rounded-br-md max-sm:bg-accent-soft" : "max-sm:rounded-bl-md max-sm:border max-sm:border-line max-sm:bg-surface",
           )}
         >
-          <Markdown text={message.body} channels={channels} />
+          <AnswerBody text={message.body} channels={channels} fold={author?.kind === "agent"} />
         </div>
         <AttachmentList attachments={message.attachments} />
         {message.options && message.options.length > 0 && <MessageChoices message={message} channelId={channelId} />}
@@ -335,6 +343,7 @@ function MessageRow({
               Reply in thread
             </button>
             <PinButton message={message} pinned={pinned} />
+            {author?.kind === "agent" && <AnswerActions message={message} author={author} run={run} onOpenThread={onOpenThread} />}
           </p>
         )}
       </div>
@@ -464,17 +473,32 @@ function AgentLine({ messages, members, channels }: { messages: Message[]; membe
 }
 
 function NoticeRow({ notice }: { notice: NoticeItem }) {
+  const [explained, setExplained] = useState(false)
+  const why = noticeWhy(notice)
   return (
-    <div
-      className={cx(
-        "ml-[42px] flex flex-wrap items-center gap-2 text-[12px]",
-        notice.level === "error" && "text-danger",
-        notice.level === "warn" && "text-warn",
-        notice.level === "info" && "text-muted",
-      )}
-    >
-      <p>{notice.text}</p>
-      {notice.action && <AssignButton action={notice.action} />}
+    <div className="ml-[42px] text-[12px]">
+      <div
+        className={cx(
+          "flex flex-wrap items-center gap-2",
+          notice.level === "error" && "text-danger",
+          notice.level === "warn" && "text-warn",
+          notice.level === "info" && "text-muted",
+        )}
+      >
+        <p>{notice.text}</p>
+        {notice.action && <AssignButton action={notice.action} />}
+        {why && (
+          <button
+            type="button"
+            aria-expanded={explained}
+            onClick={() => setExplained((value) => !value)}
+            className="min-h-8 rounded px-1 text-muted underline-offset-2 hover:text-ink hover:underline md:min-h-6"
+          >
+            Why?
+          </button>
+        )}
+      </div>
+      {why && explained && <p className="fz-rise mt-0.5 max-w-prose text-muted">{why}</p>}
     </div>
   )
 }

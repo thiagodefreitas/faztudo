@@ -4,7 +4,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { qk } from "../state/keys"
-import type { Channel, Member, Run } from "../types"
+import type { Approval, Channel, Member, Project, Run } from "../types"
 import { WorkspaceNav } from "./sidebar"
 
 const ada: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA1", kind: "human", handle: "ada", display_name: "Ada", presence: "online" }
@@ -55,16 +55,21 @@ const coderRun: Run = {
   started_at: "2026-10-18T12:00:00.000Z",
 }
 
-async function setup(options: { members?: Member[]; runs?: Run[] } = {}) {
+async function setup(options: { members?: Member[]; runs?: Run[]; projects?: Project[]; approvals?: Approval[]; channels?: Channel[] } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.members, options.members ?? [ada, bob, coder])
   client.setQueryData(qk.runs, options.runs ?? [])
-  client.setQueryData(qk.channels, [general, coderDm])
+  client.setQueryData(qk.channels, options.channels ?? [general, coderDm])
   client.setQueryData(qk.lanes, [])
+  client.setQueryData(qk.org, { director_id: ada.id, departments: [], projects: options.projects ?? [] })
+  client.setQueryData(qk.approvals, options.approvals ?? [])
   const rootRoute = createRootRoute({ component: () => <WorkspaceNav /> })
   const router = createRouter({
-    routeTree: rootRoute.addChildren([createRoute({ getParentRoute: () => rootRoute, path: "/c/$channelId" })]),
+    routeTree: rootRoute.addChildren([
+      createRoute({ getParentRoute: () => rootRoute, path: "/c/$channelId" }),
+      createRoute({ getParentRoute: () => rootRoute, path: "/p/$handle" }),
+    ]),
     history: createMemoryHistory({ initialEntries: ["/c/c1"] }),
   })
   await router.load()
@@ -108,6 +113,42 @@ describe("WorkspaceNav", () => {
     const headings = (await screen.findAllByText(/^(Channels|Direct messages|Agents)$/)).map((el) => el.textContent)
     expect(headings).toEqual(["Channels", "Direct messages", "Agents"])
     expect(screen.getByText("Bob")).toBeInTheDocument()
+  })
+
+  it("groups a project's channels under it and leaves the others in Channels", async () => {
+    const dev: Channel = { ...general, id: "c3", name: "dev", unread: 2 }
+    const project: Project = { handle: "faztudo", name: "Faztudo", channels: ["Dev"], departments: [], specialists: [] }
+    await setup({ projects: [project], channels: [general, dev, coderDm] })
+    const header = await screen.findByRole("link", { name: /Project$/ })
+    expect(header).toHaveAttribute("href", "/p/faztudo")
+    const group = header.parentElement as HTMLElement
+    expect(within(group).getByText("dev")).toBeInTheDocument()
+    expect(within(group).queryByText("general")).not.toBeInTheDocument()
+    expect(screen.getByText("general")).toBeInTheDocument()
+  })
+
+  it("counts the approvals that wait for me and links to the first", async () => {
+    const waiting = (id: string, state: Approval["state"]): Approval => ({
+      id,
+      run_id: `run-${id}`,
+      channel_id: "c1",
+      requested_by: coder.id,
+      title: "Merge",
+      detail: "",
+      options: [],
+      state,
+    })
+    await setup({ approvals: [waiting("a", "pending"), waiting("b", "pending"), waiting("c", "resolved")] })
+    const link = await screen.findByRole("link", { name: /Needs you/ })
+    expect(within(link).getByLabelText("2 waiting")).toBeInTheDocument()
+    expect(link.getAttribute("href")).toContain("/c/c1")
+    expect(link.getAttribute("href")).toContain("run=run-a")
+  })
+
+  it("shows no Needs you row when nothing waits", async () => {
+    await setup()
+    await screen.findByText("Coder")
+    expect(screen.queryByRole("link", { name: /Needs you/ })).not.toBeInTheDocument()
   })
 
   it("shows the lane summary as a compact Lanes link", async () => {

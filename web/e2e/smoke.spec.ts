@@ -32,6 +32,8 @@ test("posts a mention, streams a run, and answers the approval", async ({ page }
 
   await approval.focus()
   await approval.press("Enter")
+  // A passing verification is folded under Details on the run card.
+  await page.locator("summary", { hasText: "Details" }).last().click()
   await expect(page.getByText("ok: pushed and verified").first()).toBeVisible()
   await page.getByRole("button", { name: /View diff/ }).last().click()
   await expect(page.getByText("shown on the run card")).toBeVisible()
