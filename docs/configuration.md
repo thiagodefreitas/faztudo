@@ -30,6 +30,9 @@ ca_listen = "0.0.0.0:7459"
 [runs]
 default_timeout = "30m"
 context_messages = 40       # recent messages sent to an agent
+summary_every = 20         # update the rolling channel summary after this many new messages
+context_limit_tokens = 128000 # model context estimate used for rollover
+# summary_lane = "kimi/default" # optional; otherwise the cheapest healthy lane
 sandbox = "off"             # off (default for now), auto or required for write runs
 sandbox_memory_max = "4G"  # systemd user scope, when available
 sandbox_tasks_max = 512    # systemd user scope, when available
@@ -87,6 +90,9 @@ capacity = 1
 conserve_at = 80
 sandbox_network = true       # default; false hides the network in write runs
 # plan_limit_tokens = 1000000 # optional manual limit for token-based usage (claude, grok)
+# usd_per_million_input = 2.0  # optional estimate, not billing
+# usd_per_million_output = 8.0
+# usd_per_million_cached = 0.5
 
 [[lane]]
 id = "codex/default"
@@ -184,6 +190,20 @@ counts as usable, so the run waits for it.
 `runs_today` on a lane counts runs started on it since local midnight.
 `tokens_last_hour` is filled for Claude and Grok lanes from the local
 session logs.
+
+Lane prices are optional and apply only where the local CLI logs input,
+output and cache token counts. The Lanes page labels the result "about $X
+today, estimate". It is not a bill. Cache writes use the input rate because
+there is no separate cache-write setting. Usage history keeps each reading
+for the history endpoint; the page draws 24-hour and 7-day trends.
+
+The summary lane produces a rolling channel summary after `summary_every`
+new root messages. Quiet channels are checked once a minute. The prompt
+includes that summary and recent messages. A human can regenerate a summary
+through the API.
+When their rough size passes 65% of `context_limit_tokens`, it drops the
+oldest recent messages. The estimate is four bytes per token, not a model
+tokenizer. If summary generation fails, the previous summary stays in use.
 
 `allowed_tools` is an optional list on a `claude` lane, passed to Claude as
 `--allowedTools`. These tools run without asking, which matters because

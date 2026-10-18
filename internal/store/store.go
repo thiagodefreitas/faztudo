@@ -98,6 +98,16 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 5 {
+		migration, err = migrations.ReadFile("migrations/005.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return &Store{db: db}, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
@@ -245,7 +255,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org"} {
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org", "lane_usage_history", "channel_summaries"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -375,6 +385,30 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 			return errors.New("lane id required")
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO lanes(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data", l.ID, e.Payload)
+		return err
+	case events.LaneUsageRead:
+		var reading LaneUsageReading
+		if err := json.Unmarshal(e.Payload, &reading); err != nil {
+			return err
+		}
+		if reading.LaneID == "" || reading.Window.Name == "" || reading.ReadAt.IsZero() {
+			return errors.New("invalid lane usage reading")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO lane_usage_history(seq,lane_id,window_name,measured_at,data) VALUES(?,?,?,?,?)", e.Seq, reading.LaneID, reading.Window.Name, reading.ReadAt.UTC().Format("2006-01-02T15:04:05.000000000Z"), e.Payload)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "DELETE FROM lane_usage_history WHERE measured_at<?", time.Now().UTC().Add(-31*24*time.Hour).Format("2006-01-02T15:04:05.000000000Z"))
+		return err
+	case events.ChannelSummarized:
+		var summary ChannelSummary
+		if err := json.Unmarshal(e.Payload, &summary); err != nil {
+			return err
+		}
+		if summary.ChannelID == "" || summary.ThroughMessageID == "" {
+			return errors.New("invalid channel summary")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO channel_summaries(channel_id,data) VALUES(?,?) ON CONFLICT(channel_id) DO UPDATE SET data=excluded.data", summary.ChannelID, e.Payload)
 		return err
 	case events.DepartmentUpdated:
 		var d domain.Department

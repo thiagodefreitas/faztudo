@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -53,20 +54,26 @@ type LAN struct {
 	CAListen string `toml:"ca_listen"`
 }
 type Runs struct {
-	DefaultTimeout   string `toml:"default_timeout"`
-	ContextMessages  int    `toml:"context_messages"`
-	Sandbox          string `toml:"sandbox"`
-	SandboxMemoryMax string `toml:"sandbox_memory_max"`
-	SandboxTasksMax  int    `toml:"sandbox_tasks_max"`
+	DefaultTimeout     string `toml:"default_timeout"`
+	ContextMessages    int    `toml:"context_messages"`
+	Sandbox            string `toml:"sandbox"`
+	SandboxMemoryMax   string `toml:"sandbox_memory_max"`
+	SandboxTasksMax    int    `toml:"sandbox_tasks_max"`
+	SummaryLane        string `toml:"summary_lane"`
+	SummaryEvery       int    `toml:"summary_every"`
+	ContextLimitTokens int    `toml:"context_limit_tokens"`
 }
 type Lane struct {
-	ID              string `toml:"id"`
-	CLI             string `toml:"cli"`
-	Model           string `toml:"model"`
-	CostClass       string `toml:"cost_class"`
-	Capacity        int    `toml:"capacity"`
-	ConserveAt      *int   `toml:"conserve_at"`
-	PlanLimitTokens int64  `toml:"plan_limit_tokens"`
+	ID                  string  `toml:"id"`
+	CLI                 string  `toml:"cli"`
+	Model               string  `toml:"model"`
+	CostClass           string  `toml:"cost_class"`
+	Capacity            int     `toml:"capacity"`
+	ConserveAt          *int    `toml:"conserve_at"`
+	PlanLimitTokens     int64   `toml:"plan_limit_tokens"`
+	USDPerMillionInput  float64 `toml:"usd_per_million_input"`
+	USDPerMillionOutput float64 `toml:"usd_per_million_output"`
+	USDPerMillionCached float64 `toml:"usd_per_million_cached"`
 	// AllowedTools lists tools a claude run may use without asking, passed
 	// as --allowedTools. Unset keeps the write-run default; an empty list
 	// allows none.
@@ -122,7 +129,7 @@ func Defaults() Config {
 	return Config{
 		Server: Server{Listen: "127.0.0.1:7457", OpenBrowser: true},
 		LAN:    LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
-		Runs:   Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "off", SandboxMemoryMax: "4G", SandboxTasksMax: 512},
+		Runs:   Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "off", SandboxMemoryMax: "4G", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000},
 	}
 }
 func Load(p Paths) (Config, error) {
@@ -158,6 +165,9 @@ func (c Config) Validate() error {
 	if c.Runs.ContextMessages < 1 {
 		return errors.New("runs.context_messages: must be positive")
 	}
+	if c.Runs.SummaryEvery < 1 || c.Runs.ContextLimitTokens < 1 {
+		return errors.New("runs.summary_every and runs.context_limit_tokens: must be positive")
+	}
 	if c.Runs.Sandbox != "auto" && c.Runs.Sandbox != "off" && c.Runs.Sandbox != "required" {
 		return errors.New("runs.sandbox: must be auto, off or required")
 	}
@@ -183,6 +193,9 @@ func (c Config) Validate() error {
 		}
 		if l.PlanLimitTokens < 0 {
 			return fmt.Errorf("lane[%d].plan_limit_tokens: must be nonnegative", i)
+		}
+		if !validPrice(l.USDPerMillionInput) || !validPrice(l.USDPerMillionOutput) || !validPrice(l.USDPerMillionCached) {
+			return fmt.Errorf("lane[%d] prices: must be nonnegative", i)
 		}
 		for j, t := range l.AllowedTools {
 			if strings.TrimSpace(t) == "" {
@@ -266,6 +279,8 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+func validPrice(v float64) bool { return v >= 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 var handleName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 

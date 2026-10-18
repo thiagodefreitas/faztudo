@@ -372,7 +372,16 @@ func TestWireCancelRetryAndProbe(t *testing.T) {
 	}
 	requestJSON(t, "POST", srv.URL+"/api/v1/lanes/codex/default/probe", `{}`, 200, nil)
 	after, err := s.EventsAfter(context.Background(), 0, 500)
-	if err != nil || len(after) <= len(before) || after[len(after)-1].Type != events.LaneUpdated {
+	updated := false
+	if len(after) >= len(before) {
+		for _, event := range after[len(before):] {
+			if event.Type == events.LaneUpdated {
+				updated = true
+				break
+			}
+		}
+	}
+	if err != nil || len(after) <= len(before) || !updated {
 		t.Fatalf("probe did not refresh lane: before %d after %d error %v", len(before), len(after), err)
 	}
 }

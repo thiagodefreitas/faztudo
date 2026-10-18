@@ -85,6 +85,17 @@ describe("LaneCardView", () => {
     expect(screen.getByText("Probe now")).toBeEnabled()
   })
 
+  it("shows history for both time ranges and an estimated cost", () => {
+    const history = [
+      { lane_id: availableLane.id, window: { name: "5h" as const, used_pct: 10, source: "probe" as const }, read_at: new Date(now - 60_000).toISOString() },
+      { lane_id: availableLane.id, window: { name: "5h" as const, used_pct: 20, source: "probe" as const }, read_at: new Date(now).toISOString() },
+    ]
+    renderCard({ ...availableLane, cost_today_usd: 0.12 }, { history })
+    expect(screen.getByText("about $0.12 today, estimate")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "5h usage, last 24 hours" }).querySelector("path")?.getAttribute("d")).toContain("L")
+    expect(screen.getByRole("img", { name: "5h usage, last 7 days" })).toBeInTheDocument()
+  })
+
   it("shows tokens used when a lane logs tokens but has no quota percentage", () => {
     renderCard({
       ...unknownLane,

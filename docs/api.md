@@ -173,6 +173,8 @@ interface Lane {
   runs_today: number;
   runs_date?: string;       // local day (YYYY-MM-DD) that runs_today counts
   tokens_last_hour?: number;
+  cost_today_usd?: number;  // local token-price estimate, never billing
+  alerted?: boolean;        // alert already sent for this health episode
   last_error?: { class: string; message: string; at: string };
 }
 ```
@@ -247,9 +249,20 @@ interface NoticeAction {
 | GET | `/api/v1/approvals?state=pending` | approvals |
 | POST | `/api/v1/approvals/{id}/resolve` | `{option, note?, commit_message?}`; humans only. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message |
 | GET | `/api/v1/lanes` | configured lanes (a detected-only default is hidden once lanes.toml configures that CLI) |
+| GET | `/api/v1/lanes/{id}/history?window=&since=` | usage readings for a lane; `window` is optional (`5h`, `day`, `week`, `month`), `since` is RFC3339 and defaults to 7 days ago (at most 31 days ago) |
+| GET | `/api/v1/lanes/channel-summary/{channel_id}` | latest rolling summary, or an empty summary object before the first one |
+| POST | `/api/v1/lanes/channel-summary/{channel_id}/regenerate` | human-only; regenerate the summary from stored root messages |
 | PATCH | `/api/v1/lanes/{id}` | set `{capacity?, health_override?, manual_window?}` (capacity must be at least 1; health_override records the reason as a manual override) |
 | POST | `/api/v1/lanes/{id}/probe` | refresh this lane's usage now |
 | GET | `/api/v1/health` | `{ok, version, api}` without auth on loopback; `{ok}` only on the LAN listener |
+
+Each history item is `{lane_id, window, read_at}`. `window` has the same
+shape as an entry in `Lane.windows`; `read_at` is when the daemon read it.
+`lane.usage_read` and `lane.alert` are emitted in the event stream. A lane
+alert contains `{lane_id, health, reason}` and is emitted once per alert
+episode; recovery re-arms it. A channel summary is stored as a
+`channel.summarized` event with `{channel_id, lane_id, text,
+through_message_id, updated_at}`.
 
 ## Event stream
 

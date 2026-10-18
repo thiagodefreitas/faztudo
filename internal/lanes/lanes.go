@@ -26,19 +26,21 @@ type PersonaConfig struct {
 }
 type Skipped struct{ ID, Reason string }
 type Registry struct {
-	mu         sync.Mutex
-	lanes      map[string]*domain.Lane
-	personas   map[string]PersonaConfig
-	app        events.Appender
-	until      map[string]time.Time
-	thresholds map[string]int
-	changed    chan struct{}
+	mu            sync.Mutex
+	lanes         map[string]*domain.Lane
+	personas      map[string]PersonaConfig
+	app           events.Appender
+	until         map[string]time.Time
+	thresholds    map[string]int
+	alerted       map[string]bool
+	alertChannels func(context.Context, string) ([]string, error)
+	changed       chan struct{}
 	// now is the clock; tests replace it.
 	now func() time.Time
 }
 
 func New(lanes []LaneConfig, personas []PersonaConfig, app events.Appender) (*Registry, error) {
-	r := &Registry{lanes: map[string]*domain.Lane{}, personas: map[string]PersonaConfig{}, app: app, until: map[string]time.Time{}, thresholds: map[string]int{}, changed: make(chan struct{}), now: time.Now}
+	r := &Registry{lanes: map[string]*domain.Lane{}, personas: map[string]PersonaConfig{}, app: app, until: map[string]time.Time{}, thresholds: map[string]int{}, alerted: map[string]bool{}, changed: make(chan struct{}), now: time.Now}
 	for _, c := range lanes {
 		if c.ID == "" || c.Capacity < 1 || c.ConserveAt < 0 || c.ConserveAt > 100 || r.lanes[c.ID] != nil {
 			return nil, fmt.Errorf("invalid or duplicate lane %q", c.ID)
@@ -95,6 +97,8 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 		if l.Health == domain.LaneExhausted && !r.until[id].IsZero() && time.Now().After(r.until[id]) {
 			l.Health = domain.LaneUnknown
 			l.HealthReason = "reset time passed"
+			delete(r.alerted, id)
+			l.Alerted = false
 		}
 		reason := ""
 		if l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable {
@@ -290,14 +294,89 @@ func (r *Registry) Restore(lane domain.Lane) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if current := r.lanes[lane.ID]; current != nil {
+		r.alerted[lane.ID] = lane.Alerted || isAlert(lane.Health)
+		current.Alerted = r.alerted[lane.ID]
 		current.RunsToday, current.RunsDate = lane.RunsToday, lane.RunsDate
 		current.TokensLastHour = lane.TokensLastHour
+		current.CostTodayUSD = lane.CostTodayUSD
 		r.rollDay(current)
 		current.Health = lane.Health
 		current.HealthReason = lane.HealthReason
 		current.Windows = lane.Windows
 		current.LastError = lane.LastError
 	}
+}
+
+func (r *Registry) SetCostToday(ctx context.Context, id string, estimate *float64) error {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil {
+		r.mu.Unlock()
+		return fmt.Errorf("unknown lane %s", id)
+	}
+	l.CostTodayUSD = estimate
+	copyLane := *l
+	r.mu.Unlock()
+	if r.app == nil {
+		return nil
+	}
+	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
+	return err
+}
+
+func isAlert(h domain.LaneHealth) bool {
+	return h == domain.LaneConserve || h == domain.LaneExhausted || h == domain.LaneUnavailable
+}
+
+func (r *Registry) SetAlertChannels(fn func(context.Context, string) ([]string, error)) {
+	r.mu.Lock()
+	r.alertChannels = fn
+	r.mu.Unlock()
+}
+
+func (r *Registry) alertTransition(id string, h domain.LaneHealth) bool {
+	if !isAlert(h) {
+		if h == domain.LaneAvailable {
+			delete(r.alerted, id)
+			r.lanes[id].Alerted = false
+		}
+		return false
+	}
+	if r.alerted[id] {
+		return false
+	}
+	r.alerted[id] = true
+	r.lanes[id].Alerted = true
+	return true
+}
+
+func (r *Registry) emitAlert(ctx context.Context, l domain.Lane, skipChannel string) error {
+	if r.app == nil {
+		return nil
+	}
+	if _, err := r.app.Append(ctx, events.Draft{Type: events.LaneAlert, Actor: events.System, Payload: struct {
+		LaneID string            `json:"lane_id"`
+		Health domain.LaneHealth `json:"health"`
+		Reason string            `json:"reason"`
+	}{l.ID, l.Health, l.HealthReason}}); err != nil {
+		return err
+	}
+	if r.alertChannels == nil {
+		return nil
+	}
+	channels, err := r.alertChannels(ctx, l.ID)
+	if err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		if channel == skipChannel {
+			continue
+		}
+		if _, err := r.app.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: channel, Payload: events.NoticePayload{Level: "warn", Text: fmt.Sprintf("Lane %s is %s: %s", l.ID, l.Health, l.HealthReason)}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateUsage refreshes readings without clearing a hard failure signal.
@@ -313,6 +392,7 @@ func (r *Registry) UpdateUsage(ctx context.Context, id string, windows []domain.
 	if r.canUpdateFromUsage(id, l, now) {
 		l.Health, l.HealthReason = usageHealth(l.CLI, windows, r.thresholds[id], now)
 	}
+	alert := r.alertTransition(id, l.Health)
 	copyLane := *l
 	r.mu.Unlock()
 	if r.app == nil {
@@ -320,6 +400,19 @@ func (r *Registry) UpdateUsage(ctx context.Context, id string, windows []domain.
 	}
 	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
 	if err == nil {
+		for _, window := range windows {
+			_, err = r.app.Append(ctx, events.Draft{Type: events.LaneUsageRead, Actor: events.System, Payload: struct {
+				LaneID string            `json:"lane_id"`
+				Window domain.LaneWindow `json:"window"`
+				ReadAt time.Time         `json:"read_at"`
+			}{id, window, now.UTC()}})
+			if err != nil {
+				return err
+			}
+		}
+		if alert {
+			err = r.emitAlert(ctx, copyLane, "")
+		}
 		r.scheduleExpiry(id, windows, now)
 	}
 	return err
@@ -367,6 +460,7 @@ func (r *Registry) expireUsage(id string, now time.Time) {
 		return
 	}
 	l.Health, l.HealthReason = health, reason
+	r.alertTransition(id, l.Health)
 	copyLane := *l
 	r.mu.Unlock()
 	r.emit(copyLane)
@@ -435,6 +529,7 @@ func (r *Registry) ApplySignalForChannel(ctx context.Context, runID, channelID, 
 	}
 	l.HealthReason = reason
 	l.LastError = &domain.LaneError{Class: string(signal.Kind), Message: reason, At: time.Now().UTC()}
+	alert := r.alertTransition(laneID, l.Health)
 	close(r.changed)
 	r.changed = make(chan struct{})
 	copyLane := *l
@@ -447,15 +542,28 @@ func (r *Registry) ApplySignalForChannel(ctx context.Context, runID, channelID, 
 	}
 	next, _, err := r.Pick(persona, "")
 	if err != nil {
+		if alert {
+			return r.emitAlert(ctx, copyLane, "")
+		}
 		return nil
 	}
 	if next.ID == laneID {
+		if alert {
+			return r.emitAlert(ctx, copyLane, "")
+		}
 		return nil
+	}
+	if alert {
+		if err := r.emitAlert(ctx, copyLane, channelID); err != nil {
+			return err
+		}
 	}
 	if _, err = r.app.Append(ctx, events.Draft{Type: events.LaneSwitched, Version: 1, Actor: events.System, ChannelID: channelID, Payload: events.LaneSwitchedPayload{RunID: runID, From: laneID, To: next.ID, Reason: reason}}); err != nil {
 		return err
 	}
-	_, err = r.app.Append(ctx, events.Draft{Type: events.Notice, Version: 1, Actor: events.System, ChannelID: channelID, Payload: events.NoticePayload{Level: "warn", Text: fmt.Sprintf("Lane %s is %s (%s); next run uses %s", laneID, copyLane.Health, reason, next.ID)}})
+	if alert {
+		_, err = r.app.Append(ctx, events.Draft{Type: events.Notice, Version: 1, Actor: events.System, ChannelID: channelID, Payload: events.NoticePayload{Level: "warn", Text: fmt.Sprintf("Lane %s is %s (%s); next run uses %s", laneID, copyLane.Health, reason, next.ID)}})
+	}
 	return err
 }
 
@@ -484,6 +592,8 @@ func (r *Registry) RecoverSince(ctx context.Context, id, reason string, since ti
 	if l.Health == domain.LaneUnavailable || l.Health == domain.LaneExhausted {
 		l.Health, l.HealthReason = domain.LaneUnknown, reason
 	}
+	delete(r.alerted, id)
+	l.Alerted = false
 	delete(r.until, id)
 	close(r.changed)
 	r.changed = make(chan struct{})

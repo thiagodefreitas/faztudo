@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { displayPct, formatCountdown, formatTokens } from "./lane-format"
+import { displayPct, formatCostEstimate, formatCountdown, formatTokens, sparklinePath } from "./lane-format"
 import { summarizeLanes } from "./lane-health"
 import type { Lane, LaneWindow } from "../types"
 
@@ -49,6 +49,22 @@ describe("formatTokens", () => {
     expect(formatTokens(1200)).toBe("1,200")
     expect(formatTokens(31_000)).toBe("31,000")
     expect(formatTokens(2_500_000)).toBe("2,500,000")
+  })
+})
+
+describe("lane history and cost", () => {
+  it("draws a measured trend and leaves sparse history blank", () => {
+    const readings = [
+      { lane_id: "a", read_at: new Date(now - 60_000).toISOString(), window: window({ used_pct: 20 }) },
+      { lane_id: "a", read_at: new Date(now).toISOString(), window: window({ used_pct: 80 }) },
+    ]
+    expect(sparklinePath(readings, now - 120_000, now)).toBe("M50.0 19.2 L100.0 4.8")
+    expect(sparklinePath(readings.slice(0, 1), now - 120_000, now)).toBe("")
+  })
+
+  it("labels cost as an estimate only when priced", () => {
+    expect(formatCostEstimate(undefined)).toBeUndefined()
+    expect(formatCostEstimate(0.25)).toBe("about $0.25 today, estimate")
   })
 })
 

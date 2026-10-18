@@ -2,6 +2,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,11 +44,12 @@ type App struct {
 	// MCP is the in-process server. MCPBase is its loopback origin with no
 	// token in it, for example http://127.0.0.1:7457. An empty MCPBase leaves
 	// agent commands unchanged.
-	MCP      *mcp.Handler
-	MCPBase  string
-	mu       sync.Mutex
-	activeMu sync.Mutex
-	active   map[string]context.CancelFunc
+	MCP          *mcp.Handler
+	MCPBase      string
+	mu           sync.Mutex
+	activeMu     sync.Mutex
+	active       map[string]context.CancelFunc
+	summaryLocks sync.Map
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (*App, error) {
@@ -100,6 +103,82 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		"opencode": adapters.OpenCode{},
 	}}
 	a.Runner = &runner.Runner{RunDir: p.RunsDir, Appender: s, Lanes: reg, PersonaForRun: func(r domain.Run) string { return byID[r.AgentID] }}
+	reg.SetAlertChannels(func(ctx context.Context, laneID string) ([]string, error) {
+		channels, err := s.Channels(ctx)
+		if err != nil {
+			return nil, err
+		}
+		members, err := s.Members(ctx)
+		if err != nil {
+			return nil, err
+		}
+		using := map[string]bool{}
+		usingHandle := map[string]bool{}
+		for _, m := range members {
+			if m.Agent != nil && slices.Contains(m.Agent.Lanes, laneID) {
+				using[m.ID] = true
+				usingHandle[m.Handle] = true
+			}
+		}
+		projects, err := s.Projects(ctx)
+		if err != nil {
+			return nil, err
+		}
+		departments, err := s.Departments(ctx)
+		if err != nil {
+			return nil, err
+		}
+		assignedChannel := map[string]bool{}
+		for _, project := range projects {
+			assigned := usingHandle[project.Lead]
+			for _, specialist := range project.Specialists {
+				assigned = assigned || usingHandle[specialist]
+			}
+			for _, dept := range departments {
+				if !slices.Contains(project.Departments, dept.Handle) {
+					continue
+				}
+				assigned = assigned || usingHandle[dept.Lead]
+				for _, member := range dept.Members {
+					assigned = assigned || usingHandle[member]
+				}
+			}
+			if assigned {
+				for _, name := range project.Channels {
+					assignedChannel[name] = true
+				}
+			}
+		}
+		var ids []string
+		for _, ch := range channels {
+			if assignedChannel[ch.Name] {
+				ids = append(ids, ch.ID)
+				continue
+			}
+			if using[ch.DefaultAgentID] {
+				ids = append(ids, ch.ID)
+				continue
+			}
+			preferred := false
+			for _, id := range ch.LaneOverrides {
+				if id == laneID {
+					preferred = true
+					break
+				}
+			}
+			if preferred {
+				ids = append(ids, ch.ID)
+				continue
+			}
+			for _, id := range ch.MemberIDs {
+				if using[id] {
+					ids = append(ids, ch.ID)
+					break
+				}
+			}
+		}
+		return ids, nil
+	})
 	a.MCP = mcp.New(s, a)
 	return a, nil
 }
@@ -113,6 +192,7 @@ func (a *App) Bind(h *api.API) {
 	h.CancelRun = a.CancelRun
 	h.RetryRun = a.RetryRun
 	h.ProbeLane = a.ProbeLane
+	h.RegenerateSummary = a.RegenerateSummary
 	h.HideLane = func(l domain.Lane) bool { return a.Config.IsStaleDefaultLane(l.ID, l.CLI) }
 }
 
@@ -138,7 +218,49 @@ func (a *App) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = a.RefreshSummaries(ctx)
+			}
+		}
+	}()
 	return nil
+}
+
+// RefreshSummaries also covers quiet channels whose messages mention no agent.
+func (a *App) RefreshSummaries(ctx context.Context) error {
+	channels, err := a.Store.Channels(ctx)
+	if err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		lock := a.summaryLock(channel.ID)
+		lock.Lock()
+		previous, _ := a.Store.ChannelSummary(ctx, channel.ID)
+		_, err = a.refreshSummary(ctx, domain.Message{ChannelID: channel.ID}, previous, false)
+		lock.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RegenerateSummary rebuilds the channel summary from the stored transcript.
+func (a *App) RegenerateSummary(ctx context.Context, channelID string) (store.ChannelSummary, error) {
+	if _, err := a.Store.Channel(ctx, channelID); err != nil {
+		return store.ChannelSummary{}, err
+	}
+	lock := a.summaryLock(channelID)
+	lock.Lock()
+	defer lock.Unlock()
+	return a.refreshSummary(ctx, domain.Message{ChannelID: channelID}, store.ChannelSummary{}, true)
 }
 
 func (a *App) RefreshUsage(ctx context.Context) error {
@@ -182,6 +304,7 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 	}
 	var windows []domain.LaneWindow
 	var tokensHour *int64
+	var estimate *float64
 	switch lane.CLI {
 	case "codex":
 		windows, err = usage.ReadCodex(home, usage.Options{})
@@ -193,6 +316,12 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 		var result usage.TokenResult
 		result, err = read(home, usage.Options{PlanLimitTokens: a.planLimit(id)})
 		windows = result.Windows
+		for _, configured := range a.Config.Lanes.Lane {
+			if configured.ID == id {
+				estimate = usage.EstimateUSD(result.Day, configured.USDPerMillionInput, configured.USDPerMillionOutput, configured.USDPerMillionCached)
+				break
+			}
+		}
 		if result.FiveHour.Entries > 0 || result.Day.Entries > 0 {
 			total := result.LastHour.Total()
 			tokensHour = &total
@@ -208,6 +337,9 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 	}
 	if lane.CLI == "claude" || lane.CLI == "grok" {
 		if err := a.Registry.SetTokensLastHour(ctx, id, tokensHour); err != nil {
+			return domain.Lane{}, err
+		}
+		if err := a.Registry.SetCostToday(ctx, id, estimate); err != nil {
 			return domain.Lane{}, err
 		}
 	}
@@ -566,6 +698,13 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 	if n > 200 {
 		n = 200
 	}
+	// Summary generation is serialized so simultaneous agents do not charge
+	// the same channel twice or overwrite a newer boundary.
+	lock := a.summaryLock(m.ChannelID)
+	lock.Lock()
+	summary, _ := a.Store.ChannelSummary(ctx, m.ChannelID)
+	summary, _ = a.refreshSummary(ctx, m, summary, false)
+	lock.Unlock()
 	messages, err := a.Store.Messages(ctx, m.ChannelID, "", n)
 	if err != nil {
 		return "", err
@@ -579,6 +718,18 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 		handles[member.ID] = member.Handle
 	}
 	var b strings.Builder
+	if summary.Text != "" {
+		fmt.Fprintf(&b, "Channel summary through %s (lane %s):\n%s\n\n", summary.ThroughMessageID, summary.LaneID, summary.Text)
+	}
+	if summary.ThroughMessageID != "" {
+		for i, msg := range messages {
+			if msg.ID == summary.ThroughMessageID {
+				messages = messages[i+1:]
+				break
+			}
+		}
+	}
+	messages = rolloverMessages(messages, summary.Text, a.Config.Runs.ContextLimitTokens)
 	b.WriteString("Recent channel messages (oldest first):\n")
 	for _, msg := range messages {
 		body := msg.Body
@@ -589,6 +740,202 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 	}
 	fmt.Fprintf(&b, "\nRequest:\n%s", m.Body)
 	return b.String(), nil
+}
+
+func (a *App) summaryLock(channelID string) *sync.Mutex {
+	v, _ := a.summaryLocks.LoadOrStore(channelID, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
+
+// rolloverMessages keeps the newest messages under 65 percent of the
+// configured model context. The conservative four-bytes-per-token estimate
+// is only a guardrail, not a tokenizer or a provider measurement.
+func rolloverMessages(messages []domain.Message, summary string, limit int) []domain.Message {
+	if limit < 1 {
+		return messages
+	}
+	budget := int(float64(limit) * 0.65)
+	used := estimatedContextTokens(messages, summary)
+	for len(messages) > 1 && used > budget {
+		used -= (len(messages[0].Body)+3)/4 + 16
+		messages = messages[1:]
+	}
+	return messages
+}
+
+func estimatedContextTokens(messages []domain.Message, summary string) int {
+	used := (len(summary) + 3) / 4
+	for _, m := range messages {
+		used += (len(m.Body)+3)/4 + 16
+	}
+	return used
+}
+
+func (a *App) refreshSummary(ctx context.Context, current domain.Message, previous store.ChannelSummary, force bool) (store.ChannelSummary, error) {
+	messages, err := a.Store.RootMessagesAfter(ctx, current.ChannelID, previous.ThroughMessageID)
+	if err != nil {
+		return previous, err
+	}
+	if current.ID != "" {
+		for i, msg := range messages {
+			if msg.ID == current.ID {
+				messages = messages[:i]
+				break
+			}
+		}
+	}
+	if len(messages) == 0 {
+		return previous, nil
+	}
+	every := a.Config.Runs.SummaryEvery
+	if every < 1 {
+		every = 20
+	}
+	limit := a.Config.Runs.ContextLimitTokens
+	if limit < 1 {
+		limit = 128000
+	}
+	if !force && len(messages) < every && len(messages) <= a.Config.Runs.ContextMessages && estimatedContextTokens(messages, previous.Text) <= int(float64(limit)*0.65) {
+		return previous, nil
+	}
+	lane, err := a.summaryLane(ctx)
+	if err != nil {
+		return previous, err
+	}
+	var input strings.Builder
+	input.WriteString("Summarize this channel for future agent runs in under 1800 characters. Preserve decisions, constraints, open tasks and named facts. Do not invent facts. Return only the summary.\n\n")
+	if previous.Text != "" {
+		input.WriteString("Previous summary:\n" + previous.Text + "\n\n")
+	}
+	input.WriteString("New messages:\n")
+	for _, msg := range messages {
+		fmt.Fprintf(&input, "%s: %s\n", msg.AuthorID, msg.Body)
+	}
+	answer, err := a.generateSummary(ctx, lane, input.String(), current.ChannelID)
+	if err != nil {
+		return previous, err
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return previous, errors.New("summary lane returned no text")
+	}
+	if len(answer) > 4000 {
+		answer = answer[:4000]
+	}
+	updated := store.ChannelSummary{ChannelID: current.ChannelID, LaneID: lane.ID, Text: answer, ThroughMessageID: messages[len(messages)-1].ID, UpdatedAt: time.Now().UTC()}
+	_, err = a.Store.Append(ctx, events.Draft{Type: events.ChannelSummarized, Actor: events.System, ChannelID: current.ChannelID, Payload: updated})
+	if err != nil {
+		return previous, err
+	}
+	if len(messages) == 80 {
+		return a.refreshSummary(ctx, current, updated, force)
+	}
+	return updated, nil
+}
+
+func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
+	all, err := a.Store.Lanes(ctx)
+	if err != nil {
+		return domain.Lane{}, err
+	}
+	preferred := a.Config.Runs.SummaryLane
+	if preferred != "" {
+		for _, l := range all {
+			if l.ID == preferred && a.Adapters[l.CLI] != nil && l.Running < l.Capacity && l.Health != domain.LaneExhausted && l.Health != domain.LaneUnavailable {
+				return l, nil
+			}
+		}
+		return domain.Lane{}, fmt.Errorf("summary lane %s unavailable", preferred)
+	}
+	rank := func(c domain.CostClass) int {
+		switch c {
+		case domain.CostLocal:
+			return 0
+		case domain.CostCheap:
+			return 1
+		case domain.CostStandard:
+			return 2
+		default:
+			return 3
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if rank(all[i].CostClass) != rank(all[j].CostClass) {
+			return rank(all[i].CostClass) < rank(all[j].CostClass)
+		}
+		return all[i].ID < all[j].ID
+	})
+	for _, l := range all {
+		if a.Adapters[l.CLI] != nil && l.Running < l.Capacity && l.Health != domain.LaneExhausted && l.Health != domain.LaneUnavailable {
+			return l, nil
+		}
+	}
+	return domain.Lane{}, errors.New("no summary lane available")
+}
+
+func (a *App) generateSummary(ctx context.Context, lane domain.Lane, prompt, channelID string) (string, error) {
+	if err := a.Registry.Acquire(lane.ID); err != nil {
+		return "", err
+	}
+	defer a.Registry.Release(lane.ID)
+	a.Registry.RecordRun(lane.ID)
+	adapter := a.Adapters[lane.CLI]
+	if adapter == nil {
+		return "", fmt.Errorf("no summary adapter for %s", lane.CLI)
+	}
+	channel, err := a.Store.Channel(ctx, channelID)
+	if err != nil {
+		return "", err
+	}
+	dir := channel.RepoPath
+	if dir == "" {
+		dir = a.Paths.DataDir
+	}
+	command, err := adapter.Command(adapters.Request{Prompt: prompt, Mode: domain.RunRead, Model: lane.Model, Workdir: dir, Timeout: 2 * time.Minute})
+	if err != nil {
+		return "", err
+	}
+	for _, file := range command.Remove {
+		defer os.Remove(file)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(callCtx, command.Path, command.Args...)
+	cmd.Dir = command.Dir
+	cmd.Env = append([]string{}, os.Environ()...)
+	for key, value := range command.EnvAdd {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	for _, key := range command.EnvRemove {
+		filtered := cmd.Env[:0]
+		for _, item := range cmd.Env {
+			if !strings.HasPrefix(item, key+"=") {
+				filtered = append(filtered, item)
+			}
+		}
+		cmd.Env = filtered
+	}
+	var out summaryOutput
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return adapters.CleanAnswer(adapter, out.String()), nil
+}
+
+type summaryOutput struct{ bytes.Buffer }
+
+func (o *summaryOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	if o.Len() < 8192 {
+		remaining := 8192 - o.Len()
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = o.Buffer.Write(p)
+	}
+	return n, nil
 }
 
 func (a *App) answer(id string) string {

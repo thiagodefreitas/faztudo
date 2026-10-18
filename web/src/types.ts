@@ -163,7 +163,15 @@ export interface Lane {
   windows: LaneWindow[]
   runs_today: number
   tokens_last_hour?: number
+  cost_today_usd?: number
+  alerted?: boolean
   last_error?: LaneError
+}
+
+export interface LaneUsageReading {
+  lane_id: string
+  window: LaneWindow
+  read_at: string
 }
 
 export interface OutputLine {

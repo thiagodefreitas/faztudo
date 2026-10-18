@@ -25,6 +25,9 @@ const (
 	DepartmentUpdated Type = "department.updated"
 	ProjectUpdated    Type = "project.updated"
 	LaneUpdated       Type = "lane.updated"
+	LaneUsageRead     Type = "lane.usage_read"
+	LaneAlert         Type = "lane.alert"
+	ChannelSummarized Type = "channel.summarized"
 	LaneSwitched      Type = "lane.switched"
 	Notice            Type = "notice"
 )

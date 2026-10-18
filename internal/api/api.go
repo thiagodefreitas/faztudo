@@ -42,15 +42,16 @@ type API struct {
 	// tailscale serve. With LAN mode on, such requests need a session.
 	AllowedHosts []string
 	// LocalTokenPath is the persistent token file. Serve fails closed if unset.
-	LocalTokenPath  string
-	LocalLimiter    *auth.LoginRateLimiter
-	localAuthBypass bool // used only by legacy in-package tests
-	Trigger         RunTrigger
-	ResolveApproval func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
-	ReadDiff        func(string) ([]byte, error)
-	CancelRun       func(context.Context, string) error
-	RetryRun        func(context.Context, string, string) error
-	ProbeLane       func(context.Context, string) (domain.Lane, error)
+	LocalTokenPath    string
+	LocalLimiter      *auth.LoginRateLimiter
+	localAuthBypass   bool // used only by legacy in-package tests
+	Trigger           RunTrigger
+	ResolveApproval   func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
+	ReadDiff          func(string) ([]byte, error)
+	CancelRun         func(context.Context, string) error
+	RetryRun          func(context.Context, string, string) error
+	ProbeLane         func(context.Context, string) (domain.Lane, error)
+	RegenerateSummary func(context.Context, string) (store.ChannelSummary, error)
 	// HideLane drops lanes that must not be listed, such as a detected-only
 	// default once lanes.toml configures the CLI.
 	HideLane      func(domain.Lane) bool
@@ -147,6 +148,9 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/approvals", a.approvals)
 	m.HandleFunc("POST /api/v1/approvals/{id}/resolve", a.resolve)
 	m.HandleFunc("GET /api/v1/lanes", a.lanes)
+	m.HandleFunc("GET /api/v1/lanes/channel-summary/{channel_id}", a.getChannelSummary)
+	m.HandleFunc("POST /api/v1/lanes/channel-summary/{channel_id}/regenerate", a.regenerateChannelSummary)
+	m.HandleFunc("GET /api/v1/lanes/{id...}", a.laneHistory)
 	m.HandleFunc("PATCH /api/v1/lanes/{id...}", a.patchLane)
 	m.HandleFunc("POST /api/v1/lanes/{id...}", a.probe)
 	m.HandleFunc("GET /api/v1/stream", a.stream)
@@ -938,6 +942,75 @@ func (a *API) lanes(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, v)
 }
+func (a *API) getChannelSummary(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("channel_id")
+	if _, err := a.Store.Channel(r.Context(), id); err != nil {
+		failErr(w, err)
+		return
+	}
+	summary, err := a.Store.ChannelSummary(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		respond(w, 200, store.ChannelSummary{ChannelID: id})
+		return
+	}
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	respond(w, 200, summary)
+}
+func (a *API) regenerateChannelSummary(w http.ResponseWriter, r *http.Request) {
+	if current(r).Kind != domain.MemberHuman {
+		fail(w, 403, "forbidden", "only a human can regenerate a summary")
+		return
+	}
+	if a.RegenerateSummary == nil {
+		fail(w, 409, "conflict", "summary generation unavailable")
+		return
+	}
+	summary, err := a.RegenerateSummary(r.Context(), r.PathValue("channel_id"))
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	respond(w, 200, summary)
+}
+func (a *API) laneHistory(w http.ResponseWriter, r *http.Request) {
+	path := r.PathValue("id")
+	if !strings.HasSuffix(path, "/history") {
+		fail(w, 404, "not_found", "endpoint not found")
+		return
+	}
+	id := strings.TrimSuffix(path, "/history")
+	if _, err := a.Store.Lane(r.Context(), id); err != nil {
+		failErr(w, err)
+		return
+	}
+	window := r.URL.Query().Get("window")
+	if window != "" && window != "5h" && window != "day" && window != "week" && window != "month" {
+		fail(w, 400, "bad_request", "invalid window")
+		return
+	}
+	since := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		var err error
+		since, err = time.Parse(time.RFC3339, raw)
+		if err != nil {
+			fail(w, 400, "bad_request", "since must be RFC3339")
+			return
+		}
+	}
+	if since.Before(time.Now().Add(-31 * 24 * time.Hour)) {
+		fail(w, 400, "bad_request", "history is limited to 31 days")
+		return
+	}
+	readings, err := a.Store.LaneHistory(r.Context(), id, window, since)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	respond(w, 200, readings)
+}
 func laneID(r *http.Request) string { return strings.TrimSuffix(r.PathValue("id"), "/probe") }
 func (a *API) patchLane(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.PathValue("id"), "/probe") {
@@ -969,9 +1042,21 @@ func (a *API) patchLane(w http.ResponseWriter, r *http.Request) {
 		v.HealthReason = "manual override"
 	}
 	if req.ManualWindow != nil {
+		now := time.Now().UTC()
+		if req.ManualWindow.MeasuredAt == nil {
+			req.ManualWindow.MeasuredAt = &now
+		}
+		req.ManualWindow.Source = domain.SourceManual
 		v.Windows = append(v.Windows, *req.ManualWindow)
 	}
 	if _, ok := a.append(w, r, events.LaneUpdated, "", "", v); ok {
+		if req.ManualWindow != nil {
+			_, err := a.Store.Append(r.Context(), events.Draft{Type: events.LaneUsageRead, Actor: events.Human(current(r).ID), Payload: store.LaneUsageReading{LaneID: v.ID, Window: *req.ManualWindow, ReadAt: time.Now().UTC()}})
+			if err != nil {
+				failErr(w, err)
+				return
+			}
+		}
 		respond(w, 200, v)
 	}
 }

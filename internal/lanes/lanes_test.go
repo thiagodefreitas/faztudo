@@ -44,7 +44,7 @@ func TestPickCapacityAndExhaustion(t *testing.T) {
 		t.Fatalf("%+v %+v %v", second, skipped, err)
 	}
 	drafts := log.Snapshot()
-	if len(drafts) != 5 || drafts[0].Type != events.LaneUpdated || drafts[1].Type != events.LaneUpdated || drafts[2].Type != events.LaneUpdated || drafts[3].Type != events.LaneSwitched || drafts[4].Type != events.Notice {
+	if len(drafts) != 6 || drafts[0].Type != events.LaneUpdated || drafts[1].Type != events.LaneUpdated || drafts[2].Type != events.LaneUpdated || drafts[3].Type != events.LaneAlert || drafts[4].Type != events.LaneSwitched || drafts[5].Type != events.Notice {
 		t.Fatalf("%+v", drafts)
 	}
 	if drafts[0].Payload.(domain.Lane).Running != 1 || drafts[1].Payload.(domain.Lane).Running != 0 {
@@ -212,7 +212,7 @@ func TestUsageExpiresWithoutNewProbe(t *testing.T) {
 		t.Fatalf("expired health: %s %q", got.Health, got.HealthReason)
 	}
 	drafts := log.Snapshot()
-	if len(drafts) != 2 || drafts[1].Payload.(domain.Lane).Health != domain.LaneUnknown {
+	if len(drafts) != 3 || drafts[1].Type != events.LaneUsageRead || drafts[2].Payload.(domain.Lane).Health != domain.LaneUnknown {
 		t.Fatalf("expiry events: %+v", drafts)
 	}
 }

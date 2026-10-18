@@ -283,5 +283,7 @@ type Lane struct {
 	// RunsDate is the local day (2006-01-02) that RunsToday counts.
 	RunsDate       string     `json:"runs_date,omitempty"`
 	TokensLastHour *int64     `json:"tokens_last_hour,omitempty"`
+	CostTodayUSD   *float64   `json:"cost_today_usd,omitempty"`
+	Alerted        bool       `json:"alerted,omitempty"`
 	LastError      *LaneError `json:"last_error,omitempty"`
 }

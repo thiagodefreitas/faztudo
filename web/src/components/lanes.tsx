@@ -1,16 +1,31 @@
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
-import { compactTokens, displayPct, formatCountdown, formatTokens } from "../lib/lane-format"
+import { compactTokens, displayPct, formatCostEstimate, formatCountdown, formatTokens, sparklinePath } from "../lib/lane-format"
 import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
 import { formatAge } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
 import { useLanes } from "../state/queries"
-import type { Lane, LaneHealth, LaneWindow } from "../types"
+import type { Lane, LaneHealth, LaneUsageReading, LaneWindow } from "../types"
+
+function WindowHistory({ window, history, now }: { window: LaneWindow; history: LaneUsageReading[]; now: number }) {
+  const readings = history.filter((r) => r.window.name === window.name)
+  return <div className="mt-1 flex gap-2">
+    {([1, 7] as const).map((days) => {
+      const path = sparklinePath(readings, now - days * 86_400_000, now)
+      return <div key={days} className="min-w-0 flex-1">
+        <span className="font-mono text-[10px] text-faint">{days === 1 ? "24h" : "7d"}</span>
+        <svg role="img" aria-label={`${window.name} usage, last ${days === 1 ? "24 hours" : "7 days"}`} viewBox="0 0 100 24" preserveAspectRatio="none" className="h-6 w-full text-accent">
+          {path ? <path d={path} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" /> : <path d="M0 23H100" fill="none" stroke="currentColor" strokeDasharray="2 3" opacity="0.35" />}
+        </svg>
+      </div>
+    })}
+  </div>
+}
 
 // Alt+L jumps to the Lanes page from anywhere, except while typing.
 export function useLanesShortcut(): void {
@@ -129,7 +144,7 @@ function WindowFill({ health, pct }: { health: LaneHealth; pct: number | undefin
   }
 }
 
-function WindowBar({ lane, window, now }: { lane: Lane; window: LaneWindow; now: number }) {
+function WindowBar({ lane, window, now, history }: { lane: Lane; window: LaneWindow; now: number; history: LaneUsageReading[] }) {
   const pct = displayPct(window, lane.health)
   // Without a percentage, a CLI that logs tokens still says how much it used.
   const tokens = pct === undefined && window.tokens !== undefined ? `${compactTokens(window.tokens)} tokens` : undefined
@@ -154,6 +169,7 @@ function WindowBar({ lane, window, now }: { lane: Lane; window: LaneWindow; now:
         </span>
         <span>{formatCountdown(window.resets_at, now)}</span>
       </div>
+      <WindowHistory window={window} history={history} now={now} />
     </li>
   )
 }
@@ -164,12 +180,14 @@ export function LaneCardView({
   probing,
   probeError,
   onProbe,
+  history = [],
 }: {
   lane: Lane
   now: number
   probing: boolean
   probeError: string | undefined
   onProbe: () => void
+  history?: LaneUsageReading[]
 }) {
   return (
     <article aria-label={`lane ${lane.id}`} data-health={lane.health} className="flex flex-col rounded-md border border-line bg-surface p-3">
@@ -186,7 +204,7 @@ export function LaneCardView({
       {lane.windows.length > 0 && (
         <ul className="mt-2 flex flex-col gap-2">
           {lane.windows.map((window) => (
-            <WindowBar key={window.name} lane={lane} window={window} now={now} />
+            <WindowBar key={window.name} lane={lane} window={window} now={now} history={history} />
           ))}
         </ul>
       )}
@@ -206,6 +224,7 @@ export function LaneCardView({
           <dd className="font-mono text-[12px] tabular-nums text-ink">{formatTokens(lane.tokens_last_hour)}</dd>
         </div>
       </dl>
+      {formatCostEstimate(lane.cost_today_usd) && <p className="mt-2 text-[12px] text-muted">{formatCostEstimate(lane.cost_today_usd)}</p>}
       {lane.last_error && (
         <div className="mt-2 rounded-md border-l-2 border-danger bg-danger-soft px-2 py-1.5">
           <p className="text-[12px] font-medium text-danger">{lane.last_error.class}</p>
@@ -236,6 +255,15 @@ function LaneCard({ lane, now }: { lane: Lane; now: number }) {
   const qc = useQueryClient()
   const [probing, setProbing] = useState(false)
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
+  const history = useQuery({
+    queryKey: ["lane-history", lane.id],
+    queryFn: async (): Promise<LaneUsageReading[]> => {
+      const response = await fetch(`/api/v1/lanes/${encodeURIComponent(lane.id)}/history`, { credentials: "same-origin" })
+      if (!response.ok) throw new Error("Lane history unavailable")
+      return response.json() as Promise<LaneUsageReading[]>
+    },
+    staleTime: 60_000,
+  })
 
   function probe() {
     setProbing(true)
@@ -252,7 +280,7 @@ function LaneCard({ lane, now }: { lane: Lane; now: number }) {
     )
   }
 
-  return <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} />
+  return <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} />
 }
 
 export function LanesPage() {
