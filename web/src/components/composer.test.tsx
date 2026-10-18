@@ -23,6 +23,37 @@ const members: Member[] = [
   },
 ]
 
+describe("Composer tasks", () => {
+  it("opens the task builder from the Task button", async () => {
+    const user = userEvent.setup()
+    const onTask = vi.fn()
+    render(<Composer members={members} channelName="dev" onSend={vi.fn()} onTask={onTask} />)
+    await user.click(screen.getByRole("button", { name: "New task" }))
+    expect(onTask).toHaveBeenCalledWith("")
+  })
+
+  it("opens the builder for /task and sends nothing", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    const onTask = vi.fn()
+    render(<Composer members={members} channelName="dev" onSend={onSend} onTask={onTask} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await user.type(box, "/task Fix the login{Enter}")
+    expect(onTask).toHaveBeenCalledWith("Fix the login")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(box).toHaveValue("")
+  })
+
+  it("sends /task as plain text when there is no builder", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Composer members={members} channelName="dev" onSend={onSend} />)
+    expect(screen.queryByRole("button", { name: "New task" })).not.toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "/task x{Enter}")
+    expect(onSend).toHaveBeenCalledWith("/task x")
+  })
+})
+
 describe("Composer", () => {
   it("completes a mention on Enter and sends on the next Enter", async () => {
     const user = userEvent.setup()

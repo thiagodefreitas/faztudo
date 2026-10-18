@@ -55,6 +55,10 @@ type App struct {
 	extraMu      sync.Mutex
 	extra        map[string]string
 	summaryLocks sync.Map
+	// taskMu serializes changes to tasks. taskDispatch runs a task's message
+	// for its agent; nil means a.run, tests replace it.
+	taskMu       sync.Mutex
+	taskDispatch func(ctx context.Context, m domain.Message, agent domain.Member, override string)
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (*App, error) {
@@ -228,6 +232,8 @@ func (a *App) Bind(h *api.API) {
 	h.ReadDiff = func(id string) ([]byte, error) {
 		return os.ReadFile(filepath.Join(a.Paths.RunsDir, id, "diff.patch"))
 	}
+	h.Tasks = a
+	h.OnApproval = a.TaskForApproval
 	h.CancelRun = a.CancelRun
 	h.RetryRun = a.RetryRun
 	h.ProbeLane = a.ProbeLane
@@ -576,6 +582,12 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if mode == "" {
 		mode = domain.RunRead
 	}
+	if m.Task != "" {
+		// A task decides its own mode, also when its run is retried.
+		if task, terr := a.Store.Task(ctx, m.Task); terr == nil && task.Mode != "" {
+			mode = task.Mode
+		}
+	}
 	if mode == domain.RunWrite && channel.RepoPath == "" {
 		a.notice(ctx, channel.ID, "warn", "Write runs need a channel repo_path. Set it with PATCH /api/v1/channels/"+channel.ID+".")
 		return nil
@@ -658,6 +670,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if _, err := a.Store.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: channel.ID, Payload: run}); err != nil {
 		return err
 	}
+	a.syncTask(ctx, m.ID, false)
 	workdir := channel.RepoPath
 	if workdir == "" {
 		workdir = a.Paths.DataDir
@@ -822,7 +835,10 @@ func (a *App) RetryRun(ctx context.Context, id, laneID string) error {
 	if _, _, err := a.Registry.Pick(agent.Handle, laneID); err != nil {
 		return err
 	}
-	go a.run(context.Background(), message, agent, laneID)
+	go func() {
+		a.run(context.Background(), message, agent, laneID)
+		a.syncTask(context.Background(), message.ID, true)
+	}()
 	return nil
 }
 

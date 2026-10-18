@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type Dra
 import { ApiError, api } from "../api/client"
 import { formatSize } from "../lib/files"
 import { applyMention, filterMembers, mentionQuery } from "../lib/mentions"
+import { parseTaskCommand } from "../lib/tasks"
 import type { Attachment, Member } from "../types"
 
 interface Upload {
@@ -24,6 +25,7 @@ export function Composer({
   label = "Message",
   attach = false,
   onSend,
+  onTask,
 }: {
   members: Member[]
   channelName: string
@@ -32,6 +34,8 @@ export function Composer({
   /** Show the attach button and accept pasted or dropped files. */
   attach?: boolean
   onSend: (body: string, attachments?: Attachment[]) => void
+  /** Opens the task builder, with a title. Adds the Task button and the /task command. */
+  onTask?: (title: string) => void
 }) {
   const listId = useId()
   const [text, setText] = useState("")
@@ -110,6 +114,13 @@ export function Composer({
       return
     }
     const body = text.trim()
+    const command = onTask ? parseTaskCommand(body) : null
+    if (command && onTask) {
+      onTask(command.title)
+      setText("")
+      setCursor(0)
+      return
+    }
     if ((!body && ready.length === 0) || uploading) return
     if (ready.length > 0) onSend(body, ready)
     else onSend(body)
@@ -236,6 +247,17 @@ export function Composer({
               </svg>
             </button>
           </>
+        )}
+        {onTask && (
+          <button
+            type="button"
+            aria-label="New task"
+            title="New task (or type /task)"
+            onClick={() => onTask("")}
+            className="flex h-10 shrink-0 items-center justify-center rounded-full px-2.5 text-[12px] font-medium text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink md:h-8"
+          >
+            Task
+          </button>
         )}
         <label className="block min-w-0 flex-1">
           <span className="sr-only">{label}</span>

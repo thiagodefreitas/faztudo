@@ -34,6 +34,9 @@ import type {
   Run,
   RunState,
   SearchHit,
+  Task,
+  TaskInput,
+  TaskPatch,
   ThreadPage,
 } from "../types"
 
@@ -85,6 +88,11 @@ export interface Api {
   routines: () => Promise<Routine[]>
   setRoutineEnabled: (handle: string, enabled: boolean) => Promise<Routine>
   runRoutine: (handle: string) => Promise<{ status: string }>
+  tasks: (query?: { channel_id?: ID; project?: string }) => Promise<Task[]>
+  createTask: (body: TaskInput) => Promise<Task>
+  patchTask: (id: ID, body: TaskPatch) => Promise<Task>
+  startTask: (id: ID) => Promise<Task>
+  cancelTask: (id: ID) => Promise<Task>
   lanes: () => Promise<Lane[]>
   channelSummary: (channelId: ID) => Promise<ChannelSummary>
   patchLane: (id: string, body: LanePatch) => Promise<Lane>
@@ -174,6 +182,11 @@ export function createApi(options: ApiOptions = {}): Api {
     routines: () => request("GET", "/routines"),
     setRoutineEnabled: (handle, enabled) => request("PATCH", `/routines/${encodeURIComponent(handle)}`, { enabled }),
     runRoutine: (handle) => request("POST", `/routines/${encodeURIComponent(handle)}/run`),
+    tasks: (params = {}) => request("GET", query("/tasks", params)),
+    createTask: (body) => request("POST", "/tasks", body),
+    patchTask: (id, body) => request("PATCH", `/tasks/${encodeURIComponent(id)}`, body),
+    startTask: (id) => request("POST", `/tasks/${encodeURIComponent(id)}/start`),
+    cancelTask: (id) => request("POST", `/tasks/${encodeURIComponent(id)}/cancel`),
     lanes: () => request("GET", "/lanes"),
     channelSummary: (channelId) => request("GET", `/lanes/channel-summary/${encodeURIComponent(channelId)}`),
     patchLane: (id, body) => request("PATCH", `/lanes/${encodeURIComponent(id)}`, body),

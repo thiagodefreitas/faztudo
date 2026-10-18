@@ -34,6 +34,8 @@ const (
 	Notice            Type = "notice"
 	HandoffCreated    Type = "handoff.created"
 	RoutineUpdated    Type = "routine.updated"
+	TaskCreated       Type = "task.created"
+	TaskUpdated       Type = "task.updated"
 )
 
 // Actor identifies who caused an event: "human:<id>", "agent:<id>",

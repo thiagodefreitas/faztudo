@@ -114,6 +114,7 @@ interface Message {
   run_id?: ID;              // set when the message is an agent run's output
   handoff?: Handoff;        // set when an agent handed work over with the delegate tool
   routine?: string;         // handle of the routine that posted this message
+  task?: ID;                // id of the task whose start posted this message
   created_at: string;
   edited_at?: string;
   reply_count?: number;     // on thread roots
@@ -138,6 +139,27 @@ interface Routine {
   enabled: boolean;
   next_run?: string;        // scheduled routines that are on
   last?: { at: string; status: "ok" | "failed" | "skipped"; detail?: string; run_id?: ID };
+}
+
+interface Task {
+  id: ID;
+  channel_id: ID;
+  title: string;
+  body?: string;            // the directive
+  assignee: string;         // handle of the agent
+  lane?: string;            // set when the task is pinned to a lane, as with /lane
+  mode: "read" | "write";   // overrides the agent's own mode for this task
+  scope: string[];          // paths or areas it may touch
+  checks: string[];         // commands to run and report
+  acceptance: string[];     // what done means
+  status: "todo" | "running" | "review" | "done" | "failed" | "cancelled";
+  order: number;            // sorts the Todo column
+  message_id?: ID;          // the message that started it
+  run_ids: ID[];            // runs for that message, oldest first, retries included
+  approval_id?: ID;         // the approval of the newest run, when it has one
+  created_by: ID;
+  created_at: string;
+  updated_at: string;
 }
 
 interface Attachment {
@@ -287,6 +309,12 @@ interface NoticeAction {
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/routines` | `Routine[]` with the time of the next run |
 | PATCH | `/api/v1/routines/{handle}` | switch `{enabled}` on or off; humans only (403 for an agent), 404 for an unknown routine; returns the `Routine` |
+| GET | `/api/v1/tasks?channel_id=&project=` | `Task[]` by board order; `project` is a project handle (404 if unknown) and keeps the tasks of its channels |
+| POST | `/api/v1/tasks` | humans only. `{channel_id, title, assignee, body?, lane?, mode?, scope?, checks?, acceptance?, start?}` creates a task in Todo and returns it (201). With `start: true` it also starts it. 400 with the reason when the input is wrong or the assignee is not an agent |
+| GET | `/api/v1/tasks/{id}` | `Task`, 404 if unknown |
+| PATCH | `/api/v1/tasks/{id}` | humans only. Any of `title, body, assignee, lane, mode, scope, checks, acceptance, order`; only a task in Todo can change (400 otherwise) |
+| POST | `/api/v1/tasks/{id}/start` | humans only. Posts the directive in the channel as a message that mentions the assignee, with `Message.task` set, and runs the agent. A failed task can be started again. 409 with the reason when it cannot run now (unknown lane, lane out of quota, write mode without `repo_path`, already started) and nothing is posted |
+| POST | `/api/v1/tasks/{id}/cancel` | humans only. Drops a Todo task or stops a running one and its runs; 409 when it waits for an approval (decide that instead) or has ended |
 | POST | `/api/v1/routines/{handle}/run` | start the routine now, on or off; humans only; 202 `{status: "started"}`, or 409 with the reason in `message` when it cannot run now (lane health, no assignment, daily limit, already running) |
 | GET | `/api/v1/channels` | channels the caller can see |
 | POST | `/api/v1/channels` | create `{name, kind?, visibility?, topic?, repo_path?, member_ids?}`; kind defaults to `team`, visibility to `public` |
@@ -369,6 +397,7 @@ Event types in version 1:
 | `department.updated` | `Department` |
 | `project.updated` | `Project` (sent when the Director creates a project or changes its fields or assignments) |
 | `routine.updated` | `Routine` (sent when it is switched or has run) |
+| `task.created`, `task.updated` | `Task` (the whole task, sent when it is created, edited, started or reported on by a run or an approval) |
 | `handoff.created` | `Handoff` plus `message_id` |
 | `notice` | `{level: "info" or "warn" or "error", text, action?: NoticeAction}` |
 

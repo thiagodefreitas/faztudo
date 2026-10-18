@@ -1,7 +1,7 @@
 import * as Menu from "@radix-ui/react-dropdown-menu"
 import { Link, getRouteApi, useNavigate } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { Suspense, lazy, useEffect, useState } from "react"
 import { ApiError, api } from "../api/client"
 import { directPeer, isDirect } from "../lib/direct"
 import { ulid } from "../lib/id"
@@ -24,6 +24,8 @@ import { ThreadPanel } from "./thread-panel"
 import { OPEN_SETTINGS_EVENT } from "./palette"
 import { PinsDialog } from "./pins-dialog"
 import { OPEN_SEARCH_EVENT } from "./search-dialog"
+
+const TaskBuilder = lazy(() => import("./tasks/task-builder").then((module) => ({ default: module.TaskBuilder })))
 
 const channelApi = getRouteApi("/c/$channelId")
 
@@ -56,6 +58,8 @@ export function ChannelPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [pinsOpen, setPinsOpen] = useState(false)
+  // The task builder is loaded when it is first opened; a title opens it filled in.
+  const [taskTitle, setTaskTitle] = useState<string | null>(null)
   const notify = useNotifyPrefs()
   const muted = notify.muted.includes(channelId)
 
@@ -271,6 +275,11 @@ export function ChannelPage() {
                   </Menu.Item>
                 )}
                 <Menu.Item asChild>
+                  <Link to="/tasks" className={MENU_ITEM}>
+                    Tasks
+                  </Link>
+                </Menu.Item>
+                <Menu.Item asChild>
                   <Link to="/lanes" className={MENU_ITEM}>
                     Lanes
                   </Link>
@@ -299,7 +308,19 @@ export function ChannelPage() {
           attach
           {...(direct ? { placeholder: `Message ${title}` } : {})}
           onSend={(body, attachments) => send(body, attachments)}
+          onTask={(taskTitle) => setTaskTitle(taskTitle)}
         />
+        {taskTitle !== null && (
+          <Suspense fallback={null}>
+            <TaskBuilder
+              open
+              onOpenChange={(open) => !open && setTaskTitle(null)}
+              channels={[channel]}
+              channelId={channelId}
+              initialTitle={taskTitle}
+            />
+          </Suspense>
+        )}
         <PinsDialog channelId={channelId} open={pinsOpen} onOpenChange={setPinsOpen} />
       </section>
       {search.thread ? (

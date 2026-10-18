@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query"
-import type { Member, Message, NoticeItem, OutputLine, StreamEvent } from "../types"
+import type { Member, Message, NoticeItem, OutputLine, StreamEvent, Task } from "../types"
 import { qk } from "./keys"
+import { replaceById } from "./merge"
 import { emptySnapshot, reduce, type Snapshot } from "./reduce"
 
 function readSnapshot(qc: QueryClient): Snapshot {
@@ -52,6 +53,14 @@ export function applyEvent(qc: QueryClient, event: StreamEvent): void {
   // Routines are not part of the snapshot either.
   if (event.type === "routine.updated") {
     void qc.invalidateQueries({ queryKey: qk.routines })
+  }
+  // Tasks are not part of the snapshot: the event carries the whole task.
+  if (event.type === "task.created" || event.type === "task.updated") {
+    const task = event.payload as Task | null
+    if (task && typeof task.id === "string") {
+      qc.setQueryData<Task[]>(qk.tasks, (current) => replaceById(current ?? [], task))
+    }
+    return
   }
   // Pins are fetched per channel and not part of the snapshot.
   if ((event.type === "message.pinned" || event.type === "message.unpinned") && event.channel_id) {

@@ -118,6 +118,16 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 7 {
+		migration, err = migrations.ReadFile("migrations/007.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	// Search is optional: if this SQLite build has no FTS5 the table is not
 	// created and Search falls back to LIKE.
 	setupSearch(db)
@@ -488,6 +498,16 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 			return errors.New("routine handle required")
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('routine',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", r.Handle, e.Payload)
+		return err
+	case events.TaskCreated, events.TaskUpdated:
+		var t domain.Task
+		if err := json.Unmarshal(e.Payload, &t); err != nil {
+			return err
+		}
+		if t.ID == "" || t.ChannelID == "" {
+			return errors.New("task id and channel required")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO tasks(id,channel_id,message_id,status,data) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id,status=excluded.status,data=excluded.data", t.ID, t.ChannelID, t.MessageID, t.Status, e.Payload)
 		return err
 	case events.Type("channel.read"):
 		var read struct {

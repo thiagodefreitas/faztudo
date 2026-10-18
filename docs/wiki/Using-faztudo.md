@@ -100,6 +100,29 @@ channels, team, recent merges and routines:
 - `/status` answers from faztudo itself, with no agent and no quota: active
   runs in the channel, approvals waiting for you and every lane's health.
 
+## Tasks
+
+A plain `@coder fix the login` always works. When the work needs more
+shape, give it as a task: a title, a directive, the agent, an optional lane,
+a mode (read or write), the scope it may touch, the checks to run and what
+done means. Click **Task** next to the message box, or type `/task` (and an
+optional title). The builder has templates for implement, review,
+investigate and docs. **Add to Todo** keeps it for later, **Start now** runs
+it.
+
+Starting a task posts its directive in the channel, with scope, checks and
+acceptance as their own sections, and runs the agent on it. A task you pin to
+a lane does not fall back to another lane, as with `/lane`. If the lane is out
+of quota, or a write task has no `repo_path`, the start is refused and you
+see why.
+
+The **Tasks** page (`/tasks`, and `/p/<project>/tasks` for one project) is a
+board: Todo, Running, Review and Done. Drag Todo cards to reorder them, or
+use the arrow buttons. A card opens the task with its directive, its runs,
+links to each run's timeline and to its approval. A task is in Review while
+a run waits for your decision, and when it failed; deciding the approval
+finishes it. A project home lists its open tasks.
+
 ## Runs and approvals
 
 Each run shows as a card with its state and streamed output. You can cancel a

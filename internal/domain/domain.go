@@ -117,6 +117,7 @@ type Message struct {
 	ReplyCount  int          `json:"reply_count,omitempty"`
 	Handoff     *Handoff     `json:"handoff,omitempty"` // set when an agent posted it with the delegate tool
 	Routine     string       `json:"routine,omitempty"` // handle of the routine that posted it
+	Task        ID           `json:"task,omitempty"`    // id of the task whose start posted it
 }
 
 // Attachment describes a file stored by content hash. ContentType is what the

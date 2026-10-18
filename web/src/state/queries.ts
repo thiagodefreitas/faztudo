@@ -52,6 +52,15 @@ export function useRoutines() {
   return useQuery({ queryKey: qk.routines, queryFn: () => api.routines() })
 }
 
+// Every task. The stream keeps the cache current (see state/cache.ts).
+export function useTasks() {
+  const qc = useQueryClient()
+  return useQuery({
+    queryKey: qk.tasks,
+    queryFn: async () => mergeById(await api.tasks(), qc.getQueryData(qk.tasks) ?? []),
+  })
+}
+
 export function useRuns() {
   const qc = useQueryClient()
   return useQuery({

@@ -54,7 +54,11 @@ type API struct {
 	// that channel opted in. Nil means no channel has one.
 	Chief func(channel string) (handle string, ok bool)
 	// Routines runs and switches the routines. Nil means there are none.
-	Routines          RoutineControl
+	Routines RoutineControl
+	// Tasks lists, starts and cancels task directives. OnApproval is called
+	// after a human decided an approval, so a task can follow it.
+	Tasks             TaskControl
+	OnApproval        func(context.Context, domain.Approval)
 	ResolveApproval   func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
 	ReadDiff          func(string) ([]byte, error)
 	CancelRun         func(context.Context, string) error
@@ -99,6 +103,7 @@ func New(s *store.Store, humanID, version string) *API {
 		Version:      version,
 		Trigger:      noopTrigger{},
 		Routines:     noRoutines{},
+		Tasks:        noTasks{},
 		Limiter:      auth.NewLoginRateLimiter(),
 		LocalLimiter: auth.NewLoginRateLimiter(),
 		Now:          time.Now,
@@ -147,6 +152,12 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/routines", a.routines)
 	m.HandleFunc("PATCH /api/v1/routines/{handle}", a.patchRoutine)
 	m.HandleFunc("POST /api/v1/routines/{handle}/run", a.runRoutine)
+	m.HandleFunc("GET /api/v1/tasks", a.listTasks)
+	m.HandleFunc("POST /api/v1/tasks", a.createTask)
+	m.HandleFunc("GET /api/v1/tasks/{id}", a.getTask)
+	m.HandleFunc("PATCH /api/v1/tasks/{id}", a.patchTask)
+	m.HandleFunc("POST /api/v1/tasks/{id}/start", a.taskAction(true))
+	m.HandleFunc("POST /api/v1/tasks/{id}/cancel", a.taskAction(false))
 	m.HandleFunc("GET /api/v1/channels", a.channels)
 	m.HandleFunc("POST /api/v1/channels", a.createChannel)
 	m.HandleFunc("PATCH /api/v1/channels/{id}", a.patchChannel)
@@ -963,6 +974,9 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 			failErr(w, e)
 		}
 		return
+	}
+	if a.OnApproval != nil {
+		a.OnApproval(r.Context(), v)
 	}
 	respond(w, 200, v)
 }

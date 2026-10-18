@@ -67,10 +67,54 @@ export interface Message {
   handoff?: Handoff
   /** Handle of the routine that posted this message. */
   routine?: string
+  /** Id of the task whose start posted this message. */
+  task?: ID
   created_at: string
   edited_at?: string
   reply_count?: number
 }
+
+export type TaskStatus = "todo" | "running" | "review" | "done" | "failed" | "cancelled"
+
+/** A directive for one agent. Runs and the approval report back to it. */
+export interface Task {
+  id: ID
+  channel_id: ID
+  title: string
+  body?: string
+  /** The handle of the agent it is for. */
+  assignee: string
+  lane?: string
+  mode: RunMode
+  scope: string[]
+  checks: string[]
+  acceptance: string[]
+  status: TaskStatus
+  /** Sorts the Todo column. */
+  order: number
+  message_id?: ID
+  run_ids: ID[]
+  approval_id?: ID
+  created_by: ID
+  created_at: string
+  updated_at: string
+}
+
+/** What the task builder sends. start also runs it at once. */
+export interface TaskInput {
+  channel_id: ID
+  title: string
+  body?: string
+  assignee: string
+  lane?: string
+  mode: RunMode
+  scope: string[]
+  checks: string[]
+  acceptance: string[]
+  start?: boolean
+}
+
+export type TaskPatch = Partial<Omit<TaskInput, "channel_id" | "start">> & { order?: number }
 
 export interface Handoff {
   request_id: ID
@@ -282,6 +326,8 @@ export type EventType =
   | "department.updated"
   | "project.updated"
   | "routine.updated"
+  | "task.created"
+  | "task.updated"
   | "handoff.created"
   | "notice"
 

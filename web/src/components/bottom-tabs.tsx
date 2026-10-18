@@ -52,6 +52,11 @@ export function BottomTabs({ pathname }: { pathname: string }) {
               </Link>
             </Menu.Item>
             <Menu.Item asChild>
+              <Link to="/tasks" className={ITEM}>
+                Tasks
+              </Link>
+            </Menu.Item>
+            <Menu.Item asChild>
               <Link to="/organization" className={ITEM}>
                 Organization
               </Link>
