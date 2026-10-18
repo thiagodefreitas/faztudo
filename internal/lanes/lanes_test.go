@@ -117,6 +117,50 @@ func TestWaitPickFailsFastWhenExhausted(t *testing.T) {
 	}
 }
 
+func TestRestoredExhaustionEndsAtItsReset(t *testing.T) {
+	cfg := []LaneConfig{{ID: "a", CLI: "codex", Capacity: 1}}
+	personas := []PersonaConfig{{Handle: "coder", Lanes: []string{"a"}}}
+	past := time.Now().Add(-time.Minute).UTC()
+	future := time.Now().Add(time.Hour).UTC()
+	for _, tc := range []struct {
+		name   string
+		reset  *time.Time
+		usable bool
+	}{
+		{"reset passed", &past, true},
+		{"reset ahead", &future, false},
+		{"no reset known", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := New(cfg, personas, &eventstest.Appender{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Restore(domain.Lane{ID: "a", CLI: "codex", Capacity: 1, Health: domain.LaneExhausted, HealthReason: "quota",
+				LastError: &domain.LaneError{Class: "exhausted", Message: "quota", ResetAt: tc.reset}})
+			_, _, err = r.Pick("coder", "")
+			if (err == nil) != tc.usable {
+				t.Fatalf("usable=%v, pick error %v", tc.usable, err)
+			}
+		})
+	}
+}
+
+func TestExhaustionRecordsItsReset(t *testing.T) {
+	r, err := New([]LaneConfig{{ID: "a", CLI: "codex", Capacity: 1}}, []PersonaConfig{{Handle: "coder", Lanes: []string{"a"}}}, &eventstest.Appender{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := time.Now().Add(2 * time.Hour)
+	if err := r.ApplySignal(context.Background(), "run", "coder", "a", adapters.LaneSignal{Kind: adapters.SignalExhausted, Until: until}, "quota"); err != nil {
+		t.Fatal(err)
+	}
+	l, _ := r.Snapshot("a")
+	if l.LastError == nil || l.LastError.ResetAt == nil || !l.LastError.ResetAt.Equal(until.UTC()) {
+		t.Fatalf("reset not recorded: %+v", l.LastError)
+	}
+}
+
 func TestUsageHealth(t *testing.T) {
 	now := time.Now().UTC()
 	pct := func(v float64) *float64 { return &v }

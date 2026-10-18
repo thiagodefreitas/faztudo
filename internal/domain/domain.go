@@ -325,6 +325,9 @@ type LaneError struct {
 	Class   string    `json:"class"`
 	Message string    `json:"message"`
 	At      time.Time `json:"at"`
+	// ResetAt is when the CLI said the limit ends, if it said. It is kept
+	// with the lane so the limit still ends after faztudo restarts.
+	ResetAt *time.Time `json:"reset_at,omitempty"`
 }
 
 type Lane struct {

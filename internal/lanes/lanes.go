@@ -304,6 +304,9 @@ func (r *Registry) Restore(lane domain.Lane) {
 		current.HealthReason = lane.HealthReason
 		current.Windows = lane.Windows
 		current.LastError = lane.LastError
+		if lane.Health == domain.LaneExhausted && lane.LastError != nil && lane.LastError.ResetAt != nil {
+			r.until[lane.ID] = *lane.LastError.ResetAt
+		}
 	}
 }
 
@@ -581,6 +584,10 @@ func (r *Registry) ApplySignalForChannel(ctx context.Context, runID, channelID, 
 	}
 	l.HealthReason = reason
 	l.LastError = &domain.LaneError{Class: string(signal.Kind), Message: reason, At: time.Now().UTC()}
+	if signal.Kind == adapters.SignalExhausted && !signal.Until.IsZero() {
+		until := signal.Until.UTC()
+		l.LastError.ResetAt = &until
+	}
 	alert := r.alertTransition(laneID, l.Health)
 	close(r.changed)
 	r.changed = make(chan struct{})
