@@ -45,7 +45,7 @@ make dev          # daemon plus web UI with hot reload
 2. Keep the change focused. One concern per pull request.
 3. Add or update tests. Bug fixes come with a test that failed before the fix.
 4. Run `make check` (lint, tests, prose, secrets) before pushing. CI runs
-   the same checks on GitHub Actions and on Travis CI.
+   the same checks on GitHub Actions.
 5. Describe what changed and how you verified it. "It works" is not evidence;
    a command and its output is.
 
