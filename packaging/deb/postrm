@@ -1,0 +1,13 @@
+#!/bin/sh
+# Removes the AppArmor profile that postinst may have installed.
+set -e
+dst=/etc/apparmor.d/faztudo
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+	if [ -e "$dst" ]; then
+		if command -v apparmor_parser >/dev/null 2>&1; then
+			apparmor_parser -R "$dst" >/dev/null 2>&1 || true
+		fi
+		rm -f "$dst"
+	fi
+fi
+exit 0

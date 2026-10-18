@@ -67,12 +67,23 @@ unprivileged user namespaces: available
 systemd user scopes: available
 ```
 
-If the namespaces line shows an error, bubblewrap cannot run as you. On Ubuntu
-24.04 you can allow it with an AppArmor profile for `bwrap`, or by lowering
-`kernel.apparmor_restrict_unprivileged_userns`; both change how your machine
-is protected, so read your distribution's notes first. Read-only runs still
-work without it. If you accept unsandboxed write runs, set `sandbox = "auto"`
-under `[runs]` in `config.toml`. The "systemd user scopes" line only matters
+If the namespaces line shows an error on Ubuntu 24.04, bubblewrap cannot
+create its user namespace as you. The `.deb` from 0.1.1 on handles this: it
+installs a small AppArmor profile, `/etc/apparmor.d/faztudo`, that lets
+faztudo (and the bubblewrap it starts) create user namespaces, and only on
+systems that restrict them. Removing the package removes the profile. With
+the tarball, install the same profile from its `apparmor/faztudo` file:
+
+```bash
+sudo install -m 0644 apparmor/faztudo /etc/apparmor.d/faztudo
+sudo apparmor_parser -r /etc/apparmor.d/faztudo
+faztudo doctor
+```
+
+The profile only applies to `/usr/bin/faztudo`; if you put the binary
+somewhere else, change the path in its `profile` line. Read-only runs work
+without it. If you accept unsandboxed write runs instead, set
+`sandbox = "auto"` under `[runs]` in `config.toml`. The "systemd user scopes" line only matters
 for the memory and task limits.
 
 ## Install and run

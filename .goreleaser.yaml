@@ -32,6 +32,8 @@ archives:
       - CHANGELOG.md
       - src: packaging/systemd/faztudo.service
         dst: systemd/faztudo.service
+      - src: packaging/apparmor/faztudo
+        dst: apparmor/faztudo
 
 nfpms:
   - package_name: faztudo
@@ -49,6 +51,15 @@ nfpms:
         dst: /usr/lib/systemd/user/faztudo.service
         file_info:
           mode: 0644
+      # Installed into /etc/apparmor.d by postinst only on Ubuntu 24.04 and
+      # newer, where bubblewrap needs it to create a user namespace.
+      - src: packaging/apparmor/faztudo
+        dst: /usr/share/faztudo/apparmor/faztudo
+        file_info:
+          mode: 0644
+    scripts:
+      postinstall: packaging/deb/postinst
+      postremove: packaging/deb/postrm
 
 checksum:
   name_template: checksums.txt

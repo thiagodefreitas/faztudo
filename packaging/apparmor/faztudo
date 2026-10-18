@@ -1,0 +1,12 @@
+# AppArmor profile for faztudo. Ubuntu 24.04 and newer stop unprivileged
+# programs from creating user namespaces unless a profile allows it, and
+# faztudo's write runs need bubblewrap to create one. This profile only adds
+# that permission; faztudo stays otherwise unconfined, as it was.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile faztudo /usr/bin/faztudo flags=(unconfined) {
+  userns,
+
+  include if exists <local/faztudo>
+}

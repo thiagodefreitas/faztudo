@@ -4,6 +4,19 @@ All notable changes are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Ubuntu 24.04: the `.deb` installs an AppArmor profile so the bubblewrap
+  sandbox can create its user namespace; without it every write run refused
+  to start. Only installed where the kernel restricts user namespaces, and
+  removed with the package. The tarball carries the same profile.
+- Sandbox memory: `sandbox_memory_max` defaults to `auto` (a quarter of RAM,
+  2G to 8G), a write run waits for free memory instead of being killed, and
+  the web tests use at most four workers.
+- A `/lane` override a persona cannot use says which lanes it can.
+
 ## [0.1.0] - 2026-10-18
 
 First usable alpha.

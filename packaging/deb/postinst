@@ -1,0 +1,13 @@
+#!/bin/sh
+# Installs the AppArmor profile only where the kernel restricts unprivileged
+# user namespaces (Ubuntu 24.04 and newer) and the installed AppArmor can
+# parse it. Elsewhere nothing is changed.
+set -e
+src=/usr/share/faztudo/apparmor/faztudo
+dst=/etc/apparmor.d/faztudo
+if [ "$1" = "configure" ] && [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ] \
+	&& command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -Q -K "$src" >/dev/null 2>&1; then
+	cp "$src" "$dst"
+	apparmor_parser -r -T -W "$dst" >/dev/null 2>&1 || echo "faztudo: could not load $dst; run 'faztudo doctor'" >&2
+fi
+exit 0
