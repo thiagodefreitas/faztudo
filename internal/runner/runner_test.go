@@ -146,6 +146,56 @@ func TestTimeoutKillsGrandchild(t *testing.T) {
 	}
 	t.Fatalf("grandchild %d still alive", pid)
 }
+
+func TestTimeoutDoesNotRetry(t *testing.T) {
+	dir := t.TempDir()
+	count := filepath.Join(dir, "attempts")
+	r := Runner{RunDir: dir, Grace: 10 * time.Millisecond, Backoff: []time.Duration{10 * time.Millisecond}}
+	run := domain.Run{ID: "timeout-once", Mode: domain.RunRead, State: domain.RunQueued}
+	adapter := timeoutAttemptAdapter{count: count}
+	err := r.Execute(context.Background(), &run, adapter, adapters.Request{Mode: domain.RunRead, Workdir: dir, Prompt: "x", Timeout: 100 * time.Millisecond})
+	if err == nil || run.State != domain.RunFailed || run.FailureReason != "run timed out" {
+		t.Fatalf("timeout result: %+v, %v", run, err)
+	}
+	data, err := os.ReadFile(count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "x" {
+		t.Fatalf("timeout restarted process: %q", data)
+	}
+}
+
+func TestTimeoutKillsProcessIgnoringTERM(t *testing.T) {
+	dir := t.TempDir()
+	r := Runner{RunDir: dir, Grace: 30 * time.Millisecond, Backoff: []time.Duration{}}
+	run := domain.Run{ID: "ignore-term", Mode: domain.RunRead, State: domain.RunQueued}
+	start := time.Now()
+	err := r.Execute(context.Background(), &run, timeoutAttemptAdapter{count: filepath.Join(dir, "attempts"), ignoreTERM: true}, adapters.Request{Mode: domain.RunRead, Workdir: dir, Prompt: "x", Timeout: 100 * time.Millisecond})
+	if err == nil || run.State != domain.RunFailed || run.FailureReason != "run timed out" {
+		t.Fatalf("timeout result: %+v, %v", run, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("process outlived timeout and grace: %v", elapsed)
+	}
+}
+
+type timeoutAttemptAdapter struct {
+	count      string
+	ignoreTERM bool
+}
+
+func (timeoutAttemptAdapter) Name() string { return "timeout-attempt" }
+func (a timeoutAttemptAdapter) Command(req adapters.Request) (adapters.Cmd, error) {
+	script := "printf x >> \"$1\"; exec sleep 2"
+	if a.ignoreTERM {
+		script = "printf x >> \"$1\"; trap '' TERM; while :; do sleep 2; done"
+	}
+	return adapters.Cmd{Path: "/bin/sh", Args: []string{"-c", script, "timeout-attempt", a.count}, Dir: req.Workdir}, nil
+}
+func (timeoutAttemptAdapter) Classify(code int, tail string) (domain.FailureClass, adapters.LaneSignal, string) {
+	return (adapters.Codex{}).Classify(code, tail)
+}
 func TestCancelAndCrash(t *testing.T) {
 	path := fakeBinary(t)
 	dir := t.TempDir()

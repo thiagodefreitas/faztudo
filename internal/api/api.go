@@ -1181,6 +1181,11 @@ func (a *API) probe(w http.ResponseWriter, r *http.Request) {
 	}
 	lane, err := a.ProbeLane(r.Context(), laneID(r))
 	if err != nil {
+		var userErr domain.UserError
+		if errors.As(err, &userErr) {
+			fail(w, 400, "bad_request", userErr.Message)
+			return
+		}
 		failErr(w, err)
 		return
 	}

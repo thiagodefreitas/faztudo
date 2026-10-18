@@ -448,7 +448,7 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 		if signalErr != nil {
 			return errors.Join(signalErr, r.finish(ctx, run, domain.RunFailed, class, reason, &code))
 		}
-		if class == domain.FailureTransient && attempt < len(backoff) {
+		if class == domain.FailureTransient && !errors.Is(execErr, context.DeadlineExceeded) && attempt < len(backoff) {
 			timer := time.NewTimer(backoff[attempt])
 			select {
 			case <-timer.C:

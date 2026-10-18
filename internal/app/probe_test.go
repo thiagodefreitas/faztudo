@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
@@ -11,6 +12,30 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
+
+func TestProbeUnsupportedCLIExplainsWhy(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, id := range []string{"agy/flash", "agy/sonnet"} {
+		lane := domain.Lane{ID: id, CLI: "agy", Capacity: 1, Health: domain.LaneAvailable}
+		if _, err := s.Append(context.Background(), events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: lane}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := New(context.Background(), s, config.Config{}, config.Paths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"agy/flash", "agy/sonnet"} {
+		_, err := a.ProbeLane(context.Background(), id)
+		if err == nil || !strings.Contains(err.Error(), "this CLI has no probe") {
+			t.Fatalf("%s: want clear unsupported probe error, got %v", id, err)
+		}
+	}
+}
 
 // The usage ticker calls RefreshUsage. It must read usage without giving an
 // unavailable lane another chance; only a probe the human asked for does.

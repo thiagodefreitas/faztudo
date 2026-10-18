@@ -373,6 +373,9 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 	if err != nil {
 		return domain.Lane{}, err
 	}
+	if lane.CLI != "codex" && lane.CLI != "claude" && lane.CLI != "grok" {
+		return domain.Lane{}, domain.UserError{Message: "this CLI has no probe"}
+	}
 	if asked && lane.Health == domain.LaneUnavailable {
 		if err := a.Registry.Recover(ctx, id, "probe requested after an error"); err != nil {
 			return domain.Lane{}, err
@@ -406,8 +409,6 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 			total := result.LastHour.Total()
 			tokensHour = &total
 		}
-	default:
-		return domain.Lane{}, fmt.Errorf("%w: usage reader unavailable for lane", store.ErrConflict)
 	}
 	if err != nil {
 		return domain.Lane{}, err
