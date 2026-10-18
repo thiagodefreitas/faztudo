@@ -53,9 +53,9 @@ nfpms:
 checksum:
   name_template: checksums.txt
 
-changelog:
-  # Release notes come from CHANGELOG.md, written by people.
-  disable: true
+# Release notes come from CHANGELOG.md, written by people, through
+# --release-notes in the release workflow. Do not disable the changelog
+# step: with it disabled the v0.1.0 release came out with empty notes.
 
 release:
   draft: true
