@@ -150,22 +150,28 @@ func (a *App) RefreshUsage(ctx context.Context) error {
 		if l.CLI != "codex" && l.CLI != "claude" && l.CLI != "grok" {
 			continue
 		}
-		if _, err = a.ProbeLane(ctx, l.ID); err != nil {
+		if _, err = a.probeLane(ctx, l.ID, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// ProbeLane is the probe the human asked for.
 func (a *App) ProbeLane(ctx context.Context, id string) (domain.Lane, error) {
+	return a.probeLane(ctx, id, true)
+}
+
+// probeLane reads the lane's usage. Only a probe the human asked for is their
+// "try again": it gives an unavailable lane another chance, and the next
+// failed run marks it again. The usage ticker must not, or a lane whose login
+// is broken would come back every few minutes.
+func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane, error) {
 	lane, err := a.Store.Lane(ctx, id)
 	if err != nil {
 		return domain.Lane{}, err
 	}
-	// A probe is the human's "try again": an unavailable lane gets another
-	// chance, and the next failed run marks it again. This holds for CLIs
-	// without a usage reader too.
-	if lane.Health == domain.LaneUnavailable {
+	if asked && lane.Health == domain.LaneUnavailable {
 		if err := a.Registry.Recover(ctx, id, "probe requested after an error"); err != nil {
 			return domain.Lane{}, err
 		}
@@ -387,6 +393,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if adapter == nil {
 		return fmt.Errorf("no adapter for %s", lane.CLI)
 	}
+	runStarted := time.Now().UTC()
 	a.Registry.RecordRun(lane.ID)
 	prompt, err := a.prompt(ctx, m)
 	if err != nil {
@@ -472,7 +479,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		}
 	}
 	if err == nil {
-		_ = a.Registry.Recover(ctx, lane.ID, "last run succeeded")
+		_ = a.Registry.RecoverSince(ctx, lane.ID, "last run succeeded", runStarted)
 	}
 	var proposal string
 	if run.StartedAt != nil {
@@ -497,6 +504,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	if err != nil {
 		return fmt.Errorf("run %s failed: %w", run.ID, err)
+	}
+	if mode == domain.RunWrite && run.State == domain.RunDone && run.DiffStat != nil && run.DiffStat.Files == 0 {
+		a.notice(ctx, channel.ID, "info", fmt.Sprintf("No changes: @%s did not change any files, so there is nothing to approve.", agent.Handle))
 	}
 	if mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
 		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: channel.ID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", CommitMessage: buildCommitMessage(proposal, m.Body, run.ID), State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}

@@ -65,6 +65,11 @@ func TestTransientAndSemanticFailuresAreNotAuth(t *testing.T) {
 		{"--- FAIL: TestLoginRejects (0.01s)\n    lan_test.go:88: status 403, want 200", domain.FailureUnknown},
 		{"--- FAIL: TestPairing\n    got 401 Unauthorized from the stub server", domain.FailureUnknown},
 		{"docs: describe the subscription page", domain.FailureUnknown},
+		// Quoted output of code the agent ran, with no test-runner markers.
+		// Only a line the CLI prints as its own error counts.
+		{"$ curl -i localhost:8080/admin\nstatus: 401 Unauthorized\nbody: denied", domain.FailureUnknown},
+		{"the handler answers unauthorized when the token is missing", domain.FailureUnknown},
+		{"  \"error\": \"not logged in\" (fixture from the user store)", domain.FailureUnknown},
 	} {
 		class, signal, _ := Claude{}.Classify(1, tc.tail)
 		if class != tc.class || signal.Kind != SignalNone {

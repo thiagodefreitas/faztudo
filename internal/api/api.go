@@ -22,6 +22,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/auth"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
@@ -581,18 +582,8 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	for _, p := range problems {
 		notices = append(notices, events.NoticePayload{Level: "warn", Text: p})
 	}
-	if project, ok := projectOfChannel(projects, c.Name); ok {
-		var allowed, refused []domain.Member
-		for _, ag := range agents {
-			if assigned(project, departments, ag.Handle) {
-				allowed = append(allowed, ag)
-			} else {
-				refused = append(refused, ag)
-			}
-		}
-		agents = allowed
-		notices = append(notices, refusals(project, refused)...)
-	}
+	agents, refusals := org.Gate(projects, departments, c.Name, agents)
+	notices = append(notices, refusals...)
 	m := domain.Message{ID: store.NewID(), ChannelID: c.ID, ThreadID: v.ThreadID, AuthorID: current(r).ID, Body: v.Body, Mentions: ids, CreatedAt: time.Now().UTC()}
 	newMessageID := m.ID
 	evt, ok := a.append(w, r, events.MessagePosted, c.ID, v.IdempotencyKey, m)
@@ -608,7 +599,7 @@ func (a *API) postMessage(w http.ResponseWriter, r *http.Request) {
 	if newMessageID == m.ID && len(agents) > 0 {
 		a.Trigger.OnMessage(r.Context(), m, agents)
 	}
-	if newMessageID == m.ID && isCommand(m.Body, "/lane") && len(ids) == 0 {
+	if newMessageID == m.ID && isCommand(m.Body, "/lane") {
 		a.laneCommand(r.Context(), c, members, m.Body)
 	}
 	if newMessageID == m.ID {

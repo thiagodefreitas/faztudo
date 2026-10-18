@@ -9,6 +9,7 @@ import (
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 )
 
 // orgView is the body of GET /api/v1/org.
@@ -112,34 +113,7 @@ func (a *API) unassign(w http.ResponseWriter, r *http.Request) {
 	a.assignment(w, r, r.PathValue("kind"), r.PathValue("handle"), false)
 }
 
-func containsFold(list []string, s string) bool {
-	return slices.ContainsFunc(list, func(e string) bool { return strings.EqualFold(e, s) })
-}
-
-// projectOfChannel finds the project that lists the channel by name.
-func projectOfChannel(projects []domain.Project, channel string) (domain.Project, bool) {
-	for _, p := range projects {
-		if containsFold(p.Channels, channel) {
-			return p, true
-		}
-	}
-	return domain.Project{}, false
-}
-
-// assigned reports whether the agent may act in the project: its lead, a
-// specialist assigned to it, or the lead or a member of an assigned
-// department.
-func assigned(p domain.Project, departments []domain.Department, handle string) bool {
-	if strings.EqualFold(p.Lead, handle) || containsFold(p.Specialists, handle) {
-		return true
-	}
-	for _, d := range departments {
-		if containsFold(p.Departments, d.Handle) && (strings.EqualFold(d.Lead, handle) || containsFold(d.Members, handle)) {
-			return true
-		}
-	}
-	return false
-}
+func containsFold(list []string, s string) bool { return org.ContainsFold(list, s) }
 
 // groupLeads turns @<department> into that department's lead and @<project>
 // into the project lead. A group with no lead is reported in problems.
@@ -174,18 +148,4 @@ func groupLeads(body string, departments []domain.Department, projects []domain.
 		}
 	}
 	return leads, problems
-}
-
-// refusals builds the notices for agents the project does not include, each
-// with an action that assigns the agent.
-func refusals(p domain.Project, refused []domain.Member) []events.NoticePayload {
-	out := make([]events.NoticePayload, 0, len(refused))
-	for _, m := range refused {
-		out = append(out, events.NoticePayload{
-			Level:  "warn",
-			Text:   fmt.Sprintf("@%s is not assigned to project %s, so it did not run.", m.Handle, p.Name),
-			Action: &events.NoticeAction{Kind: "assign", Label: fmt.Sprintf("Assign @%s to %s", m.Handle, p.Name), Project: p.Handle, Agent: m.Handle},
-		})
-	}
-	return out
 }

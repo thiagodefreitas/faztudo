@@ -181,15 +181,25 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 			return err
 		}
 		run.DiffStat = &stat
-		if diff == "" {
-			return errors.New("write run produced no diff")
-		}
-		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
-			return err
-		}
 		verifyTimeout := opts.TestTimeout
 		if verifyTimeout <= 0 {
 			verifyTimeout = 5 * time.Minute
+		}
+		if diff == "" {
+			// Nothing to approve. The run is done, unless the channel's test
+			// command fails on the untouched tree.
+			if err := opts.Worktrees.Verify(ctx, w, opts.TestCommand, verifyTimeout); err != nil {
+				return err
+			}
+			if err := opts.Worktrees.Cleanup(context.Background(), w); err != nil {
+				return err
+			}
+			run.Worktree, run.BaseCommit = "", ""
+			run.Verification = &domain.Verification{OK: true, Detail: "no changes"}
+			return nil
+		}
+		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
+			return err
 		}
 		if err := opts.Worktrees.Verify(ctx, w, opts.TestCommand, verifyTimeout); err != nil {
 			return err
@@ -312,6 +322,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 					}
 					return errors.Join(err, r.finish(context.Background(), run, state, class, err.Error(), &code))
 				}
+			}
+			if verify != nil && run.DiffStat != nil && run.DiffStat.Files == 0 {
+				successState = domain.RunDone // a write run that changed nothing has nothing to approve
 			}
 			return r.finish(ctx, run, successState, "", "", &code)
 		}

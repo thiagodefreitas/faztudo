@@ -96,8 +96,9 @@ interface Channel {
 
 Channel commands: `/lane <persona> <lane>` pins the persona's lane in
 this channel (a `channel.updated` event and a notice confirm it);
-`/lane <persona> default` clears the pin. The command starts no agent and
-applies only when the message has no @mention.
+`/lane <persona> default` clears the pin. The persona may be written with a
+leading `@`. The command starts no agent. A write run that changes nothing
+ends `done` with a "No changes" notice and no approval.
 
 ```ts
 interface Message {

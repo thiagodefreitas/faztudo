@@ -198,6 +198,14 @@ var serverErrorPattern = regexp.MustCompile(`\b5\d\d\b`)
 // are testing.
 var authPattern = regexp.MustCompile(`(?i)auth_error|authentication_error|unauthori[sz]ed|not logged in|please (?:log ?in|sign ?in)|upgrade your plan|subscription (?:does not|doesn't|has expired|expired|is inactive|required)|invalid api key|(?:api error|status|http)\W{0,3}40[13]\b`)
 
+// ownErrorLine matches the start of a line a CLI prints as its own error:
+// "API Error:" and "Please log in" (claude), "ERROR:" and "unexpected status"
+// (codex), "error: failed to run prompt" (kimi), "AI_APICallError:"
+// (opencode), "Error:" (grok, agy), and a bare "provider.auth_error:" (kimi
+// structured errors). A line that merely quotes output of the
+// code under test does not start like that.
+var ownErrorLine = regexp.MustCompile(`(?i)^(?:\[?(?:error|fatal)\]?\W|api error\W|ai_\w*error\W|provider\.\w*error\W|unexpected status\b|please (?:log ?in|sign ?in)|not logged in|invalid api key)`)
+
 // testFailure marks output from tests the agent ran. A CLI login failure
 // happens before any work, so a tail with test failures is the task failing.
 var testFailure = regexp.MustCompile(`(?m)^\s*(?:--- FAIL|FAIL\s|=== RUN)|_test\.go:\d+|\bAssertionError\b|\bTests?:\s+\d+ failed`)
@@ -210,7 +218,7 @@ func authLine(tail string) string {
 	}
 	for _, l := range strings.Split(tail, "\n") {
 		l = strings.TrimSpace(l)
-		if l != "" && authPattern.MatchString(l) {
+		if l != "" && ownErrorLine.MatchString(l) && authPattern.MatchString(l) {
 			if len(l) > 200 {
 				l = l[:200]
 			}

@@ -468,9 +468,15 @@ func Busy(skipped []Skipped) bool { return onlyBusy(skipped) }
 // reading, and the last error is dropped. It does nothing for a lane without
 // a recorded error.
 func (r *Registry) Recover(ctx context.Context, id, reason string) error {
+	return r.RecoverSince(ctx, id, reason, time.Time{})
+}
+
+// RecoverSince is Recover for a run that started at since: a failure
+// recorded after that moment is newer than the run's success and stays.
+func (r *Registry) RecoverSince(ctx context.Context, id, reason string, since time.Time) error {
 	r.mu.Lock()
 	l := r.lanes[id]
-	if l == nil || l.LastError == nil {
+	if l == nil || l.LastError == nil || l.LastError.At.After(since) && !since.IsZero() {
 		r.mu.Unlock()
 		return nil
 	}

@@ -11,6 +11,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
+	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 )
 
@@ -144,7 +145,8 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 	if len(body) > maxBodyBytes {
 		return messageOut{}, errors.New("body too long")
 	}
-	if _, err := h.store.Channel(ctx, grant.ChannelID); err != nil {
+	channel, err := h.store.Channel(ctx, grant.ChannelID)
+	if err != nil {
 		return messageOut{}, errors.New("channel unavailable")
 	}
 	if threadID != "" {
@@ -188,11 +190,33 @@ func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, 
 				others = append(others, agent)
 			}
 		}
+		// A project's channel only lets assigned agents act, as in the API.
+		others, refusals := h.assignedOnly(ctx, channel.Name, others)
+		for _, n := range refusals {
+			_, _ = h.store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: grant.ChannelID, Payload: n})
+		}
 		if len(others) > 0 {
 			h.trigger.OnMessage(ctx, msg, others)
 		}
 	}
 	return messageView(msg), nil
+}
+
+// assignedOnly filters agents by the project rule. If the org cannot be read
+// it lets nobody through, so a store error never widens who may run.
+func (h *Handler) assignedOnly(ctx context.Context, channel string, agents []domain.Member) ([]domain.Member, []events.NoticePayload) {
+	if len(agents) == 0 {
+		return agents, nil
+	}
+	projects, err := h.store.Projects(ctx)
+	if err != nil {
+		return nil, nil
+	}
+	departments, err := h.store.Departments(ctx)
+	if err != nil {
+		return nil, nil
+	}
+	return org.Gate(projects, departments, channel, agents)
 }
 
 // cleanChoices validates the optional answers of ask_human. No options is
