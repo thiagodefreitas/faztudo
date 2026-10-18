@@ -50,6 +50,21 @@ func TestPlanQuotaIsExhaustedWithReset(t *testing.T) {
 	}
 }
 
+func TestKimiLaneReasonUsesOnlyProviderErrorLine(t *testing.T) {
+	tail := "ts/office/ and sidebar agent rows\"). Hmm. But agent-avatar.tsx needs work.\n" +
+		"error: failed to run prompt: provider.auth_error: 403 Your current subscription does not have access to Kimi Code. Upgrade your plan.\n" +
+		"See log: /tmp/kimi.log\n"
+	_, signal, reason := Kimi{}.Classify(1, tail)
+	if signal.Kind != SignalUnavailable || reason != "error: failed to run prompt: provider.auth_error: 403 Your current subscription does not have access to Kimi Code." {
+		t.Fatalf("lane reason contains prose or lost provider error: %q (%s)", reason, signal.Kind)
+	}
+	quota := "Working on the sidebar. Hmm.\nerror: failed to run prompt: quota exceeded. Resets in 3 hours.\n"
+	_, signal, reason = Kimi{}.Classify(1, quota)
+	if signal.Kind != SignalExhausted || reason != "error: failed to run prompt: quota exceeded." {
+		t.Fatalf("quota reason contains prose or lost quota error: %q (%s)", reason, signal.Kind)
+	}
+}
+
 func TestTransientAndSemanticFailuresAreNotAuth(t *testing.T) {
 	for _, tc := range []struct {
 		tail  string

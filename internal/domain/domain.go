@@ -212,6 +212,7 @@ type Run struct {
 	ExitCode         *int         `json:"exit_code,omitempty"`
 	FailureClass     FailureClass `json:"failure_class,omitempty"`
 	FailureReason    string       `json:"failure_reason,omitempty"`
+	PeakMemoryBytes  int64        `json:"peak_memory_bytes,omitempty"`
 	// RetryOf is the failed run this one retried on the next lane.
 	RetryOf      ID            `json:"retry_of,omitempty"`
 	Verification *Verification `json:"verification,omitempty"`

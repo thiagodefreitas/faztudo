@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
+	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/sandbox"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
@@ -168,7 +170,17 @@ func sandboxLaunch(args []string, opts *WriteOptions) (string, []string, error) 
 		if err != nil {
 			return "", nil, err
 		}
-		return scope, sandbox.ScopeArgs(opts.MemoryMax, opts.TasksMax, append([]string{path}, args...)), nil
+		sh, err := exec.LookPath("sh")
+		if err != nil {
+			return "", nil, err
+		}
+		// This host-side shell remains in the scope after bubblewrap exits.
+		// It reads cgroup counters before --collect removes the scope.
+		// The sandbox can write runStateDir; keep the diagnostic in its
+		// parent so agent-written files cannot forge an OOM result.
+		opts.scopeReport = filepath.Join(filepath.Dir(opts.runStateDir), "scope.report")
+		wrapped := append([]string{sh, "-c", scopeReportScript, "scope-report", opts.scopeReport, path}, args...)
+		return scope, sandbox.ScopeArgs(opts.MemoryMax, opts.TasksMax, wrapped), nil
 	}
 	return path, args, nil
 }
@@ -332,7 +344,7 @@ func runVerification(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) 
 	}
 }
 
-func (r *Runner) verifyWrite(ctx context.Context, w worktree.Worktree, testCommand string, timeout time.Duration, opts WriteOptions) (string, error) {
+func (r *Runner) verifyWrite(ctx context.Context, run *domain.Run, w worktree.Worktree, testCommand string, timeout time.Duration, opts WriteOptions) (string, error) {
 	if testCommand == "" {
 		return "", nil
 	}
@@ -354,5 +366,15 @@ func (r *Runner) verifyWrite(ctx context.Context, w worktree.Worktree, testComma
 	cmd := exec.Command(path, args...)
 	cmd.Dir = w.Path
 	cmd.Env = stripEnv(os.Environ(), r.ExtraEnvRemove, opts.sandboxEnv, envKeys(opts.sandboxEnv)...)
-	return runVerification(ctx, cmd, timeout)
+	_ = os.Remove(opts.scopeReport)
+	output, verifyErr := runVerification(ctx, cmd, timeout)
+	code := -1
+	var exit *exec.ExitError
+	if errors.As(verifyErr, &exit) {
+		code = exit.ExitCode()
+	}
+	if oom, reason := scopeFailure(run, code, &opts); oom && !errors.Is(verifyErr, context.DeadlineExceeded) {
+		return output, scopeOOMError(reason)
+	}
+	return output, verifyErr
 }

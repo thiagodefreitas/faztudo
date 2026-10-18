@@ -241,13 +241,33 @@ func authLine(tail string) string {
 	for _, l := range strings.Split(tail, "\n") {
 		l = strings.TrimSpace(l)
 		if l != "" && ownErrorLine.MatchString(l) && authPattern.MatchString(l) {
-			if len(l) > 200 {
-				l = l[:200]
-			}
-			return l
+			return oneSentence(l)
 		}
 	}
 	return ""
+}
+
+// oneSentence keeps a CLI diagnostic short without splitting dotted error
+// identifiers such as provider.auth_error.
+func oneSentence(line string) string {
+	line = strings.TrimSpace(line)
+	if end := strings.Index(line, ". "); end >= 0 {
+		line = line[:end+1]
+	}
+	if len(line) > 200 {
+		line = strings.TrimSpace(line[:200])
+	}
+	return line
+}
+
+func quotaLine(tail string) string {
+	for _, line := range strings.Split(tail, "\n") {
+		line = strings.TrimSpace(line)
+		if ownErrorLine.MatchString(line) && (quotaPattern.MatchString(line) || strings.Contains(line, "429") || strings.Contains(strings.ToLower(line), "rate limit")) {
+			return oneSentence(line)
+		}
+	}
+	return "quota exceeded"
 }
 
 func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
@@ -295,7 +315,7 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 		if reset > 0 {
 			signal.Until = time.Now().Add(reset)
 		}
-		return domain.FailureSemantic, signal, tail
+		return domain.FailureSemantic, signal, quotaLine(tail)
 	case authLine(tail) != "":
 		// The login or plan is the problem, not the task: retrying the
 		// same lane cannot help until the person fixes it.

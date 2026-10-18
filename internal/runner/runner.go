@@ -160,6 +160,7 @@ type WriteOptions struct {
 	sandboxArgs []string
 	sandboxEnv  map[string]string
 	scopeUsed   bool
+	scopeReport string
 }
 
 func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, opts WriteOptions) error {
@@ -206,7 +207,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if diff == "" {
 			// Nothing to approve. The run is done, unless the channel's test
 			// command fails on the untouched tree.
-			output, verifyErr := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts)
+			output, verifyErr := r.verifyWrite(ctx, run, w, opts.TestCommand, verifyTimeout, opts)
 			if err := r.recordVerification(run, "no changes", output, verifyErr); err != nil {
 				return err
 			}
@@ -219,7 +220,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
 			return err
 		}
-		output, verifyErr := r.verifyWrite(ctx, w, opts.TestCommand, verifyTimeout, opts)
+		output, verifyErr := r.verifyWrite(ctx, run, w, opts.TestCommand, verifyTimeout, opts)
 		detail := "diff exists"
 		if opts.TestCommand != "" {
 			detail = "diff exists and verification passed"
@@ -372,6 +373,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 			return errors.Join(err, r.finish(context.Background(), run, domain.RunCancelled, domain.FailureTransient, err.Error(), nil))
 		}
 		outStart := r.fileSize(run.ID, "stdout.log")
+		if write != nil && write.scopeReport != "" {
+			_ = os.Remove(write.scopeReport)
+		}
 		code, tail, execErr := r.executeOnce(ctx, run, command, req.Timeout, &outputSeq)
 		stdoutTail := r.tailOf(run.ID, "stdout.log", outStart)
 		if ctx.Err() != nil {
@@ -383,9 +387,18 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 			return errors.Join(ctx.Err(), finishErr)
 		}
 		class, signal, reason := adapters.Classify(adapter, code, stdoutTail, tail)
+		oom := false
+		if write != nil {
+			var oomReason string
+			oom, oomReason = scopeFailure(run, code, write)
+			if oom {
+				reason = oomReason
+				class, signal = domain.FailureTransient, adapters.LaneSignal{Kind: adapters.SignalNone}
+			}
+		}
 		// A zero exit succeeds unless the adapter reads a lane signal out
 		// of the output (agy reports an exhausted quota with exit 0).
-		if execErr == nil && code == 0 && signal.Kind == adapters.SignalNone {
+		if execErr == nil && code == 0 && signal.Kind == adapters.SignalNone && !oom {
 			if verify != nil {
 				run.State = domain.RunVerifying
 				if err := r.emitRun(ctx, run, events.RunUpdated, *run); err != nil {
@@ -397,6 +410,10 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 					}
 					state := domain.RunFailed
 					class := domain.FailureSemantic
+					var oomErr scopeOOMError
+					if errors.As(err, &oomErr) {
+						class = domain.FailureTransient
+					}
 					if ctx.Err() != nil {
 						class = domain.FailureTransient
 						if errors.Is(ctx.Err(), context.Canceled) {
