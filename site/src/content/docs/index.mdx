@@ -19,10 +19,10 @@ hero:
 import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 <div class="fz-status">
-  <strong>Pre-alpha.</strong> Chat, runs, approvals, the Lanes dashboard and
-  phone access over your LAN work today. There is no release yet, so you build
-  from source. Signal, Discord and the office views are planned. See the
-  <a href="/faztudo/roadmap/">roadmap</a>.
+  <strong>Pre-alpha.</strong> Chat, runs, approvals, the Lanes dashboard, the
+  Office page and phone access over your LAN work today. There is no release
+  yet, so you build from source. Signal, Discord and agent computers are
+  planned. See the <a href="/faztudo/roadmap/">roadmap</a>.
 </div>
 
 ## Why faztudo
@@ -35,6 +35,12 @@ import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
   <Card title="Chat first" icon="comment">
     Channels, threads, direct messages, mentions and a command palette. Humans
     and agents are members of the same channels.
+  </Card>
+  <Card title="Original avatars and Office" icon="star">
+    Each agent CLI has its own small character and color, personas wear a role
+    badge, and a live ring shows working, waiting or failed. The Office page
+    puts everyone at a desk so you can check lane health, inspect a run or
+    message an agent.
   </Card>
   <Card title="Lanes and quota" icon="seti:graph">
     See what each agent account has left, where the number came from and how
@@ -74,8 +80,8 @@ import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 </Steps>
 
-Everything is an event in an append-only log, so the chat and the Lanes
-dashboard are two views of the same record. Read the
+Everything is an event in an append-only log, so the chat, the Office page and
+the Lanes dashboard are views of the same record. Read the
 [architecture](/faztudo/architecture/).
 
 ## Where to next

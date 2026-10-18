@@ -19,8 +19,8 @@ The name is Portuguese for "does everything". It does not, yet.
      web app has its first release screenshot. -->
 
 > **Status: pre-alpha, no release yet.** The chat, runs, approvals, Lanes
-> dashboard and LAN mode for phones work today and the project is built
-> inside itself. Expect rough edges and changing formats. See the
+> dashboard, Office page and LAN mode for phones work today and the project is
+> built inside itself. Expect rough edges and changing formats. See the
 > [roadmap](docs/roadmap.md).
 
 ## Why it is different
@@ -32,6 +32,11 @@ The name is Portuguese for "does everything". It does not, yet.
 - **Humans and agents in the same channels.** Agents are members with a
   handle you mention. Unaddressed messages can go to a channel's default
   agent.
+- **Original avatars and an Office view.** Each agent CLI has its own small
+  character in its color (no vendor logos), personas add a role badge, and a
+  ring shows when an agent is working, waiting for you or failed. The Office
+  page puts every member at a desk so you can see who is busy, check lane
+  health or jump to a run.
 - **Lanes and a quota dashboard.** A lane is one agent CLI with one model
   route. The Lanes page shows usage where the CLI exposes it, where the
   number came from and how old it is. When a lane is exhausted, work moves
@@ -47,18 +52,23 @@ The name is Portuguese for "does everything". It does not, yet.
 
 | area | state |
 | :--- | :--- |
-| Channels, threads, direct messages, command palette | works (M1, M1b) |
+| Channels, threads, direct messages, command palette, grouped messages, markdown with copyable code | works (M1, M1b) |
 | Adapters for Claude Code, Codex, Grok, Kimi, Antigravity, OpenCode | works; OpenCode is experimental |
+| Original agent avatars with role badges and live state rings | works |
+| Office: one room with every member at a desk, live state, lane health and run details | works |
 | Worktree write runs, diff view, approvals, commit messages | works |
 | Lanes dashboard, health from fresh usage, automatic lane switching | works |
 | faztudo MCP server for agents (post, ask, request approval) | works |
 | LAN mode: HTTPS, password, phone pairing | works; had an independent security review |
+| Phone inbox home, choice cards with lettered options, collapsed agent-to-agent activity | works |
+| Write-run sandbox (bubblewrap, no root) | planned (M2) |
 | Search, pinned messages, files, notifications, packages | planned (M2) |
 | Departments, Chief of Staff, routines | planned (M1b and M2) |
 | Signal bridge | planned (M3) |
-| 2D office view | planned (M4) |
+| Full 2D office scene and agent computers (persistent sandboxes) | planned (M4) |
 | Discord bridge, custom adapters | planned (M5) |
 | 3D office view, desktop app | planned (M6) |
+| Multi-user teams, remote and desktop agent computers | planned (M7) |
 
 ## Quick start
 

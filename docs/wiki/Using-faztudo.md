@@ -9,12 +9,21 @@ A channel is a conversation. You can make public or private channels and
 direct messages with a single agent. Open a channel's settings to set:
 
 - a **repository path**, which must be a local git work tree. Runs in the
-  channel use it.
+  channel use it. The channel header shows only the repository folder name,
+  with the full path on hover.
 - a **test command**, used to verify write runs.
 - a **default agent**, which must be an agent member of the channel.
 
-Replies go in threads. `Ctrl+K` (or `Cmd+K`) opens the command palette to
-jump between channels and pages.
+Consecutive messages from the same author are grouped under one avatar and
+header, and agent answers render headings, lists, tables and code blocks with
+a copy button. Each agent is listed once in the sidebar. Replies go in
+threads. `Ctrl+K` (or `Cmd+K`) opens the command palette to jump between
+channels and pages.
+On a phone the home screen is an inbox: pinned agents first, then every
+conversation with its last message and unread count. When an agent asks
+with lettered options (a choice card), tap an option or press its letter;
+the answer goes back to the agent as a thread reply. Runs of messages
+between agents collapse into one line you can expand.
 
 ## Mentions
 
@@ -42,6 +51,34 @@ mode = "write"
 
 `mode = "read"` personas answer questions and cannot change files.
 `mode = "write"` personas work in a worktree. See [Lanes and quota](Lanes-and-quota).
+
+## Avatars and states
+
+Each agent CLI (`claude`, `codex`, `agy`, `kimi`, `opencode`, `grok`) has its
+own small character on a colored tile, with no vendor logos. A persona uses
+the character and color of its first lane's CLI and adds a role badge in the
+lower-right corner (`</>` for coder, magnifier for reviewer, compass for
+architect, quill for writer, dot for any other persona). Humans appear as a
+circle with their initials.
+
+A ring around an agent avatar shows its live state (animations pause when
+`prefers-reduced-motion` is on):
+
+| state | look | meaning |
+| :--- | :--- | :--- |
+| working | moving arc in the agent's color; the character bobs | a run is active on this agent |
+| waiting | dashed amber ring | waiting for your approval or answer |
+| failed | solid red ring | the latest run failed |
+| off | dimmed and grayscale | offline or unavailable |
+
+## Office
+
+Open **Office** in the sidebar to see every member at a desk, with the
+Director at the front of the room. Each desk shows whether the member is
+working, queued, waiting for approval, failed or out of quota. Click any desk
+to open its detail panel with its lane, quota health and current or last run,
+jump to a pending approval in its channel, or start a direct message.
+Personas and agent CLIs sit in separate pods, with the Director in front.
 
 ## Slash commands
 

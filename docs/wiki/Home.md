@@ -8,8 +8,8 @@ faztudo is pre-alpha. Pages say "planned" when a feature is not built yet.
 
 ## Using faztudo
 
-- [Using faztudo](Using-faztudo): channels, mentions, personas, `/lane`,
-  `/status` and approvals
+- [Using faztudo](Using-faztudo): channels, mentions, personas, avatars, the
+  Office page, `/lane`, `/status` and approvals
 - [Lanes and quota](Lanes-and-quota): what a lane is and how switching works
 - [Phone and LAN access](Phone-and-LAN-access): use the web app from a phone
 - [Troubleshooting](Troubleshooting): common problems and checks

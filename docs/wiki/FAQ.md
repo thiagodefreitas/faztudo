@@ -37,3 +37,13 @@ No. LAN mode is built in. See [Phone and LAN access](Phone-and-LAN-access).
 
 **Is there a Signal or Discord bridge?**
 Not yet. Signal is planned for M3 and Discord for M5.
+
+**Do agents get their own computer?**
+Today each write run gets a fresh git worktree and a clean environment on your
+machine. M2 adds a bubblewrap sandbox for write runs (no root) so the worktree
+is writable, the rest of your home directory is hidden, and the agent CLI sees
+only the login files it needs. M4 adds agent computers: persistent sandboxes
+for one agent or shared by a team, with their own home, tools, caches and
+long-running processes, while logins for the agent CLIs stay on your machine.
+Computers on other machines in your network and desktop computers with a
+screen are planned for M7.
