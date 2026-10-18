@@ -18,6 +18,9 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 )
 
+// stopWait is how long stop waits for cancelled runs to end.
+var stopWait = 15 * time.Second
+
 // activeRunStates are the states a stop cancels.
 var activeRunStates = []domain.RunState{domain.RunQueued, domain.RunRunning, domain.RunWaitingApproval, domain.RunVerifying}
 
@@ -28,6 +31,9 @@ var activeRunStates = []domain.RunState{domain.RunQueued, domain.RunRunning, dom
 type stopResult struct {
 	Cancelled int    `json:"cancelled"`
 	Daemon    string `json:"daemon"`
+	// Remaining lists runs still active after the wait: a cancel failed or
+	// a run did not end. faztudo is then left running and stop fails.
+	Remaining []string `json:"remaining,omitempty"`
 }
 
 // runStop cancels every active run with the local token, waits for them to
@@ -61,14 +67,24 @@ func runStop(listen, tokenPath string, args []string, out io.Writer, stopUnit fu
 				res.Cancelled++
 			}
 		}
-		deadline := time.Now().Add(15 * time.Second)
+		deadline := time.Now().Add(stopWait)
 		for len(ids) > 0 && time.Now().Before(deadline) {
 			time.Sleep(300 * time.Millisecond)
 			if ids, err = activeRuns(base, token); err != nil {
-				break
+				return fmt.Errorf("list runs after cancelling: %w", err)
 			}
 		}
 		res.Daemon = "left_running"
+		if len(ids) > 0 {
+			// Never stop the daemon under runs that are still working.
+			res.Remaining = ids
+			if asJSON {
+				if err := json.NewEncoder(out).Encode(res); err != nil {
+					return err
+				}
+			}
+			return fmt.Errorf("%d runs are still active (%s); faztudo was left running", len(ids), strings.Join(ids, ", "))
+		}
 	}
 	stopped, err := stopUnit(listen)
 	if err != nil {
@@ -89,6 +105,48 @@ func runStop(listen, tokenPath string, args []string, out io.Writer, stopUnit fu
 		_, err = fmt.Fprintln(out, "faztudo is not running.")
 	}
 	return err
+}
+
+// procAddresses gives the local_address forms in /proc/net/tcp{,6} that
+// serve listen: the address itself and the wildcard of its family, with the
+// port. The kernel prints each 32-bit word of the address in host order,
+// which is little endian on every platform faztudo ships for.
+func procAddresses(listen string) map[string]bool {
+	host, portText, err := net.SplitHostPort(listen)
+	if err != nil {
+		return nil
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil
+	}
+	var ips []net.IP
+	if host == "localhost" {
+		ips = []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}
+	} else if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	}
+	out := map[string]bool{}
+	for _, ip := range ips {
+		if v4 := ip.To4(); v4 != nil {
+			out[procHex(v4)+fmt.Sprintf(":%04X", port)] = true
+			out[procHex(net.IPv4zero.To4())+fmt.Sprintf(":%04X", port)] = true
+			// A dual-stack wildcard socket in tcp6 also serves IPv4.
+			out[procHex(net.IPv6zero)+fmt.Sprintf(":%04X", port)] = true
+		} else {
+			out[procHex(ip.To16())+fmt.Sprintf(":%04X", port)] = true
+			out[procHex(net.IPv6zero)+fmt.Sprintf(":%04X", port)] = true
+		}
+	}
+	return out
+}
+
+func procHex(ip []byte) string {
+	var b strings.Builder
+	for i := 0; i+4 <= len(ip); i += 4 {
+		fmt.Fprintf(&b, "%02X%02X%02X%02X", ip[i+3], ip[i+2], ip[i+1], ip[i])
+	}
+	return b.String()
 }
 
 func healthAnswers(base string) bool {
@@ -150,24 +208,25 @@ func stopSystemdUnit(listen string) (bool, error) {
 		return false, nil
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	_, port, err := net.SplitHostPort(listen)
-	if err != nil || pid <= 0 || !listensOn("/proc", pid, port) {
+	if pid <= 0 || !listensOn("/proc", pid, listen) {
 		return false, nil
 	}
+	// The unit could restart between this check and the stop; it would then
+	// be the same unit faztudo, so stopping it is still what was asked.
 	if out, err := exec.Command("systemctl", "--user", "stop", "faztudo").CombinedOutput(); err != nil {
 		return false, fmt.Errorf("systemctl --user stop faztudo: %v: %s", err, out)
 	}
 	return true, nil
 }
 
-// listensOn reports whether process pid holds a TCP socket listening on
-// port, read from proc's net/tcp tables and the process's open files.
-func listensOn(proc string, pid int, port string) bool {
-	p, err := strconv.Atoi(port)
-	if err != nil {
+// listensOn reports whether process pid holds a TCP socket listening on the
+// listen address, or on the wildcard address with the same port, read from
+// proc's net/tcp tables and the process's open files.
+func listensOn(proc string, pid int, listen string) bool {
+	want := procAddresses(listen)
+	if len(want) == 0 {
 		return false
 	}
-	want := fmt.Sprintf(":%04X", p)
 	inodes := map[string]bool{}
 	for _, table := range []string{"net/tcp", "net/tcp6"} {
 		data, err := os.ReadFile(filepath.Join(proc, table))
@@ -177,7 +236,7 @@ func listensOn(proc string, pid int, port string) bool {
 		for _, line := range strings.Split(string(data), "\n")[1:] {
 			f := strings.Fields(line)
 			// local_address is f[1], st is f[3] (0A is LISTEN), inode is f[9].
-			if len(f) > 9 && strings.HasSuffix(f[1], want) && f[3] == "0A" {
+			if len(f) > 9 && want[strings.ToUpper(f[1])] && f[3] == "0A" {
 				inodes["socket:["+f[9]+"]"] = true
 			}
 		}

@@ -27,6 +27,7 @@ struct Shared {
     origin: Arc<Mutex<Option<String>>>,
     binary: Mutex<Option<daemon::Binary>>,
     started: Mutex<Option<daemon::Started>>,
+    child: Mutex<Option<std::process::Child>>,
     update_item: Mutex<Option<MenuItem<Wry>>>,
     newer: Mutex<Option<String>>,
 }
@@ -100,7 +101,8 @@ fn open_external(url: &Url) {
 
 /// WebKitGTK asks before a page shows notifications. Allow that one
 /// permission so the web app's mention and approval alerts reach the
-/// desktop; every other request keeps WebKit's default, which is to deny.
+/// desktop, and deny every other request explicitly: WebKit's own default
+/// allows some, such as pointer lock.
 fn grant_notifications(win: &WebviewWindow) {
     #[cfg(target_os = "linux")]
     let _ = win.with_webview(|wv| {
@@ -109,9 +111,10 @@ fn grant_notifications(win: &WebviewWindow) {
         wv.inner().connect_permission_request(|_, req| {
             if req.is::<NotificationPermissionRequest>() {
                 req.allow();
-                return true;
+            } else {
+                req.deny();
             }
-            false
+            true
         });
     });
 }
@@ -142,7 +145,7 @@ fn start(app: AppHandle) {
         let shared = app.state::<Shared>();
         *shared.binary.lock().unwrap() = Some(bin.clone());
         let status = |s: &str| set_status(&win, s, "");
-        let (conn, started) = match daemon::ensure_running(&bin, &status) {
+        let (conn, started, child) = match daemon::ensure_running(&bin, &status) {
             Ok(v) => v,
             Err(e) => {
                 set_status(&win, "faztudo did not start", &e);
@@ -150,6 +153,7 @@ fn start(app: AppHandle) {
             }
         };
         *shared.started.lock().unwrap() = Some(started);
+        *shared.child.lock().unwrap() = child;
         let origin = conn.url.trim_end_matches('/').to_string();
         *shared.origin.lock().unwrap() = Some(origin.clone());
         // The code works once and expires within a minute; the page drops it
@@ -309,8 +313,8 @@ fn stop_and_exit(app: AppHandle) {
         let outcome = bin.as_ref().map(|b| daemon::stop(&b.path));
         let left = matches!(&outcome, Some(Ok(s)) if s.daemon == "left_running");
         if left {
-            if let Some(daemon::Started::Child(pid)) = started {
-                daemon::terminate(pid);
+            if let (Some(daemon::Started::Child), Some(child)) = (started, shared.child.lock().unwrap().as_mut()) {
+                daemon::terminate(child);
             } else {
                 let h = app.clone();
                 app.dialog()

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/api"
 	"github.com/thiagodefreitas/faztudo/internal/auth"
@@ -20,6 +22,12 @@ import (
 // stopFixture runs the real API with one running and one finished run.
 // Cancelling marks the run cancelled, as the runner does.
 func stopFixture(t *testing.T) (listen, tokenPath, token string, s *store.Store) {
+	t.Helper()
+	return stopFixtureWith(t, nil)
+}
+
+// stopFixtureWith uses cancel instead of the default when it is not nil.
+func stopFixtureWith(t *testing.T, cancel func(context.Context, string) error) (listen, tokenPath, token string, s *store.Store) {
 	t.Helper()
 	ctx := context.Background()
 	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
@@ -42,14 +50,17 @@ func stopFixture(t *testing.T) (listen, tokenPath, token string, s *store.Store)
 		}
 	}
 	h := api.New(s, human.ID, "9.9.9")
-	h.CancelRun = func(ctx context.Context, id string) error {
-		r, err := s.Run(ctx, id)
-		if err != nil {
+	h.CancelRun = cancel
+	if cancel == nil {
+		h.CancelRun = func(ctx context.Context, id string) error {
+			r, err := s.Run(ctx, id)
+			if err != nil {
+				return err
+			}
+			r.State = domain.RunCancelled
+			_, err = s.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: r.ChannelID, Payload: r})
 			return err
 		}
-		r.State = domain.RunCancelled
-		_, err = s.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: r.ChannelID, Payload: r})
-		return err
 	}
 	tokenPath = auth.LocalTokenPath(t.TempDir())
 	h.LocalTokenPath = tokenPath
@@ -135,13 +146,49 @@ func TestListensOnMatchesTheProcessSocket(t *testing.T) {
 	if err := os.Symlink("socket:[4242]", filepath.Join(fd, "8")); err != nil {
 		t.Fatal(err)
 	}
-	if !listensOn(proc, 77, "7453") {
-		t.Fatal("pid 77 listens on 7453 (0x1D1D)")
+	if !listensOn(proc, 77, "127.0.0.1:7453") {
+		t.Fatal("pid 77 listens on 127.0.0.1:7453 (0x1D1D)")
 	}
-	if listensOn(proc, 77, "7454") {
+	if listensOn(proc, 77, "127.0.0.2:7453") {
+		t.Fatal("a listener on 127.0.0.1 does not serve 127.0.0.2")
+	}
+	if listensOn(proc, 77, "127.0.0.1:7454") {
 		t.Fatal("7454 is an established connection, not a listener")
 	}
-	if listensOn(proc, 78, "7453") {
+	if listensOn(proc, 78, "127.0.0.1:7453") {
 		t.Fatal("pid 78 has no such socket")
+	}
+}
+
+func TestProcAddresses(t *testing.T) {
+	got := procAddresses("127.0.0.1:7457")
+	for _, want := range []string{"0100007F:1D21", "00000000:1D21", "00000000000000000000000000000000:1D21"} {
+		if !got[want] {
+			t.Errorf("missing %s in %v", want, got)
+		}
+	}
+	if got := procAddresses("[::1]:7457"); !got["00000000000000000000000001000000:1D21"] {
+		t.Errorf("::1 form missing: %v", got)
+	}
+	if procAddresses("nonsense") != nil {
+		t.Error("bad listen accepted")
+	}
+}
+
+func TestStopLeavesFaztudoWhenRunsRemain(t *testing.T) {
+	defer func(d time.Duration) { stopWait = d }(stopWait)
+	stopWait = time.Second
+	listen, path, _, _ := stopFixtureWith(t, func(context.Context, string) error { return errors.New("cannot cancel") })
+	var out bytes.Buffer
+	unitStopped := false
+	err := runStop(listen, path, []string{"--json"}, &out, func(string) (bool, error) { unitStopped = true; return true, nil })
+	if err == nil || !strings.Contains(err.Error(), "still active") {
+		t.Fatalf("want an error about active runs, got %v", err)
+	}
+	if unitStopped {
+		t.Fatal("the unit was stopped under a live run")
+	}
+	if !strings.Contains(out.String(), `"remaining":["live"]`) {
+		t.Fatalf("output %s", out.String())
 	}
 }
