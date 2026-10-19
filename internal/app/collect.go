@@ -17,6 +17,16 @@ func collectFinished(s domain.RunState) bool {
 	return s.Terminal() || s == domain.RunWaitingApproval
 }
 
+// collectStarted reports whether the collect run for message id exists.
+func collectStarted(runs []domain.Run, id string) bool {
+	for _, r := range runs {
+		if r.TriggerMessageID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func collectClip(s string, limit int) string {
 	r := []rune(strings.TrimSpace(s))
 	if len(r) <= limit {
@@ -102,6 +112,9 @@ func (a *App) collectReady(ctx context.Context, channelID string) error {
 		return err
 	}
 	for parentID, handoffs := range groups {
+		if p, ok := collected[parentID]; ok && collectStarted(runs, p.MessageID) {
+			continue // settled; skip the reads on every later event
+		}
 		parent, err := a.Store.Run(ctx, parentID)
 		if errors.Is(err, store.ErrNotFound) {
 			continue

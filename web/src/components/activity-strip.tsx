@@ -1,17 +1,23 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { api } from "../api/client"
 import { catchUpLine, channelActivity, isQuiet } from "../lib/activity"
 import { cx } from "../lib/cx"
 import { formatElapsed } from "../lib/time"
+import { qk } from "../state/keys"
+import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
 import { useApprovals, useChannelSummary, useLanes, useMembers, useMessages, useRuns } from "../state/queries"
-import type { Channel } from "../types"
+import type { Channel, Run } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { healthDotClass } from "./lane-chip"
 
-// The top of a channel: what is going on right now, and, when the channel was
+// The top of a channel: who is working now (avatar, handle, what, elapsed,
+// Stop), approvals waiting, lanes in trouble, and, when the channel was
 // opened with unread messages, one line of catch-up from the stored summary.
 // Key it by channel so the unread count is read once per visit. A page that
-// shows its own catch-up card passes catchUp={false}.
+// shows its own catch-up card passes catchUp={false}. The per-second clock
+// lives in the Elapsed leaf, so a tick re-renders that text and nothing else.
 export function ActivityStrip({
   channel,
   onOpenRun,
@@ -21,7 +27,6 @@ export function ActivityStrip({
   onOpenRun: (runId: string) => void
   catchUp?: boolean
 }) {
-  const now = useNow()
   const runs = useRuns()
   const approvals = useApprovals()
   const lanes = useLanes()
@@ -62,17 +67,20 @@ export function ActivityStrip({
       {!isQuiet(activity) && (
         <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
           {activity.working.map(({ run, agent, gist }) => (
-            <li key={run.id}>
+            <li key={run.id} className="inline-flex max-w-full items-center gap-1">
               <button
                 type="button"
                 onClick={() => onOpenRun(run.id)}
-                className="inline-flex min-h-8 max-w-full items-center gap-1.5 rounded text-left hover:text-ink md:min-h-6"
+                title={gist ? `Open the run: ${gist}` : "Open the run"}
+                className="inline-flex min-h-8 min-w-0 max-w-full items-center gap-1.5 rounded text-left hover:text-ink md:min-h-6"
               >
                 <AgentAvatar member={agent} size={16} state="working" decorative />
                 <span className="font-medium">{agent?.display_name ?? "Agent"}</span>
+                {agent && <span className="text-faint max-sm:hidden">@{agent.handle}</span>}
                 {gist && <span className="min-w-0 truncate text-muted">{gist}</span>}
-                <span className="font-mono tabular-nums text-faint">{formatElapsed(run.started_at, undefined, now)}</span>
+                <Elapsed run={run} />
               </button>
+              <StopButton run={run} handle={agent?.handle ?? "agent"} />
             </li>
           ))}
           {activity.waiting.length > 0 && (
@@ -96,5 +104,41 @@ export function ActivityStrip({
         </ul>
       )}
     </section>
+  )
+}
+
+// Only this leaf subscribes to the clock.
+function Elapsed({ run }: { run: Run }) {
+  const now = useNow()
+  return <span className="font-mono tabular-nums text-faint">{formatElapsed(run.started_at, undefined, now)}</span>
+}
+
+// The same cancel the run card offers; the strip only lists the states the
+// card lets you cancel (queued, running, verifying).
+function StopButton({ run, handle }: { run: Run; handle: string }) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  async function stop() {
+    setBusy(true)
+    try {
+      const next = await api.cancelRun(run.id)
+      qc.setQueryData<Run[]>(qk.runs, (list = []) => replaceById(list, next))
+    } catch {
+      // The run card reports failures; the strip only updates once the cancel lands.
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void stop()}
+      aria-label={`Stop the run of @${handle}`}
+      title="Stop this run"
+      className="min-h-8 rounded-full border border-line px-1.5 text-[11px] font-medium text-muted hover:border-danger hover:bg-danger-soft hover:text-danger disabled:opacity-60 md:min-h-6"
+    >
+      Stop
+    </button>
   )
 }

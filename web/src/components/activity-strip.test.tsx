@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import { qk } from "../state/keys"
 import type { Approval, Channel, Lane, Member, Message, Run } from "../types"
 import { ActivityStrip } from "./activity-strip"
@@ -74,18 +75,43 @@ function renderStrip(unread: number, data: { runs?: Run[]; approvals?: Approval[
 }
 
 describe("ActivityStrip", () => {
+  afterEach(() => vi.restoreAllMocks())
+
   it("renders nothing for a quiet, fully read channel", () => {
     renderStrip(0)
     expect(screen.queryByRole("region", { name: "Channel activity" })).not.toBeInTheDocument()
   })
 
-  it("shows who works on what, with the time, and opens the run", async () => {
+  it("stays hidden for runs that ended or belong to another channel", () => {
+    renderStrip(0, {
+      runs: [
+        { ...running, id: "r2", state: "done" },
+        { ...running, id: "r3", state: "waiting_approval" },
+        { ...running, id: "r4", state: "cancelled" },
+        { ...running, id: "r5", channel_id: "c2" },
+      ],
+    })
+    expect(screen.queryByRole("region", { name: "Channel activity" })).not.toBeInTheDocument()
+  })
+
+  it("shows who works on what, with the handle and the time, and opens the run", async () => {
     const user = userEvent.setup()
-    const open = renderStrip(0, { runs: [running] })
-    const button = screen.getByRole("button", { name: /Coder.*Fix the login check/ })
+    const open = renderStrip(0, { runs: [running, { ...running, id: "r6", state: "queued" }, { ...running, id: "r7", state: "verifying" }] })
+    const button = screen.getAllByRole("button", { name: /Coder.*Fix the login check/ })[0]!
+    expect(button).toHaveTextContent("@coder")
     expect(button).toHaveTextContent("2m")
+    expect(screen.getAllByRole("button", { name: "Stop the run of @coder" })).toHaveLength(3)
     await user.click(button)
     expect(open).toHaveBeenCalledWith("r1")
+  })
+
+  it("stops a run from the strip and drops it once the cancel lands", async () => {
+    const user = userEvent.setup()
+    const cancel = vi.spyOn(api, "cancelRun").mockResolvedValue({ ...running, state: "cancelled" })
+    renderStrip(0, { runs: [running] })
+    await user.click(screen.getByRole("button", { name: "Stop the run of @coder" }))
+    expect(cancel).toHaveBeenCalledWith("r1")
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Channel activity" })).not.toBeInTheDocument())
   })
 
   it("shows approvals waiting and lanes in trouble", () => {

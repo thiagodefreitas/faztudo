@@ -4,6 +4,7 @@ import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { api } from "../api/client"
 import { participants } from "../lib/agent-chat"
 import { answeredChoice, choiceBody } from "../lib/choices"
+import { delegationLines } from "../lib/delegation"
 import { ulid } from "../lib/id"
 import { formatClock } from "../lib/time"
 import { cx } from "../lib/cx"
@@ -85,6 +86,10 @@ export function MessageList({
   const memberById = useMemo(() => new Map(memberList.map((member) => [member.id, member])), [memberList])
   const runById = useMemo(() => new Map(runList.map((run) => [run.id, run])), [runList])
   const compareByMessage = useMemo(() => new Map(compares.data?.map((group) => [group.message_id, group]) ?? []), [compares.data])
+  // Root id to "3 pieces: 1 running, 1 done, 1 failed", from the handoff
+  // replies in the cache and the runs they started. A string, so the memoized
+  // row only re-renders when its own line changes.
+  const delegation = useMemo(() => delegationLines(allMessages, runList, memberList), [allMessages, runList, memberList])
   const parentRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const stuckRef = useRef(true)
@@ -319,6 +324,7 @@ export function MessageList({
                       channels={channelRefs}
                       run={runById.get(row.message.run_id ?? "")}
                       compare={compareByMessage.get(row.message.id)}
+                      delegation={delegation.get(row.message.id)}
                       onOpenThread={onOpenThread}
                     />
                   )}
@@ -385,6 +391,7 @@ const MessageRow = memo(function MessageRow({
   channels,
   run,
   compare,
+  delegation,
   onOpenThread,
 }: {
   message: Message
@@ -400,6 +407,8 @@ const MessageRow = memo(function MessageRow({
   channels: ChannelRef[] | undefined
   run: Run | undefined
   compare: CompareGroup | undefined
+  /** The pieces handed out under this message, in one line. */
+  delegation: string | undefined
   onOpenThread: ((message: Message) => void) | undefined
 }) {
   const [fresh] = useState(() => Date.now() - Date.parse(message.created_at) < 8000)
@@ -457,6 +466,26 @@ const MessageRow = memo(function MessageRow({
         {message.options && message.options.length > 0 && <MessageChoices message={message} channelId={channelId} />}
         {run && <RunCard run={run} channelId={channelId} />}
         {compare && <CompareCard group={compare} />}
+        {delegation && (
+          <p className="mt-1 text-[12px]">
+            {onOpenThread ? (
+              <button
+                type="button"
+                onClick={() => onOpenThread(message)}
+                aria-label={`Delegation: ${delegation}. Open the thread`}
+                className="inline-flex min-h-8 flex-wrap items-center gap-x-1.5 rounded px-1 text-left text-muted hover:text-ink hover:underline md:min-h-6"
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+                <span className="font-medium text-ink">Delegated</span>
+                <span>{delegation}</span>
+              </button>
+            ) : (
+              <span className="text-muted">
+                <span className="font-medium text-ink">Delegated</span> {delegation}
+              </span>
+            )}
+          </p>
+        )}
         {onOpenThread && (
           <p className="mt-0.5 flex items-center gap-3 text-[12px]">
             {replies > 0 && (

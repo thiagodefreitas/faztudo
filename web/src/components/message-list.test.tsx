@@ -140,6 +140,29 @@ describe("MessageList", () => {
     expect(screen.getByRole("button", { name: /3 messages between Coder and Reviewer/ })).toBeInTheDocument()
   })
 
+  it("sums the pieces handed out under a request and opens its thread", async () => {
+    const onOpenThread = vi.fn()
+    const root = { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", ada, "2026-10-18T10:00:00.000Z", "@coder ship the login fix"), mentions: [coder.id] }
+    const piece = (id: string, to: string, at: string): Message => ({
+      ...message(id, coder, at, `@${to} do a part`),
+      thread_id: root.id,
+      handoff: { request_id: root.id, from: "coder", to, depth: 1 },
+    })
+    const p1 = piece("01CRZ3NDEKTSV4RRFFQ69G5CC2", "reviewer", "2026-10-18T10:01:00.000Z")
+    const p2 = piece("01CRZ3NDEKTSV4RRFFQ69G5CC3", "reviewer", "2026-10-18T10:02:00.000Z")
+    const p3 = piece("01CRZ3NDEKTSV4RRFFQ69G5CC4", "reviewer", "2026-10-18T10:03:00.000Z")
+    const client = renderList([root, p1, p2, p3], [], { onOpenThread })
+    const run = (id: string, trigger: string, state: "running" | "done" | "failed") => ({
+      id, channel_id: "c1", trigger_message_id: trigger, agent_id: reviewer.id, lane_id: "codex/default", mode: "write" as const, state,
+    })
+    client.setQueryData(qk.runs, [run("r1", p1.id, "running"), run("r2", p2.id, "done"), run("r3", p3.id, "failed")])
+    const line = await screen.findByRole("button", { name: "Delegation: 3 pieces: 1 running, 1 done, 1 failed. Open the thread" })
+    await userEvent.click(line)
+    expect(onOpenThread).toHaveBeenCalledWith(expect.objectContaining({ id: root.id }))
+    // The pieces themselves are thread replies and stay out of the transcript.
+    expect(screen.queryByText("@reviewer do a part")).not.toBeInTheDocument()
+  })
+
   it("never collapses a message that mentions a human", () => {
     renderList([{ ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "@ada look"), mentions: [ada.id] }])
     expect(screen.getByText("@ada look")).toBeInTheDocument()

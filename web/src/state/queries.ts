@@ -188,6 +188,14 @@ export function useThread(channelId: string, rootId: string) {
     queryFn: async () => {
       const server = await api.thread(rootId)
       const local = qc.getQueryData<ThreadPage>(qk.thread(rootId))
+      // The channel page lists roots only, so a handoff reply posted before
+      // this session is known to the channel only once its thread was read.
+      // Keep those in the channel cache, where streamed replies already land,
+      // so the root's delegation line survives closing the thread.
+      const handoffs = server.replies.filter((reply) => reply.handoff)
+      if (handoffs.length > 0) {
+        qc.setQueryData<Message[]>(qk.messages(channelId), (list = []) => sortMessages(mergeById(handoffs, list)))
+      }
       return { root: server.root, replies: mergeById(server.replies, local?.replies ?? []) }
     },
   })

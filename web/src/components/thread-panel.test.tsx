@@ -98,6 +98,42 @@ describe("ThreadPanel", () => {
     })
     expect(await screen.findByText("first reply")).toBeInTheDocument()
   })
+
+  it("shows the delegation card under the root and follows a run update live", async () => {
+    const handoff: Message = {
+      ...reply,
+      id: "01CRZ3NDEKTSV4RRFFQ69G5CC5",
+      author_id: "agent-cos",
+      body: "@coder Fix the login check",
+      handoff: { request_id: root.id, from: "cos", to: "coder", depth: 1 },
+    }
+    const coder: Member = { id: "agent-coder", kind: "agent", handle: "coder", display_name: "Coder", presence: "busy", agent: { lanes: ["codex/default"] } }
+    vi.spyOn(api, "thread").mockResolvedValue({ root, replies: [reply, handoff] })
+    const client = await setup((qc) => {
+      qc.setQueryData(qk.members, [ada, coder])
+      qc.setQueryData(qk.messages("c1"), [root])
+      return <ThreadPanel channelId="c1" rootId={root.id} />
+    })
+    const card = await screen.findByRole("region", { name: "Delegation" })
+    expect(card).toHaveTextContent("1 piece: 1 not started")
+    expect(card).toHaveTextContent("@coder")
+    expect(card).toHaveTextContent("Fix the login check")
+    // The handoff reply now also sits in the channel cache, for the root's summary line.
+    await waitFor(() => expect(client.getQueryData<Message[]>(qk.messages("c1"))?.map((item) => item.id)).toEqual([root.id, handoff.id]))
+    applyEvent(client, {
+      seq: 2,
+      id: "01EVAAAAAAAAAAAAAAAAAAAAAB",
+      version: 1,
+      type: "run.created",
+      actor: "system",
+      channel_id: "c1",
+      ts: "2026-10-18T12:02:00.000Z",
+      payload: { id: "r1", channel_id: "c1", trigger_message_id: handoff.id, agent_id: coder.id, lane_id: "codex/default", mode: "write", state: "running", started_at: "2026-10-18T12:02:00.000Z" },
+    })
+    expect(await screen.findByText("running")).toBeInTheDocument()
+    expect(card).toHaveTextContent("1 piece: 1 running")
+    expect(screen.getByRole("link", { name: "Open the run of @coder" })).toHaveAttribute("href", `/c/c1?run=r1`)
+  })
 })
 
 describe("MessageList threads", () => {
