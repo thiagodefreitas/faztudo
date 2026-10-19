@@ -222,12 +222,12 @@ func TestToolsStayInsideTheRun(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"post_message", "ask_human", "request_approval", "read_context", "list_members", "delegate"} {
+	for _, name := range []string{"post_message", "ask_human", "request_approval", "read_context", "list_members", "delegate", "read_thread", "search_messages", "list_handoffs"} {
 		if !names[name] {
 			t.Fatalf("missing tool %s", name)
 		}
 	}
-	if len(names) != 6 || names["resolve_approval"] {
+	if len(names) != 9 || names["resolve_approval"] {
 		t.Fatalf("tool list %v", names)
 	}
 

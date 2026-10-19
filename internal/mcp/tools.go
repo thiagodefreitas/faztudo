@@ -155,6 +155,30 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 		return nil, out, err
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "read_thread",
+		Description: "Read a whole thread, oldest first, from this run's channel or another channel of the same project. Limit must be from 1 to 100. Does not modify the work tree.",
+		Annotations: hints,
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in threadIn) (*sdkmcp.CallToolResult, threadOut, error) {
+		out, err := h.readThread(ctx, grant, in)
+		return nil, out, err
+	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "search_messages",
+		Description: "Search message text in this run's channel and the other channels of its project, newest first. Limit must be from 1 to 30. Does not modify the work tree.",
+		Annotations: hints,
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in searchIn) (*sdkmcp.CallToolResult, searchOut, error) {
+		out, err := h.searchMessages(ctx, grant, in)
+		return nil, out, err
+	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "list_handoffs",
+		Description: "List the work handed out for this run's request: who got it, the task, and the state and answer of the run it started. Does not modify the work tree.",
+		Annotations: hints,
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, _ emptyIn) (*sdkmcp.CallToolResult, handoffsOut, error) {
+		out, err := h.listHandoffs(ctx, grant)
+		return nil, out, err
+	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "delegate",
 		Description: delegateDescription,
 		Annotations: hints,

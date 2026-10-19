@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -22,6 +23,8 @@ const (
 type delegateIn struct {
 	To   string `json:"to" jsonschema:"handle of the agent to hand the work to, without the @"`
 	Task string `json:"task" jsonschema:"what to do, with the context that agent needs"`
+	// DoneWhen is added to the posted task as a last "Done when:" line.
+	DoneWhen string `json:"done_when,omitempty" jsonschema:"optional one-line condition that tells the agent the work is finished"`
 }
 
 type delegateOut struct {
@@ -113,6 +116,12 @@ func (h *Handler) delegate(ctx context.Context, grant Grant, in delegateIn) (del
 	task := strings.TrimSpace(in.Task)
 	if task == "" {
 		return delegateOut{}, errors.New("task required")
+	}
+	if dw := strings.Join(strings.Fields(in.DoneWhen), " "); dw != "" {
+		if utf8.RuneCountInString(dw) > maxDoneWhenRunes {
+			return delegateOut{}, fmt.Errorf("done_when is too long: at most %d characters", maxDoneWhenRunes)
+		}
+		task += "\n\nDone when: " + dw
 	}
 	handle := strings.TrimPrefix(strings.TrimSpace(in.To), "@")
 	if handle == "" {

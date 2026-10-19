@@ -377,9 +377,20 @@ Unset, a Claude write run may use `Bash(go test:*)`, `Bash(go vet:*)`,
 `Bash(gh issue view:*)`. Setting the field replaces that list, and
 `allowed_tools = []` allows none. Read runs have no default list. Whenever
 faztudo passes its MCP endpoint, every Claude run, read or write, also allows
-the six faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
-`request_approval`, `read_context`, `list_members`, `delegate`); that is not
+the nine faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
+`request_approval`, `read_context`, `list_members`, `delegate`,
+`read_thread`, `search_messages`, `list_handoffs`); that is not
 configurable.
+
+The last three only read. `read_thread` returns a thread (up to 100
+messages, oldest first), `search_messages` finds message text (up to 30
+hits, newest first), and `list_handoffs` shows the work handed out for the
+run's request, with the state and answer of each run it started. They read
+the run's own channel and, when it belongs to a project, the project's other
+channels; a private or direct channel only if the agent is a member. Other
+projects, direct messages the agent is not in, and (for search) archived
+projects are never read. One call returns at most about 30 KB. `delegate`
+also takes an optional `done_when`, added to the task as a last line.
 Other CLIs ignore the field.
 
 When `lanes.toml` configures any lane for a CLI, the detected-only

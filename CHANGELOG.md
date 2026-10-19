@@ -10,6 +10,9 @@ All notable changes are listed here. The format follows
 
 - Delegated results return to the delegating agent in one read-only collect
   run. Request budget counts survive a restart.
+- Agents can read a whole thread, search messages and list the work handed
+  out for their request (`read_thread`, `search_messages`, `list_handoffs`),
+  inside their own project only. `delegate` takes an optional `done_when`.
 
 ### Changed
 
