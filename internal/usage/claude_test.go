@@ -89,7 +89,7 @@ func TestReadClaudeSkipsOldFiles(t *testing.T) {
 	home := t.TempDir()
 	path := writeLog(t, home, ".claude/projects/p/s.jsonl",
 		`{"type":"assistant","timestamp":"2026-10-18T11:00:00Z","message":{"usage":{"input_tokens":999,"output_tokens":1}}}`+"\n")
-	old := time.Now().Add(-9 * 24 * time.Hour)
+	old := testNow.Add(-9 * 24 * time.Hour)
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)
 	}

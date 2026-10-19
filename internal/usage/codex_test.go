@@ -89,7 +89,7 @@ func TestReadCodexSkipsOldAndUnrelatedFiles(t *testing.T) {
 	home := t.TempDir()
 	old := writeLog(t, home, ".codex/sessions/2026/10/18/rollout-old.jsonl",
 		`{"type":"event_msg","timestamp":"2026-10-18T09:00:00Z","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":99.0,"window_minutes":300,"resets_at":1892293200}}}}`+"\n")
-	stale := time.Now().Add(-10 * 24 * time.Hour)
+	stale := testNow.Add(-10 * 24 * time.Hour)
 	if err := os.Chtimes(old, stale, stale); err != nil {
 		t.Fatal(err)
 	}
