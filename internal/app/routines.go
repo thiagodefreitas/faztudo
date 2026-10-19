@@ -63,9 +63,21 @@ func newRoutineEngine(a *App) *routineEngine {
 // every few seconds. It returns when ctx ends.
 func (e *routineEngine) loop(ctx context.Context) {
 	var feed <-chan events.Event
-	if seq, err := e.app.Store.LastSeq(ctx); err == nil {
+	var seq int64
+	subscribe := func() {
+		if feed != nil {
+			return
+		}
+		if seq == 0 {
+			last, err := e.app.Store.LastSeq(ctx)
+			if err != nil {
+				return
+			}
+			seq = last
+		}
 		feed, _ = e.app.Store.Subscribe(ctx, seq)
 	}
+	subscribe()
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -74,11 +86,16 @@ func (e *routineEngine) loop(ctx context.Context) {
 			return
 		case ev, ok := <-feed:
 			if !ok {
-				feed = nil // a nil channel blocks, so only the ticker is left
+				// Subscribe retries read errors itself; a closed feed means the
+				// store went away. A nil channel blocks, and the next tick tries
+				// again from the last seq seen.
+				feed = nil
 				continue
 			}
+			seq = ev.Seq
 			e.onEvent(ctx, ev)
 		case <-ticker.C:
+			subscribe()
 			e.tick(ctx, e.now())
 		}
 	}

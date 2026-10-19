@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -1048,7 +1049,21 @@ func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, op
 		return domain.Approval{}, store.ErrInvalidOption
 	}
 	note := ""
-	if a.ResolveApproval != nil && v.RunID != "" {
+	// A crash between the change and the resolution leaves the run done with
+	// its outcome while the approval is still pending. Finish the approval with
+	// what was really applied, even when this request asks for another option,
+	// so a late Discard cannot contradict a merge that already happened.
+	applied := false
+	if v.RunID != "" {
+		if run, rerr := a.Store.Run(ctx, v.RunID); rerr == nil && run.State == domain.RunDone && run.ApprovalOutcome != "" {
+			for _, o := range v.Options {
+				if o.Key == run.ApprovalOption {
+					option, note, applied = run.ApprovalOption, run.ApprovalOutcome, true
+				}
+			}
+		}
+	}
+	if !applied && a.ResolveApproval != nil && v.RunID != "" {
 		note, err = a.ResolveApproval(ctx, v, option, commitMessage)
 		if err != nil {
 			var userErr domain.UserError
@@ -1312,6 +1327,16 @@ func (a *API) streamHead(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]int64{"seq": seq})
 }
 
+// Event stream liveness: a ping every streamPingEvery, and a client that sends
+// nothing (not even a pong) for streamReadWait is dropped. Atomic so tests
+// can shorten them while old handlers are still winding down.
+var streamPingEvery, streamReadWait atomic.Int64
+
+func init() {
+	streamPingEvery.Store(int64(30 * time.Second))
+	streamReadWait.Store(int64(75 * time.Second))
+}
+
 func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	if a.isLANRequest(r) {
 		if !validLANOrigin(r) {
@@ -1383,6 +1408,36 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		// closeDeviceStreams, so re-read the session row on a timer.
 		go a.watchSession(streamCtx, cancel, sessID)
 	}
+	// Nothing else reads the socket, so without this loop a client that went
+	// away is only noticed on the next write. The reader ends the stream on any
+	// error or close; pings keep the read deadline moving while the client lives.
+	readWait, pingEvery := time.Duration(streamReadWait.Load()), time.Duration(streamPingEvery.Load())
+	_ = conn.SetReadDeadline(time.Now().Add(readWait))
+	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(readWait)) })
+	go func() {
+		defer cancel()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(readWait))
+		}
+	}()
+	go func() {
+		t := time.NewTicker(pingEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-t.C:
+				if conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)) != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	me := current(r).ID
 	for evt := range ch {
 		// Events of a channel the caller cannot read never reach this stream.

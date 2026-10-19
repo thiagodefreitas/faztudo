@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -26,7 +28,15 @@ var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
 var ErrInvalidOption = errors.New("invalid option")
 
-type Store struct{ db *sql.DB }
+// Store keeps all writes on one connection (db, so Append keeps its order) and
+// serves reads from a separate pool (rdb), which WAL lets run beside a write.
+type Store struct {
+	db     *sql.DB
+	rdb    *sql.DB
+	closed chan struct{}
+	mu     sync.Mutex
+	wakeCh chan struct{}
+}
 
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -149,13 +159,53 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 10 {
+		migration, err = migrations.ReadFile("migrations/010.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	// Search is optional: if this SQLite build has no FTS5 the table is not
 	// created and Search falls back to LIKE.
 	setupSearch(db)
-	return &Store{db: db}, nil
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "query_only(1)")
+	rdb, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}).String())
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	rdb.SetMaxOpenConns(4)
+	return &Store{db: db, rdb: rdb, closed: make(chan struct{}), wakeCh: make(chan struct{})}, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
-func NewID() string           { return ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String() }
+func (s *Store) Close() error {
+	select {
+	case <-s.closed:
+	default:
+		close(s.closed)
+	}
+	s.rdb.Close()
+	return s.db.Close()
+}
+
+// wake tells subscribers that the log grew.
+func (s *Store) wake() {
+	s.mu.Lock()
+	close(s.wakeCh)
+	s.wakeCh = make(chan struct{})
+	s.mu.Unlock()
+}
+func (s *Store) woken() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wakeCh
+}
+func NewID() string { return ulid.MustNew(ulid.Timestamp(time.Now()), rand.Reader).String() }
 
 func (s *Store) Append(ctx context.Context, d events.Draft) (events.Event, error) {
 	if d.Type == "" || d.Actor == "" {
@@ -186,7 +236,11 @@ func (s *Store) Append(ctx context.Context, d events.Draft) (events.Event, error
 	if err != nil {
 		return events.Event{}, storeError(err)
 	}
-	return e, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return events.Event{}, err
+	}
+	s.wake()
+	return e, nil
 }
 
 func storeError(err error) error {
@@ -234,7 +288,7 @@ func scanEvent(row interface{ Scan(...any) error }) (events.Event, error) {
 	return e, err
 }
 func (s *Store) Event(ctx context.Context, id string) (events.Event, error) {
-	e, err := scanEvent(s.db.QueryRowContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE id=?", id))
+	e, err := scanEvent(s.rdb.QueryRowContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return e, ErrNotFound
 	}
@@ -244,14 +298,14 @@ func (s *Store) Event(ctx context.Context, id string) (events.Event, error) {
 // LastSeq is the sequence number of the newest event, 0 for an empty log.
 func (s *Store) LastSeq(ctx context.Context) (int64, error) {
 	var seq int64
-	err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq)
+	err := s.rdb.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq),0) FROM events").Scan(&seq)
 	return seq, err
 }
 func (s *Store) EventsAfter(ctx context.Context, after int64, limit int) ([]events.Event, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE seq>? ORDER BY seq LIMIT ?", after, limit)
+	rows, err := s.rdb.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE seq>? ORDER BY seq LIMIT ?", after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +326,7 @@ func (s *Store) EventsAfter(ctx context.Context, after int64, limit int) ([]even
 func (s *Store) EventsOfTypes(ctx context.Context, channelID string, types ...events.Type) ([]events.Event, error) {
 	out := []events.Event{}
 	for _, t := range types {
-		rows, err := s.db.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE type=? AND channel_id=? ORDER BY seq", string(t), channelID)
+		rows, err := s.rdb.QueryContext(ctx, "SELECT seq,id,version,type,actor,channel_id,COALESCE(idempotency_key,''),payload,ts FROM events WHERE type=? AND channel_id=? ORDER BY seq", string(t), channelID)
 		if err != nil {
 			return nil, err
 		}
@@ -300,13 +354,29 @@ func (s *Store) Subscribe(ctx context.Context, afterSeq int64) (<-chan events.Ev
 	ch := make(chan events.Event, 32)
 	go func() {
 		defer close(ch)
-		ticker := time.NewTicker(20 * time.Millisecond)
+		// Append wakes the loop; the slow ticker only covers a write made by
+		// another process. A read error is retried with backoff from the last
+		// delivered seq, it does not end the subscription.
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		backoff := 100 * time.Millisecond
 		for {
+			wake := s.woken()
 			batch, err := s.EventsAfter(ctx, afterSeq, 200)
 			if err != nil {
-				return
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.closed:
+					return
+				case <-time.After(backoff):
+				}
+				if backoff *= 2; backoff > 5*time.Second {
+					backoff = 5 * time.Second
+				}
+				continue
 			}
+			backoff = 100 * time.Millisecond
 			for _, e := range batch {
 				select {
 				case ch <- e:
@@ -321,6 +391,9 @@ func (s *Store) Subscribe(ctx context.Context, afterSeq int64) (<-chan events.Ev
 			select {
 			case <-ctx.Done():
 				return
+			case <-s.closed:
+				return
+			case <-wake:
 			case <-ticker.C:
 			}
 		}
@@ -750,7 +823,11 @@ func (s *Store) ResolveApproval(ctx context.Context, id, option, note, by string
 	if _, err := appendTx(ctx, tx, events.Draft{Type: events.ApprovalResolved, Actor: events.Human(by), ChannelID: approval.ChannelID}, payload); err != nil {
 		return domain.Approval{}, storeError(err)
 	}
-	return approval, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return domain.Approval{}, err
+	}
+	s.wake()
+	return approval, nil
 }
 func (s *Store) Departments(ctx context.Context) ([]domain.Department, error) {
 	return queryJSON[domain.Department](ctx, s.db, "SELECT data FROM org WHERE kind='department' ORDER BY handle")
@@ -776,7 +853,7 @@ func (s *Store) Lane(ctx context.Context, id string) (domain.Lane, error) {
 	return oneJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes WHERE id=?", id)
 }
 func (s *Store) RunOutput(ctx context.Context, id string, after int) ([]events.RunOutputPayload, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT payload FROM events WHERE type=? AND json_extract(payload,'$.run_id')=? AND CAST(json_extract(payload,'$.seq') AS INTEGER)>? ORDER BY seq", events.RunOutput, id, after)
+	rows, err := s.rdb.QueryContext(ctx, "SELECT payload FROM events WHERE type='run.output' AND json_extract(payload,'$.run_id')=? AND CAST(json_extract(payload,'$.seq') AS INTEGER)>? ORDER BY seq", id, after)
 	if err != nil {
 		return nil, err
 	}
@@ -797,7 +874,7 @@ func (s *Store) RunOutput(ctx context.Context, id string, after int) ([]events.R
 }
 func (s *Store) Unread(ctx context.Context, channelID, memberID string) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events e LEFT JOIN unread u ON u.channel_id=e.channel_id AND u.member_id=? WHERE e.channel_id=? AND e.type=? AND e.seq>COALESCE(u.last_read_seq,0)", memberID, channelID, events.MessagePosted).Scan(&n)
+	err := s.rdb.QueryRowContext(ctx, "SELECT COUNT(*) FROM events e LEFT JOIN unread u ON u.channel_id=e.channel_id AND u.member_id=? WHERE e.channel_id=? AND e.type=? AND e.seq>COALESCE(u.last_read_seq,0)", memberID, channelID, events.MessagePosted).Scan(&n)
 	return n, err
 }
 
