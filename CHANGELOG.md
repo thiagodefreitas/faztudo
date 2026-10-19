@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Delegated results return to the delegating agent in one read-only collect
+  run. Request budget counts survive a restart.
+
 ### Changed
 
 - `/lane codex` works as a short name for `codex/default` when it matches

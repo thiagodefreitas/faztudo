@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/thiagodefreitas/faztudo/internal/domain"
 )
 
 type Type string
@@ -33,6 +35,7 @@ const (
 	LaneSwitched      Type = "lane.switched"
 	Notice            Type = "notice"
 	HandoffCreated    Type = "handoff.created"
+	HandoffCollected  Type = "handoff.collected"
 	RoutineUpdated    Type = "routine.updated"
 	TaskCreated       Type = "task.created"
 	TaskUpdated       Type = "task.updated"
@@ -93,6 +96,22 @@ type Draft struct {
 	ChannelID      string
 	IdempotencyKey string
 	Payload        any
+}
+
+type HandoffPayload struct {
+	domain.Handoff
+	MessageID   string `json:"message_id,omitempty"`
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	Task        string `json:"task,omitempty"`
+	Premium     bool   `json:"premium,omitempty"`
+	Refusal     string `json:"refusal,omitempty"`
+}
+
+type HandoffCollectedPayload struct {
+	ParentRunID string `json:"parent_run_id"`
+	RequestID   string `json:"request_id"`
+	MessageID   string `json:"message_id"`
+	Premium     bool   `json:"premium,omitempty"`
 }
 
 // RunOutputPayload is the payload of a run.output event.

@@ -26,7 +26,7 @@ func (a *App) delegationNote(ctx context.Context, agent domain.Member, m domain.
 		return ""
 	}
 	limits := a.requestLimits()
-	budget := fmt.Sprintf("One request can start at most %d delegated runs (%d on premium lanes); past that the Director is asked, so hand over only what is needed. The agent you choose posts its result in the thread, so you do not need to wait for it.", limits.MaxRuns, limits.MaxPremium)
+	budget := fmt.Sprintf("One request can start at most %d delegated runs (%d on premium lanes); past that the Director is asked, so hand over only what is needed. Delegated results return to you in one read-only collect run; you do not need to wait for them.", limits.MaxRuns, limits.MaxPremium)
 	if chief := a.chiefHandle(); chief != "" && strings.EqualFold(agent.Handle, chief) {
 		return "You are the Chief of Staff. This request was not addressed to anyone, so it came to you. Decide who should own it by what each agent is for, then hand it over with the delegate tool (to, task). Pick one owner unless the request clearly has separate parts, and put everything the owner needs in the task. Say in one short line who you chose and why. Do the work yourself only if nobody fits. " + budget +
 			"\n\nAgents you can hand work to:\n" + org.Roster(members, departments, chief)

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 )
@@ -59,12 +58,9 @@ func CheckDelegation(caller, target domain.Member, chief string, departments []d
 // Limits caps the runs one request may start by delegation.
 type Limits struct{ MaxRuns, MaxPremium int }
 
-// Ledger counts the runs each request has started by delegation. It lives in
-// memory: a restart forgets the counts, which only lets a request that was
-// already running go on for one more round.
+// Ledger counts the runs each request has started by delegation.
 type Ledger struct {
 	mu      sync.Mutex
-	now     func() time.Time
 	entries map[string]*ledgerEntry
 }
 
@@ -72,30 +68,43 @@ type ledgerEntry struct {
 	runs, premium           int
 	extraRuns, extraPremium int
 	card                    string
-	touched                 time.Time
 }
 
-// ledgerTTL is how long an idle request is remembered.
-const ledgerTTL = 24 * time.Hour
-
 func NewLedger() *Ledger {
-	return &Ledger{now: time.Now, entries: map[string]*ledgerEntry{}}
+	return &Ledger{entries: map[string]*ledgerEntry{}}
 }
 
 func (l *Ledger) entry(request string) *ledgerEntry {
-	now := l.now()
-	for id, e := range l.entries {
-		if now.Sub(e.touched) > ledgerTTL {
-			delete(l.entries, id)
-		}
-	}
 	e := l.entries[request]
 	if e == nil {
 		e = &ledgerEntry{}
 		l.entries[request] = e
 	}
-	e.touched = now
 	return e
+}
+
+// Restore records a run already committed to the event log.
+func (l *Ledger) Restore(request string, premium bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.entry(request)
+	e.runs++
+	if premium {
+		e.premium++
+	}
+}
+
+// Release undoes a reservation whose durable event could not be written.
+func (l *Ledger) Release(request string, premium bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	e := l.entry(request)
+	if e.runs > 0 {
+		e.runs--
+	}
+	if premium && e.premium > 0 {
+		e.premium--
+	}
 }
 
 // Reserve counts one delegated run against the request. It returns false and

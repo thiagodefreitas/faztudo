@@ -205,6 +205,21 @@ func TestDelegationDepthIsEnforcedOnTheServer(t *testing.T) {
 	}
 }
 
+func TestCollectRunCannotDelegate(t *testing.T) {
+	f := newDelegateFixture(t, org.Limits{MaxRuns: 9, MaxPremium: 9})
+	msg := domain.Message{ID: "collect", ChannelID: f.room.ID, ThreadID: f.root.ID, AuthorID: f.who["chief"].ID, Body: "Combine the answers", CollectForRunID: "parent", CreatedAt: time.Now().UTC()}
+	if _, err := f.s.Append(context.Background(), events.Draft{Type: events.MessagePosted, Actor: events.Agent(msg.AuthorID), ChannelID: f.room.ID, Payload: msg}); err != nil {
+		t.Fatal(err)
+	}
+	session := f.session(t, "collect-run", "chief", msg.ID)
+	if res, text := delegateCall(t, session, "coder", "Again"); !res.IsError || !strings.Contains(text, "collect run cannot delegate") {
+		t.Fatalf("collect delegated: %v %q", res.IsError, text)
+	}
+	if f.trig.len() != 0 {
+		t.Fatal("collect started a handoff")
+	}
+}
+
 func (f *delegateFixture) cards(t *testing.T) []domain.Message {
 	t.Helper()
 	msgs, err := f.s.Messages(context.Background(), f.room.ID, "", 100)

@@ -86,6 +86,7 @@ type App struct {
 	taskMu          sync.Mutex
 	taskDispatch    func(ctx context.Context, m domain.Message, agent domain.Member, override string)
 	compareMu       sync.Mutex
+	collectMu       sync.Mutex
 	compareTails    sync.Map
 	compareDispatch func(context.Context, domain.Message, domain.Member, string) error
 	queuedDispatch  func(context.Context, domain.Message, domain.Member, string)
@@ -304,6 +305,14 @@ func (a *App) Start(ctx context.Context) error {
 		return err
 	}
 	if err := a.recoverCompares(ctx); err != nil {
+		return err
+	}
+	if a.MCP != nil {
+		if err := a.MCP.RestoreBudget(ctx); err != nil {
+			return err
+		}
+	}
+	if err := a.startCollecting(ctx); err != nil {
 		return err
 	}
 	activeTasks, err := a.Store.Tasks(ctx, "")
@@ -905,6 +914,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		if task, terr := a.Store.Task(ctx, m.Task); terr == nil && task.Mode != "" {
 			mode = task.Mode
 		}
+	}
+	if m.CollectForRunID != "" {
+		mode = domain.RunRead
 	}
 	if mode == domain.RunWrite && channel.RepoPath == "" {
 		a.notice(ctx, channel.ID, "warn", "Write runs need a channel repo_path. Set it with PATCH /api/v1/channels/"+channel.ID+".")

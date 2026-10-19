@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,10 +30,65 @@ type delegateOut struct {
 	Depth     int    `json:"depth"`
 }
 
-// handoffEvent is the payload of a handoff.created event.
-type handoffEvent struct {
-	domain.Handoff
-	MessageID string `json:"message_id"`
+type handoffEvent = events.HandoffPayload
+
+// RestoreBudget rebuilds committed request counts before another run reserves
+// capacity. The event log is the durable record; the ledger is a cache.
+func (h *Handler) RestoreBudget(ctx context.Context) error {
+	h.budgetMu.Lock()
+	defer h.budgetMu.Unlock()
+	if h.budgetLoaded {
+		return nil
+	}
+	ledger := org.NewLedger()
+	channels, err := h.store.Channels(ctx)
+	if err != nil {
+		return err
+	}
+	for _, channel := range channels {
+		batch, err := h.store.EventsOfTypes(ctx, channel.ID, events.HandoffCreated, events.HandoffCollected)
+		if err != nil {
+			return err
+		}
+		for _, e := range batch {
+			switch e.Type {
+			case events.HandoffCreated:
+				var p events.HandoffPayload
+				if err := json.Unmarshal(e.Payload, &p); err != nil {
+					return err
+				}
+				if p.MessageID == "" || p.RequestID == "" {
+					continue
+				}
+				premium := p.Premium
+				if !premium && p.ParentRunID == "" {
+					if target, err := h.store.MemberByHandle(ctx, p.To); err == nil {
+						premium = h.premium(ctx, target)
+					}
+				}
+				ledger.Restore(p.RequestID, premium)
+			case events.HandoffCollected:
+				var p events.HandoffCollectedPayload
+				if err := json.Unmarshal(e.Payload, &p); err != nil {
+					return err
+				}
+				ledger.Restore(p.RequestID, p.Premium)
+			}
+		}
+	}
+	h.ledger = ledger
+	h.budgetLoaded = true
+	return nil
+}
+
+// ReserveCollect charges the follow-up run to its original request and uses
+// the same Director choice card path as delegate.
+func (h *Handler) ReserveCollect(ctx context.Context, run domain.Run, request string, premium bool) error {
+	return h.reserve(ctx, Grant{RunID: run.ID, AgentID: run.AgentID, ChannelID: run.ChannelID}, request, premium)
+}
+
+func (h *Handler) ReleaseCollect(request string, premium bool) {
+	h.ledger.Release(request, premium)
 }
 
 func (h *Handler) limits() org.Limits {
@@ -70,6 +126,9 @@ func (h *Handler) delegate(ctx context.Context, grant Grant, in delegateIn) (del
 	if err != nil {
 		return delegateOut{}, errors.New("request unavailable")
 	}
+	if trigger.CollectForRunID != "" {
+		return delegateOut{}, errors.New("a collect run cannot delegate")
+	}
 	// The depth comes from the message that started this run, which only the
 	// server writes. A human request is depth 0.
 	depth, request := 0, trigger.ID
@@ -97,12 +156,20 @@ func (h *Handler) delegate(ctx context.Context, grant Grant, in delegateIn) (del
 	}
 	allowed, refusals := h.assignedOnly(ctx, channel.Name, []domain.Member{target})
 	if len(allowed) == 0 {
+		reason := fmt.Sprintf("@%s is not assigned to this project", target.Handle)
+		if len(refusals) > 0 {
+			reason = refusals[0].Text
+		}
+		if _, err := h.store.Append(ctx, events.Draft{Type: events.HandoffCreated, Actor: events.Agent(grant.AgentID), ChannelID: grant.ChannelID, Payload: handoffEvent{Handoff: domain.Handoff{RequestID: request, From: caller.Handle, To: target.Handle, Depth: depth + 1}, ParentRunID: run.ID, Task: task, Refusal: reason}}); err != nil {
+			return delegateOut{}, err
+		}
 		for _, n := range refusals {
 			_, _ = h.store.Append(ctx, events.Draft{Type: events.Notice, Actor: events.System, ChannelID: grant.ChannelID, Payload: n})
 		}
 		return delegateOut{}, fmt.Errorf("@%s is not assigned to this project, so it was not asked; the Director was told", target.Handle)
 	}
-	if err := h.reserve(ctx, grant, request, h.premium(ctx, target)); err != nil {
+	premium := h.premium(ctx, target)
+	if err := h.reserve(ctx, grant, request, premium); err != nil {
 		return delegateOut{}, err
 	}
 	root := trigger.ThreadID
@@ -112,14 +179,18 @@ func (h *Handler) delegate(ctx context.Context, grant Grant, in delegateIn) (del
 	handoff := &domain.Handoff{RequestID: request, From: caller.Handle, To: target.Handle, Depth: depth + 1}
 	msg, err := h.postMessage(ctx, grant, "@"+target.Handle+" "+task, root, nil, false, handoff)
 	if err != nil {
+		h.ledger.Release(request, premium)
 		return delegateOut{}, err
 	}
-	_, _ = h.store.Append(ctx, events.Draft{
+	if _, err := h.store.Append(ctx, events.Draft{
 		Type:      events.HandoffCreated,
 		Actor:     events.Agent(grant.AgentID),
 		ChannelID: grant.ChannelID,
-		Payload:   handoffEvent{Handoff: *handoff, MessageID: msg.ID},
-	})
+		Payload:   handoffEvent{Handoff: *handoff, MessageID: msg.ID, ParentRunID: run.ID, Task: task, Premium: premium},
+	}); err != nil {
+		h.ledger.Release(request, premium)
+		return delegateOut{}, err
+	}
 	if h.trigger != nil {
 		h.trigger.OnMessage(ctx, msg, []domain.Member{target})
 	}
@@ -131,6 +202,9 @@ func (h *Handler) delegate(ctx context.Context, grant Grant, in delegateIn) (del
 // Their answer "A: ..." (the first option, which allows another round) lifts
 // the limits; anything else keeps the refusal.
 func (h *Handler) reserve(ctx context.Context, grant Grant, request string, premium bool) error {
+	if err := h.RestoreBudget(ctx); err != nil {
+		return err
+	}
 	lim := h.limits()
 	if h.ledger.Reserve(request, premium, lim) {
 		return nil

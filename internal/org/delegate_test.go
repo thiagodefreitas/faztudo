@@ -3,7 +3,6 @@ package org
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 )
@@ -93,10 +92,20 @@ func TestLedgerRefusedRunIsNotCounted(t *testing.T) {
 	}
 }
 
-func TestLedgerForgetsIdleRequestsAndKeepsTheCard(t *testing.T) {
+func TestLedgerReleaseAfterWriteFailure(t *testing.T) {
 	l := NewLedger()
-	now := time.Now()
-	l.now = func() time.Time { return now }
+	lim := Limits{MaxRuns: 1, MaxPremium: 1}
+	if !l.Reserve("req", true, lim) {
+		t.Fatal("first reservation refused")
+	}
+	l.Release("req", true)
+	if !l.Reserve("req", true, lim) {
+		t.Fatal("failed event kept the budget")
+	}
+}
+
+func TestLedgerKeepsCountsAndTheCard(t *testing.T) {
+	l := NewLedger()
 	l.SetCard("req", "card1")
 	if l.Card("req") != "card1" {
 		t.Fatal("card not kept")
@@ -106,9 +115,8 @@ func TestLedgerForgetsIdleRequestsAndKeepsTheCard(t *testing.T) {
 		t.Fatal("allowing more runs should close the card")
 	}
 	l.Reserve("req", false, Limits{MaxRuns: 1})
-	now = now.Add(ledgerTTL + time.Minute)
-	if runs, _ := l.Used("req"); runs != 0 {
-		t.Fatalf("an idle request was remembered: %d runs", runs)
+	if runs, _ := l.Used("req"); runs != 1 {
+		t.Fatalf("a committed request was forgotten: %d runs", runs)
 	}
 }
 

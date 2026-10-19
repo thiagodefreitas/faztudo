@@ -25,10 +25,10 @@ way to the right agent.
 | Organization page: the Director, departments, projects, assign and unassign | built |
 | Chief of Staff: `chief_of_staff = true` on a persona; it gets unaddressed messages in the channels that list it, picks the owner from the agents' descriptions and hands off in a thread | built, see [configuration](configuration.md#chief-of-staff-and-delegation) |
 | `delegate` MCP tool for the Chief of Staff and department leads: checked on the server, two levels deep at most, every handoff a thread message and a `handoff.created` event | built |
-| Run budget per request (total and premium); over it, the Director gets a choice card | built; counts live in memory and restart with faztudo |
+| Run budget per request (total and premium); over it, the Director gets a choice card | built; committed run counts are rebuilt from handoff events after a restart; open cards and approved extra rounds are not restored |
 | Routines: cron schedule in your time zone or a trigger on new messages, a daily debrief template, a Routines page with switch, run now and last result | built; they skip when the lane is exhausted, unavailable or in conserve, and stop at a daily cap |
 | `faztudo init --template solo\|team\|empty` | built |
-| A lead or the Chief of Staff waiting for the delegated results to write one combined answer | not built: results land in the thread and the delegating agent does not wait |
+| A lead or the Chief of Staff collecting delegated results into one combined answer | built; a read-only follow-up starts when the parent and all pieces finish, including failed or refused pieces; the follow-up uses the request budget |
 | Routines for a trigger other than a new message (an issue, a failing CI run) | not built |
 | Working groups, drag-to-assign, lane budgets shared across projects, deleting a project from the app | not built, next pass |
 | A project's `repo_path` choosing where runs happen | not built: runs use the channel's `repo_path` |

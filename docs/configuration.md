@@ -40,6 +40,7 @@ sandbox_tasks_max = 512    # systemd user scope, when available
 sandbox_read_only = []      # extra absolute toolchain paths to mount read-only
 request_max_runs = 6          # runs one request may start by delegation
 request_max_premium_runs = 2  # of those, runs on a premium lane
+collect_delegations = true     # one read-only follow-up after delegated results
 
 [routines]
 timezone = ""     # IANA name such as "Europe/Berlin"; empty uses this machine's zone
@@ -252,9 +253,12 @@ channels = ["general"]          # channel names that opt in
   `cost_class = "premium"`. Over a limit, faztudo asks the Director
   with a choice card in the channel and refuses further handoffs until they
   answer. "A" allows another round of the same size, anything else stops the
-  request. Counts are kept in memory and start again after a restart.
-- A delegated agent posts its result in the same thread. The agent that handed
-  the work over does not wait for it.
+  request. Committed counts survive a restart; open cards and approved extra
+  rounds do not.
+- A delegated agent posts its result in the same thread. After all pieces
+  finish, faztudo starts one read-only follow-up for the delegating agent to
+  combine their answers. A refused piece is included with its reason. Set
+  `runs.collect_delegations = false` to turn this off.
 
 ### Routines
 

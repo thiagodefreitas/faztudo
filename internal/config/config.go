@@ -71,6 +71,8 @@ type Runs struct {
 	// by delegation, in total and on premium lanes. Going over asks the Director.
 	RequestMaxRuns    int `toml:"request_max_runs"`
 	RequestMaxPremium int `toml:"request_max_premium_runs"`
+	// CollectDelegations defaults to enabled when omitted.
+	CollectDelegations *bool `toml:"collect_delegations"`
 }
 
 // Routines holds the settings that apply to every routine.

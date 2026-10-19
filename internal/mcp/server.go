@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/thiagodefreitas/faztudo/internal/api"
@@ -29,12 +30,14 @@ type Trigger interface {
 
 // Handler serves streamable HTTP MCP. It accepts loopback clients only.
 type Handler struct {
-	PostAs  func(context.Context, events.Actor, domain.Member, api.PostInput) (domain.Message, bool, error)
-	store   *store.Store
-	tokens  *tokens
-	trigger Trigger
-	http    http.Handler
-	ledger  *org.Ledger
+	PostAs       func(context.Context, events.Actor, domain.Member, api.PostInput) (domain.Message, bool, error)
+	store        *store.Store
+	tokens       *tokens
+	trigger      Trigger
+	http         http.Handler
+	ledger       *org.Ledger
+	budgetMu     sync.Mutex
+	budgetLoaded bool
 	// FilesDir is where uploads live. read_context returns small text
 	// attachments of the run's trigger message from here.
 	FilesDir string
