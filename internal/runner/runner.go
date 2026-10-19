@@ -487,6 +487,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 		if errors.Is(execErr, context.DeadlineExceeded) {
 			class = domain.FailureTransient
 			reason = "run timed out"
+		} else if execErr != nil && code == -1 {
+			// The process never ran, so there is no output to classify.
+			reason = execErr.Error()
 		}
 		if reason == "" {
 			if execErr != nil {
@@ -614,6 +617,11 @@ func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cm
 	_ = os.Remove(exitPath)
 	// The shell remains the process group leader and records the child's exit
 	// even if the daemon that launched it is gone.
+	// Under the wrapper a missing program would surface as exit 127; look it
+	// up first so the run fails with the same error as a direct exec.
+	if _, err := exec.LookPath(c.Path); err != nil {
+		return -1, "", err
+	}
 	script := `status_file=$1; shift; "$@"; status=$?; printf '%s\n' "$status" > "$status_file.tmp" && mv "$status_file.tmp" "$status_file"; exit "$status"`
 	args := append([]string{"-c", script, "faztudo-run", exitPath, c.Path}, c.Args...)
 	cmd := exec.Command("/bin/sh", args...)

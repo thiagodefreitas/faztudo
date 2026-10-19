@@ -908,3 +908,15 @@ func TestAgyQuotaWithExitZeroExhaustsLane(t *testing.T) {
 		t.Fatalf("%+v %v", next, err)
 	}
 }
+
+// A CLI missing from PATH fails the run with the lookup error, not as an
+// exit 127 from the status wrapper.
+func TestMissingCLIFailsWithLookupError(t *testing.T) {
+	dir := t.TempDir()
+	r := Runner{RunDir: dir, Backoff: []time.Duration{time.Millisecond}}
+	run := domain.Run{ID: "missing1", Mode: domain.RunRead, State: domain.RunQueued, LaneID: "lane"}
+	err := r.Execute(context.Background(), &run, fakeAdapter{path: "faztudo-no-such-cli"}, adapters.Request{Mode: domain.RunRead, Workdir: dir, Prompt: "x"})
+	if run.State != domain.RunFailed || !strings.Contains(run.FailureReason, "executable file not found") || run.ExitCode != nil && *run.ExitCode == 127 {
+		t.Fatalf("%v %s %q", err, run.State, run.FailureReason)
+	}
+}
