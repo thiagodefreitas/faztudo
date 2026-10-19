@@ -920,3 +920,34 @@ func TestMissingCLIFailsWithLookupError(t *testing.T) {
 		t.Fatalf("%v %s %q", err, run.State, run.FailureReason)
 	}
 }
+
+// run.json still says waiting_approval after the approval was resolved; a
+// restart must not move the run back.
+func TestRecoverKeepsResolvedApproval(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ended := time.Now().UTC()
+	run := domain.Run{ID: "resolved-before-restart", ChannelID: "channel", State: domain.RunWaitingApproval, Mode: domain.RunWrite, EndedAt: &ended}
+	if _, err := s.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: run.ChannelID, Payload: run}); err != nil {
+		t.Fatal(err)
+	}
+	r := Runner{RunDir: t.TempDir(), Appender: s}
+	if err := r.save(Metadata{Run: run}); err != nil {
+		t.Fatal(err)
+	}
+	done := run
+	done.State = domain.RunDone
+	if _, err := s.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: run.ChannelID, Payload: done}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Run(ctx, run.ID); err != nil || got.State != domain.RunDone {
+		t.Fatalf("after restart: %+v %v", got, err)
+	}
+}

@@ -968,7 +968,10 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 				Run(context.Context, string) (domain.Run, error)
 			}); ok {
 				stored, readErr := source.Run(ctx, m.Run.ID)
-				if readErr == nil && (stored.State != m.Run.State || stored.EndedAt == nil && m.Run.EndedAt != nil) {
+				// run.json is not rewritten when an approval resolves, so it may
+				// be behind the log. Only replay a state the log has not reached.
+				ahead := stored.State != m.Run.State && Transition(stored.State, m.Run.State) == nil
+				if readErr == nil && (ahead || stored.State == m.Run.State && stored.EndedAt == nil && m.Run.EndedAt != nil) {
 					if err := r.emitTerminal(&m.Run); err != nil {
 						return result, err
 					}

@@ -24,6 +24,8 @@ All notable changes are listed here. The format follows
 
 - A run left as running when faztudo stopped before saving its process
   state is now failed on the next start instead of staying active forever.
+- A restart no longer moves a run whose approval was already decided back
+  to waiting for approval.
 - A missing agent CLI fails the run with "executable file not found" again,
   instead of exit 127 or a bare "exit -1".
 - Agent runs survive a restart of faztudo. A run still going finishes
