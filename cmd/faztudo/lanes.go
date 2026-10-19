@@ -58,7 +58,7 @@ func printLanes(p config.Paths) error {
 			l := domain.Lane{ID: cfg.ID, CLI: cfg.CLI, Capacity: cfg.Capacity, Health: domain.LaneUnknown}
 			switch cfg.CLI {
 			case "codex":
-				l.Windows, err = usage.ReadCodex(home, usage.Options{})
+				l.Windows, err = usage.ReadCodex(home, usage.Options{ExtraDirs: []string{p.RunsDir}})
 			case "claude":
 				var result usage.ClaudeResult
 				result, err = usage.ReadClaude(home, usage.Options{})
@@ -80,7 +80,7 @@ func printLanes(p config.Paths) error {
 			l := domain.Lane{ID: detected.Name + "/default", CLI: detected.Name, Capacity: 1, Health: domain.LaneUnknown}
 			switch detected.Name {
 			case "codex":
-				l.Windows, err = usage.ReadCodex(home, usage.Options{})
+				l.Windows, err = usage.ReadCodex(home, usage.Options{ExtraDirs: []string{p.RunsDir}})
 			case "claude":
 				var result usage.ClaudeResult
 				result, err = usage.ReadClaude(home, usage.Options{})

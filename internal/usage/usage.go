@@ -33,6 +33,9 @@ type Options struct {
 	// token-based CLIs. When > 0, Claude windows get a UsedPct computed
 	// against this limit. Defaults to 0 (no percentage).
 	PlanLimitTokens int64
+	// ExtraDirs are searched for Codex rollout files besides the home's
+	// .codex, such as the rate limit lines kept from sandboxed runs.
+	ExtraDirs []string
 }
 
 func (o Options) withDefaults() Options {

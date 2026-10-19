@@ -425,7 +425,7 @@ func (a *App) probeLane(ctx context.Context, id string, asked bool) (domain.Lane
 	var estimate *float64
 	switch lane.CLI {
 	case "codex":
-		windows, err = usage.ReadCodex(home, usage.Options{})
+		windows, err = usage.ReadCodex(home, usage.Options{ExtraDirs: []string{a.Paths.RunsDir}})
 	case "claude", "grok":
 		read := usage.ReadClaude
 		if lane.CLI == "grok" {

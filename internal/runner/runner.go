@@ -22,6 +22,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/lanes"
+	"github.com/thiagodefreitas/faztudo/internal/usage"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
 
@@ -30,6 +31,14 @@ var transitions = map[domain.RunState]map[domain.RunState]bool{
 	domain.RunRunning:         {domain.RunVerifying: true, domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true, domain.RunWaitingApproval: true},
 	domain.RunVerifying:       {domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true, domain.RunWaitingApproval: true},
 	domain.RunWaitingApproval: {domain.RunDone: true, domain.RunFailed: true, domain.RunCancelled: true},
+}
+
+// removeSandbox deletes a run's sandbox state after keeping the Codex rate
+// limit lines from its private Codex home, for the Lanes page.
+func (r *Runner) removeSandbox(id string) {
+	state := filepath.Join(r.RunDir, id, "sandbox")
+	_ = usage.KeepCodexLimits(filepath.Join(state, "codex-home"), filepath.Join(r.RunDir, id, "codex-limits", "rollout-limits.jsonl"))
+	_ = os.RemoveAll(state)
 }
 
 func Transition(from, to domain.RunState) error {
@@ -404,7 +413,7 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 	defer removePaths(command.Remove)
 	if write != nil && write.SandboxMode != "" && write.SandboxMode != "off" {
 		write.runStateDir = filepath.Join(r.RunDir, run.ID, "sandbox")
-		defer os.RemoveAll(write.runStateDir)
+		defer r.removeSandbox(run.ID)
 		command, err = sandboxCommand(ctx, command, adapter.Name(), req, write)
 		if err != nil {
 			return err
@@ -982,7 +991,7 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 					return result, err
 				}
 			}
-			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+			r.removeSandbox(m.Run.ID)
 			continue
 		}
 		if m.Run.State != domain.RunRunning {
@@ -1011,7 +1020,7 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 			if err = r.afterRecovered(ctx, m.Run); err != nil {
 				return result, err
 			}
-			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+			r.removeSandbox(m.Run.ID)
 		} else {
 			if r.claimRecoveredID(m.Run.ID) {
 				if r.Capacity != nil {
@@ -1117,7 +1126,7 @@ func (r *Runner) afterRecovered(ctx context.Context, run domain.Run) error {
 func (r *Runner) finishRecovered(m Metadata, code int) {
 	defer r.recovering.Done()
 	defer r.releaseID(m.Run.ID)
-	defer os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+	defer r.removeSandbox(m.Run.ID)
 	r.replayOutput(m)
 	_ = r.completeRecovered(context.Background(), &m.Run, code)
 }
@@ -1150,7 +1159,7 @@ func (r *Runner) completeRecovered(ctx context.Context, run *domain.Run, code in
 
 func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 	defer r.releaseID(m.Run.ID)
-	defer os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+	defer r.removeSandbox(m.Run.ID)
 	defer func() {
 		r.mu.Lock()
 		delete(r.recovered, m.Run.ID)

@@ -3,6 +3,8 @@ package usage
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,5 +128,41 @@ func TestReadCodexSnapshotPastResetIsUnknown(t *testing.T) {
 	}
 	if ws[0].UsedPct != nil || ws[0].Source != domain.SourceUnknown {
 		t.Fatalf("stale 5h window reported as %v from %s", ws[0].UsedPct, ws[0].Source)
+	}
+}
+
+// A sandboxed run's Codex home is deleted with the run; its rate limit
+// lines are kept and read back from the extra directory.
+func TestKeepCodexLimitsFeedsReadCodex(t *testing.T) {
+	root, runs := t.TempDir(), t.TempDir()
+	sessions := filepath.Join(root, "codex-home", "sessions", "2026", "10", "19")
+	if err := os.MkdirAll(sessions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ts := testNow.Add(-time.Minute).UTC().Format(time.RFC3339)
+	body := `{"timestamp":"` + ts + `","payload":{"type":"message"}}` + "\n" +
+		`{"timestamp":"` + ts + `","payload":{"rate_limits":{"primary":{"used_percent":42,"window_minutes":300,"resets_at":` + strconv.FormatInt(testNow.Add(time.Hour).Unix(), 10) + `}}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(sessions, "rollout-x.jsonl"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(runs, "run1", "codex-limits", "rollout-limits.jsonl")
+	if err := KeepCodexLimits(filepath.Join(root, "codex-home"), kept); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(kept); err != nil || strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("kept %q %v", b, err)
+	}
+	windows, err := ReadCodex(t.TempDir(), Options{Now: testNow, ExtraDirs: []string{runs}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if windows[0].UsedPct == nil || *windows[0].UsedPct != 42 {
+		t.Fatalf("5h window %+v", windows[0])
+	}
+	if err := KeepCodexLimits(filepath.Join(root, "missing"), filepath.Join(runs, "run2", "x.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(runs, "run2")); !os.IsNotExist(err) {
+		t.Fatal("wrote a file with no limits")
 	}
 }

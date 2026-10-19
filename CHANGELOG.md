@@ -33,6 +33,8 @@ All notable changes are listed here. The format follows
   reset, and otherwise the lane is tried again after an hour.
 - A run's saved patch keeps its last line and never picks up git warnings,
   so it applies with `git apply` as downloaded.
+- The Lanes page measures Codex again when its runs are sandboxed: a run's
+  rate limit readings are kept before its private Codex home is deleted.
 - A missing agent CLI fails the run with "executable file not found" again,
   instead of exit 127 or a bare "exit -1".
 - Agent runs survive a restart of faztudo. A run still going finishes

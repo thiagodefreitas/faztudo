@@ -2,8 +2,12 @@ package usage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/thiagodefreitas/faztudo/internal/domain"
@@ -40,11 +44,14 @@ type codexEntry struct {
 func ReadCodex(root string, opts Options) ([]domain.LaneWindow, error) {
 	opts = opts.withDefaults()
 
-	dir := filepath.Join(root, CodexDir)
-	files := recentLogFiles(dir, opts, func(name string) bool {
+	rollout := func(name string) bool {
 		return len(name) > len("rollout-") && name[:len("rollout-")] == "rollout-" &&
 			filepath.Ext(name) == ".jsonl"
-	})
+	}
+	files := recentLogFiles(filepath.Join(root, CodexDir), opts, rollout)
+	for _, dir := range opts.ExtraDirs {
+		files = append(files, recentLogFiles(dir, opts, rollout)...)
+	}
 
 	var newest *codexEntry
 	var newestTs time.Time
@@ -128,4 +135,39 @@ func codexWindow(name string, l *codexLimit, now time.Time) domain.LaneWindow {
 		w.ResetsAt = &t
 	}
 	return w
+}
+
+// KeepCodexLimits copies the rate limit lines of the Codex rollout files
+// under from into one rollout file at to. A sandboxed run gives Codex a
+// private home that is deleted with the run, and these lines are the only
+// usage reading a run leaves. Nothing is written when there are none.
+func KeepCodexLimits(from, to string) error {
+	var kept bytes.Buffer
+	err := filepath.WalkDir(from, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasPrefix(d.Name(), "rollout-") || filepath.Ext(d.Name()) != ".jsonl" {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+		for sc.Scan() {
+			var e codexEntry
+			if bytes.Contains(sc.Bytes(), []byte(`"rate_limits"`)) && json.Unmarshal(sc.Bytes(), &e) == nil && e.Payload.RateLimits != nil {
+				kept.Write(sc.Bytes())
+				kept.WriteByte('\n')
+			}
+		}
+		return nil
+	})
+	if err != nil || kept.Len() == 0 {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(to, kept.Bytes(), 0600)
 }
