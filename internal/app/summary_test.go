@@ -186,3 +186,15 @@ func TestSummarySkipsLanesWithoutReadMode(t *testing.T) {
 		t.Fatalf("standard lane counted %d runs, want 1", lane.RunsToday)
 	}
 }
+
+func TestResolveLaneName(t *testing.T) {
+	agent := domain.Member{Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"codex/default", "claude/sonnet", "agy/sonnet"}}}
+	for in, want := range map[string]string{"codex": "codex/default", "claude": "claude/sonnet", "agy/sonnet": "agy/sonnet", "grok": "grok"} {
+		if got, err := resolveLaneName(agent, in); err != nil || got != want {
+			t.Fatalf("%s: %q %v", in, got, err)
+		}
+	}
+	if _, err := resolveLaneName(agent, "sonnet"); err == nil || !strings.Contains(err.Error(), "claude/sonnet or agy/sonnet") {
+		t.Fatalf("ambiguous: %v", err)
+	}
+}

@@ -388,8 +388,10 @@ Switching:
 
 - In a message: `@coder /lane claude/opus fix the failing test`. The
   override applies to that persona for that message only and is removed from
-  the prompt. An unknown lane, or one outside the persona's list, gets a
-  notice and no run.
+  the prompt. A short name that matches the CLI or model of exactly one of
+  the persona's lanes works too: `/lane codex` means `codex/default`. A short
+  name that matches two lanes, an unknown lane, or one outside the persona's
+  list gets a notice and no run.
 - For a channel: `/lane coder claude/opus` in that channel makes that lane
   the persona's preferred lane there, until `/lane coder default` clears it.
   The lane must be in the persona's list. If the preferred lane is exhausted

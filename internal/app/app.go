@@ -519,6 +519,12 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 		override, body, found := parseLaneOverride(m.Body, agent.Handle)
 		if found {
 			msg.Body = body
+			resolved, err := resolveLaneName(agent, override)
+			if err != nil {
+				a.notice(ctx, m.ChannelID, "warn", err.Error())
+				continue
+			}
+			override = resolved
 			if err := a.syncManualLane(ctx, override); err != nil {
 				a.notice(ctx, m.ChannelID, "error", err.Error())
 				continue
@@ -556,6 +562,29 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 			go a.run(context.Background(), msg, agent, override)
 		}
 	}
+}
+
+// resolveLaneName expands a short "/lane" name to the one lane of the agent
+// it names, so "/lane codex" means codex/default. A short name matches a
+// lane's CLI or its model; a full lane id is returned unchanged.
+func resolveLaneName(agent domain.Member, id string) (string, error) {
+	if agent.Agent == nil || strings.Contains(id, "/") || slices.Contains(agent.Agent.Lanes, id) {
+		return id, nil
+	}
+	var matches []string
+	for _, lane := range agent.Agent.Lanes {
+		cli, model, _ := strings.Cut(lane, "/")
+		if cli == id || model == id {
+			matches = append(matches, lane)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return id, nil
+	case 1:
+		return matches[0], nil
+	}
+	return "", fmt.Errorf("@%s: %s could mean %s; name one of them.", agent.Handle, id, strings.Join(matches, " or "))
 }
 
 // checkLaneOverride says why a "/lane" override cannot run.

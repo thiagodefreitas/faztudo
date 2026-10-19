@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Changed
 
+- `/lane codex` works as a short name for `codex/default` when it matches
+  exactly one of the persona's lanes.
 - The chat stays smooth while agents stream: each live event updates only
   the data it touches, and the transcript no longer redraws every second.
 - Unsent text is kept per channel and per thread, across channel switches
@@ -20,6 +22,10 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- A run left as running when faztudo stopped before saving its process
+  state is now failed on the next start instead of staying active forever.
+- A missing agent CLI fails the run with "executable file not found" again,
+  instead of exit 127 or a bare "exit -1".
 - Agent runs survive a restart of faztudo. A run still going finishes
   normally with its answer and approval, and a mention waiting for a free
   lane is kept and started again. A run that cannot be recovered is
