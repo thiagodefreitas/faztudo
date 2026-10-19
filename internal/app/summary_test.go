@@ -127,3 +127,62 @@ func TestPromptUsesSummaryAndOnlyLaterMessages(t *testing.T) {
 		t.Fatalf("prompt: %s", text)
 	}
 }
+
+// writeOnlyAdapter refuses read-only commands, as agy does.
+type writeOnlyAdapter struct{ summaryAdapter }
+
+func (a writeOnlyAdapter) Command(req adapters.Request) (adapters.Cmd, error) {
+	if req.Mode == domain.RunRead {
+		return adapters.Cmd{}, fmt.Errorf("no read-only mode")
+	}
+	return a.summaryAdapter.Command(req)
+}
+
+func TestSummarySkipsLanesWithoutReadMode(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	configs := []lanes.LaneConfig{
+		{ID: "cheap-write", CLI: "writeonly", CostClass: domain.CostCheap, Capacity: 1},
+		{ID: "standard", CLI: "reader", CostClass: domain.CostStandard, Capacity: 1},
+	}
+	for _, c := range configs {
+		lane := domain.Lane{ID: c.ID, CLI: c.CLI, CostClass: c.CostClass, Capacity: 1, Health: domain.LaneAvailable, Windows: []domain.LaneWindow{}}
+		if _, err := s.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: lane}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch := domain.Channel{ID: "ch", Name: "work"}
+	if _, err := s.Append(ctx, events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch}); err != nil {
+		t.Fatal(err)
+	}
+	msg := domain.Message{ID: "one", ChannelID: ch.ID, AuthorID: "human", Body: "Decision: keep the API small", CreatedAt: time.Now().UTC()}
+	if _, err := s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: ch.ID, Payload: msg}); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := lanes.New(configs, nil, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prompt string
+	a := App{Store: s, Config: config.Defaults(), Paths: config.Paths{DataDir: t.TempDir()}, Registry: reg, Adapters: map[string]adapters.Adapter{
+		"writeonly": writeOnlyAdapter{summaryAdapter{name: "writeonly", prompt: &prompt}},
+		"reader":    summaryAdapter{name: "reader", prompt: &prompt},
+	}}
+	got, err := a.RegenerateSummary(ctx, ch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LaneID != "standard" {
+		t.Fatalf("summary lane = %q, want standard", got.LaneID)
+	}
+	if lane, _ := reg.Snapshot("cheap-write"); lane.RunsToday != 0 {
+		t.Fatalf("write-only lane counted %d runs", lane.RunsToday)
+	}
+	if lane, _ := reg.Snapshot("standard"); lane.RunsToday != 1 {
+		t.Fatalf("standard lane counted %d runs, want 1", lane.RunsToday)
+	}
+}

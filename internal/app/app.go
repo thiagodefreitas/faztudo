@@ -330,6 +330,8 @@ func (a *App) RefreshSummaries(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// One failing channel must not stop the summaries of the others.
+	var errs []error
 	for _, channel := range channels {
 		lock := a.summaryLock(channel.ID)
 		lock.Lock()
@@ -337,10 +339,10 @@ func (a *App) RefreshSummaries(ctx context.Context) error {
 		_, err = a.refreshSummary(ctx, domain.Message{ChannelID: channel.ID}, previous, false)
 		lock.Unlock()
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("channel %s: %w", channel.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // RegenerateSummary rebuilds the channel summary from the stored transcript.
@@ -1063,7 +1065,7 @@ func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
 	preferred := a.Config.Runs.SummaryLane
 	if preferred != "" {
 		for _, l := range all {
-			if l.ID == preferred && a.Adapters[l.CLI] != nil && l.Running < l.Capacity && l.Health != domain.LaneExhausted && l.Health != domain.LaneUnavailable {
+			if l.ID == preferred && a.Adapters[l.CLI] != nil && l.Running < l.Capacity && l.Health != domain.LaneExhausted && l.Health != domain.LaneUnavailable && readOnlyCapable(a.Adapters[l.CLI]) {
 				return l, nil
 			}
 		}
@@ -1088,23 +1090,29 @@ func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
 		return all[i].ID < all[j].ID
 	})
 	for _, l := range all {
-		if a.Adapters[l.CLI] != nil && l.Running < l.Capacity && l.Health != domain.LaneExhausted && l.Health != domain.LaneUnavailable {
+		if a.Adapters[l.CLI] != nil && l.Running < l.Capacity && l.Health != domain.LaneExhausted && l.Health != domain.LaneUnavailable && readOnlyCapable(a.Adapters[l.CLI]) {
 			return l, nil
 		}
 	}
 	return domain.Lane{}, errors.New("no summary lane available")
 }
 
+// readOnlyCapable reports whether the adapter can build a read-only command.
+// Summaries never write, and some CLIs (agy) have no read-only mode.
+func readOnlyCapable(adapter adapters.Adapter) bool {
+	_, err := adapter.Command(adapters.Request{Prompt: "summary", Mode: domain.RunRead, Workdir: os.TempDir(), Timeout: time.Minute})
+	return err == nil
+}
+
 func (a *App) generateSummary(ctx context.Context, lane domain.Lane, prompt, channelID string) (string, error) {
-	if err := a.Registry.Acquire(lane.ID); err != nil {
-		return "", err
-	}
-	defer a.Registry.Release(lane.ID)
-	a.Registry.RecordRun(lane.ID)
 	adapter := a.Adapters[lane.CLI]
 	if adapter == nil {
 		return "", fmt.Errorf("no summary adapter for %s", lane.CLI)
 	}
+	if err := a.Registry.Acquire(lane.ID); err != nil {
+		return "", err
+	}
+	defer a.Registry.Release(lane.ID)
 	channel, err := a.Store.Channel(ctx, channelID)
 	if err != nil {
 		return "", err
@@ -1130,6 +1138,8 @@ func (a *App) generateSummary(ctx context.Context, lane domain.Lane, prompt, cha
 	for _, file := range command.Remove {
 		defer os.Remove(file)
 	}
+	// Counted only once a command will really start.
+	a.Registry.RecordRun(lane.ID)
 	callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(callCtx, command.Path, command.Args...)
