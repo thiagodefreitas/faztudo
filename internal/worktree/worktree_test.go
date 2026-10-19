@@ -73,6 +73,13 @@ func TestWorktreeDiffVerifyCleanup(t *testing.T) {
 	if stat.Files != 2 || stat.Insertions != 2 || stat.Deletions != 1 || !strings.Contains(diff, "added.txt") {
 		t.Fatalf("%+v %s", stat, diff)
 	}
+	// The stored patch must apply as it is: complete, ending in a newline.
+	check := exec.Command("git", "apply", "--check", "-")
+	check.Dir = repo
+	check.Stdin = strings.NewReader(diff)
+	if out, err := check.CombinedOutput(); err != nil || !strings.HasSuffix(diff, "\n") {
+		t.Fatalf("patch does not apply: %v %s", err, out)
+	}
 	if err := m.Verify(context.Background(), w, "test -f added.txt", time.Second); err != nil {
 		t.Fatal(err)
 	}

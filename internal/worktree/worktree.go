@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -37,6 +38,14 @@ func HostGit(ctx context.Context, dir string, args ...string) (string, error) {
 // runGit runs host-side git. Repository configuration may have been changed
 // by an agent, so never run its executable Git extensions in the host process.
 func runGit(ctx context.Context, dir string, prefix []string, args ...string) (string, error) {
+	out, err := gitOutput(ctx, dir, prefix, false, args...)
+	return strings.TrimSpace(out), err
+}
+
+// gitOutput runs git as runGit does. With stdoutOnly the result is stdout,
+// byte for byte, so a patch keeps its final newline and no warning from
+// stderr ends up inside it.
+func gitOutput(ctx context.Context, dir string, prefix []string, stdoutOnly bool, args ...string) (string, error) {
 	flags := []string{"-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "gpg.program="}
 	flags = append(flags, prefix...)
 	extensions, err := disabledExtensions(ctx, dir, flags)
@@ -50,11 +59,21 @@ func runGit(ctx context.Context, dir string, prefix []string, args ...string) (s
 	cmd := exec.CommandContext(ctx, "git", append(flags, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_ATTR_NOSYSTEM=1")
-	out, err := cmd.CombinedOutput()
+	var out []byte
+	if stdoutOnly {
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err = cmd.Output()
+		if err != nil {
+			out = stderr.Bytes()
+		}
+	} else {
+		out, err = cmd.CombinedOutput()
+	}
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
-	return strings.TrimSpace(string(out)), nil
+	return string(out), nil
 }
 
 // disabledExtensions reads the effective repo, global and system configuration
@@ -330,7 +349,10 @@ func (m Manager) Diff(ctx context.Context, w Worktree) (domain.DiffStat, string,
 	if err != nil {
 		return domain.DiffStat{}, "", err
 	}
-	diff, err := runIn(ctx, w, "diff", "--binary", w.BaseCommit, "--")
+	if w.Admin == "" {
+		return domain.DiffStat{}, "", errors.New("worktree git directory unknown")
+	}
+	diff, err := gitOutput(ctx, w.Path, []string{"-c", "core.attributesFile=/dev/null", "--git-dir=" + w.Admin, "--work-tree=" + w.Path}, true, "diff", "--binary", w.BaseCommit, "--")
 	if err != nil {
 		return domain.DiffStat{}, "", err
 	}
