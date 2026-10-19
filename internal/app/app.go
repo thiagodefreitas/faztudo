@@ -297,6 +297,9 @@ func (a *App) Start(ctx context.Context) error {
 	if _, err := a.Runner.Recover(ctx); err != nil {
 		return err
 	}
+	if err := a.recoverOrphaned(ctx); err != nil {
+		return err
+	}
 	if err := a.recoverQueued(ctx); err != nil {
 		return err
 	}
@@ -679,6 +682,43 @@ func (a *App) failQueuedRun(ctx context.Context, id string, cause error) {
 	now := time.Now().UTC()
 	run.EndedAt = &now
 	_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: run.ChannelID, Payload: run})
+}
+
+// recoverOrphaned fails runs the log shows as active that have no run.json.
+// The daemon stopped after it recorded the start but before it saved the
+// process state, so no process can be reattached and the run would
+// otherwise stay active forever.
+func (a *App) recoverOrphaned(ctx context.Context) error {
+	for _, state := range []domain.RunState{domain.RunRunning, domain.RunVerifying} {
+		runs, err := a.Store.Runs(ctx, "", string(state))
+		if err != nil {
+			return err
+		}
+		for _, run := range runs {
+			if _, err := os.Stat(filepath.Join(a.Paths.RunsDir, run.ID, "run.json")); err == nil {
+				continue
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+			now := time.Now().UTC()
+			run.State, run.FailureClass, run.EndedAt = domain.RunFailed, domain.FailureTransient, &now
+			run.FailureReason = "the daemon stopped before the run's process was recorded"
+			if _, err := a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: run.ChannelID, Payload: run}); err != nil {
+				return err
+			}
+			if run.Worktree == "" {
+				continue
+			}
+			channel, err := a.Store.Channel(ctx, run.ChannelID)
+			if err == nil {
+				err = a.removeRecoveredWorktree(ctx, channel, run)
+			}
+			if err != nil {
+				a.notice(ctx, run.ChannelID, "warn", fmt.Sprintf("Run %s failed after the daemon restart; its worktree %s was left in place: %s.", run.ID, run.Worktree, err))
+			}
+		}
+	}
+	return nil
 }
 
 func (a *App) recoverQueued(ctx context.Context) error {

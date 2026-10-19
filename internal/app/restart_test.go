@@ -767,3 +767,39 @@ func TestOnMessageQueuesAfterTheRequestEnds(t *testing.T) {
 		t.Fatalf("queued after the request ended: %+v %v", runs, err)
 	}
 }
+
+// A run recorded as running whose run.json was never written has no process
+// to reattach. Start must fail it; a run with run.json is left to the runner.
+func TestRecoverOrphanedFailsRunsWithoutState(t *testing.T) {
+	ctx := context.Background()
+	a, s, agent, ch, m := newFallbackFixture(t)
+	start := func() domain.Run {
+		run, err := a.queueRun(ctx, m, agent, domain.RunRead, "", store.NewID(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().UTC()
+		run.State, run.StartedAt = domain.RunRunning, &now
+		if _, err := s.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: ch.ID, Payload: run}); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	orphan, tracked := start(), start()
+	if err := os.MkdirAll(filepath.Join(a.Paths.RunsDir, tracked.ID), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.Paths.RunsDir, tracked.ID, "run.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.recoverOrphaned(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Run(ctx, orphan.ID)
+	if err != nil || got.State != domain.RunFailed || got.EndedAt == nil {
+		t.Fatalf("orphan: %+v %v", got, err)
+	}
+	if got, err = s.Run(ctx, tracked.ID); err != nil || got.State != domain.RunRunning {
+		t.Fatalf("tracked: %+v %v", got, err)
+	}
+}
