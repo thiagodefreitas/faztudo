@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
 import { qk } from "../state/keys"
-import type { Member, Message, NoticeItem } from "../types"
-import { MessageList } from "./message-list"
+import type { CompareGroup, Member, Message, NoticeItem } from "../types"
+import type { PendingMessage } from "../state/queries"
+import { comparePollInterval, MessageList } from "./message-list"
 
 // jsdom has no layout, so the virtualizer would render no rows.
 vi.mock("@tanstack/react-virtual", () => ({
@@ -88,6 +89,17 @@ function renderList(
 }
 
 describe("MessageList", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("polls only while a comparison is running", () => {
+    const group = { decision: undefined, candidates: [{ run: { state: "running" } }, { run: { state: "waiting_approval" } }] } as CompareGroup
+    expect(comparePollInterval(undefined)).toBe(false)
+    expect(comparePollInterval([group])).toBe(5000)
+    expect(comparePollInterval([{ ...group, candidates: [{ run: { state: "verifying" } }, { run: { state: "done" } }] } as CompareGroup])).toBe(5000)
+    expect(comparePollInterval([{ ...group, candidates: [{ run: { state: "done" } }, { run: { state: "failed" } }] } as CompareGroup])).toBe(false)
+    expect(comparePollInterval([{ ...group, decision: "merge_a" }])).toBe(false)
+  })
+
   it("shows an empty channel", () => {
     renderList()
     expect(screen.getByText("No messages yet.")).toBeInTheDocument()
@@ -212,5 +224,68 @@ describe("MessageList", () => {
     renderList([first, second], [], { focusId: second.id })
     expect(document.getElementById(`msg-${second.id}`)).toHaveClass("bg-accent-soft")
     expect(document.getElementById(`msg-${first.id}`)).not.toHaveClass("bg-accent-soft")
+  })
+
+  it("jumps to a new local message even when the reader scrolled up", async () => {
+    const qc = renderList([message("first", ada, "2026-10-18T10:00:00Z", "first")])
+    const transcript = screen.getByTestId("transcript")
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 500 },
+      clientHeight: { configurable: true, value: 100 },
+    })
+    transcript.scrollTop = 100
+    fireEvent.wheel(transcript)
+    fireEvent.scroll(transcript)
+    expect(screen.getByRole("button", { name: "Latest" })).toBeInTheDocument()
+    act(() => qc.setQueryData<PendingMessage[]>(qk.pending("c1"), [
+      { key: "new", body: "sent", createdAt: "2026-10-18T10:01:00Z" },
+    ]))
+    await waitFor(() => expect(transcript.scrollTop).toBe(500))
+    expect(screen.queryByRole("button", { name: "Latest" })).not.toBeInTheDocument()
+  })
+
+  it("jumps on a posted own message even if no pending row was rendered", async () => {
+    const first = message("first", ada, "2026-10-18T10:00:00Z", "first")
+    const qc = renderList([first])
+    const transcript = screen.getByTestId("transcript")
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 500 },
+      clientHeight: { configurable: true, value: 100 },
+    })
+    transcript.scrollTop = 100
+    fireEvent.wheel(transcript)
+    fireEvent.scroll(transcript)
+    act(() => qc.setQueryData(qk.messages("c1"), [first, message("second", ada, "2026-10-18T10:01:00Z", "sent")]))
+    await waitFor(() => expect(transcript.scrollTop).toBe(500))
+  })
+
+  it("pins growing rows at the bottom but leaves a scrolled-up reader alone", () => {
+    let resize: (() => void) | undefined
+    class Observer {
+      constructor(callback: () => void) { resize = callback }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", Observer)
+    renderList([message("first", ada, "2026-10-18T10:00:00Z", "first")])
+    const transcript = screen.getByTestId("transcript")
+    let height = 500
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, get: () => height },
+      clientHeight: { configurable: true, value: 100 },
+    })
+    transcript.scrollTop = 400
+    height = 600
+    fireEvent.scroll(transcript)
+    expect(transcript.scrollTop).toBe(600)
+    act(() => resize?.())
+    expect(transcript.scrollTop).toBe(600)
+
+    fireEvent.wheel(transcript)
+    transcript.scrollTop = 100
+    fireEvent.scroll(transcript)
+    height = 700
+    act(() => resize?.())
+    expect(transcript.scrollTop).toBe(100)
   })
 })

@@ -180,6 +180,11 @@ export function reduce(state: Snapshot, event: StreamEvent): Snapshot {
       const line = payload && typeof payload.text === "string" ? payload.text : null
       if (!runId || seq === null || !stream || line === null) return next
       const current = state.output[runId] ?? []
+      const last = current.at(-1)
+      if (!last || seq > last.seq) {
+        next.output = { ...state.output, [runId]: [...current, { seq, stream, text: line }] }
+        return next
+      }
       if (current.some((item) => item.seq === seq)) return next
       const lines: OutputLine[] = [...current, { seq, stream, text: line }]
       lines.sort((a, b) => a.seq - b.seq)

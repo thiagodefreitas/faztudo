@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api/client"
 import { participants } from "../lib/agent-chat"
 import { answeredChoice, choiceBody } from "../lib/choices"
@@ -10,7 +10,6 @@ import { cx } from "../lib/cx"
 import { noticeWhy } from "../lib/notice-why"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
-import { useNow } from "../state/now"
 import { sortMessages } from "../state/reduce"
 import { useApprovals, useChannelPins, useChannelSummary, useChannels, useMe, useMembers, useMessages, useNotices, useOrg, usePending, useRuns, useThread, type PendingMessage } from "../state/queries"
 import type { CompareGroup, Member, Message, NoticeAction, NoticeItem, Run, ThreadPage } from "../types"
@@ -27,6 +26,19 @@ import { buildRows, unreadIds } from "./chat/rows"
 import { CompareCard } from "./compare/compare-card"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
+
+const EMPTY_MESSAGES: Message[] = []
+const EMPTY_MEMBERS: Member[] = []
+const EMPTY_RUNS: Run[] = []
+const EMPTY_NOTICES: NoticeItem[] = []
+const EMPTY_PENDING: PendingMessage[] = []
+
+export function comparePollInterval(groups: CompareGroup[] | undefined): number | false {
+  return groups?.some((group) =>
+    !group.decision && group.candidates.some((candidate) =>
+      !candidate.run || candidate.run.state === "queued" || candidate.run.state === "running" || candidate.run.state === "verifying"),
+  ) ? 5000 : false
+}
 
 export function MessageList({
   channelId,
@@ -57,42 +69,60 @@ export function MessageList({
   const channelRefs = useMemo(() => channelList.data?.map(({ id, name }) => ({ id, name })), [channelList.data])
   const me = useMe()
   const runs = useRuns()
-  const compares = useQuery({ queryKey: ["compares", channelId], queryFn: () => api.compares(channelId), refetchInterval: 5000 })
+  const compares = useQuery({
+    queryKey: ["compares", channelId], queryFn: () => api.compares(channelId),
+    refetchInterval: (query) => comparePollInterval(query.state.data),
+  })
   const notices = useNotices()
   const pending = usePending(channelId)
-  const now = useNow()
   // Replies live in the thread panel; the cache also holds streamed replies.
-  const messages = (messagesQuery.data ?? []).filter((message) => !message.thread_id)
+  const allMessages = messagesQuery.data ?? EMPTY_MESSAGES
+  const messages = useMemo(() => allMessages.filter((message) => !message.thread_id), [allMessages])
+  const memberList = members.data ?? EMPTY_MEMBERS
+  const runList = runs.data ?? EMPTY_RUNS
+  const noticeList = notices.data ?? EMPTY_NOTICES
+  const pendingList = pending.data ?? EMPTY_PENDING
+  const memberById = useMemo(() => new Map(memberList.map((member) => [member.id, member])), [memberList])
+  const runById = useMemo(() => new Map(runList.map((run) => [run.id, run])), [runList])
+  const compareByMessage = useMemo(() => new Map(compares.data?.map((group) => [group.message_id, group]) ?? []), [compares.data])
   const parentRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const stuckRef = useRef(true)
+  const userScrollAtRef = useRef(0)
   const preserveRef = useRef<{ height: number; top: number } | null>(null)
   const anchorRef = useRef("")
   const [unstuck, setUnstuck] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
 
-  const visiblePending = (pending.data ?? []).filter((item) => {
+  const visiblePending = useMemo(() => pendingList.filter((item) => {
     if (item.error) return true
     const mine = me.data?.id
     if (!mine) return true
     return !messages.some((message) => message.author_id === mine && message.body === item.body)
-  })
+  }), [pendingList, me.data?.id, messages])
+  const channelNotices = useMemo(() => noticeList.filter((notice) => notice.channel_id === channelId), [noticeList, channelId])
 
   const approvals = useApprovals()
   const summary = useChannelSummary(channelId, unread > 0)
-  const unreadSet = useMemo(() => unreadIds(messagesQuery.data ?? [], unread, me.data?.id), [messagesQuery.data, unread, me.data?.id])
+  const unreadSet = useMemo(() => unreadIds(allMessages, unread, me.data?.id), [allMessages, unread, me.data?.id])
   const showCatchUp = unread > 0 && filter === "all" && !!onMarkRead
-  const rows = buildRows({
+  const context = useMemo(() => filterContext(me.data?.id, approvals.data ?? []), [me.data?.id, approvals.data])
+  const rows = useMemo(() => buildRows({
     messages,
-    members: members.data ?? [],
-    notices: (notices.data ?? []).filter((notice) => notice.channel_id === channelId),
+    members: memberList,
+    notices: channelNotices,
     pending: visiblePending,
     filter,
-    context: filterContext(me.data?.id, approvals.data ?? []),
+    context,
     unread: unreadSet,
     catchUp: showCatchUp,
-    now,
-  })
+    now: Date.now(),
+  }), [messages, memberList, channelNotices, visiblePending, filter, context, unreadSet, showCatchUp])
+  const catchUp = useMemo(() => showCatchUp ? buildCatchUp({
+    channelId, unread: allMessages.filter((message) => unreadSet.has(message.id)), all: allMessages,
+    members: memberList, runs: runList, approvals: approvals.data ?? [],
+    ...(summary.data?.text ? { summary: summary.data.text } : {}),
+  }) : null, [showCatchUp, channelId, allMessages, unreadSet, memberList, runList, approvals.data, summary.data?.text])
   const newIndex = rows.findIndex((row) => row.kind === "new")
 
   // TanStack Virtual returns functions the React compiler cannot memoize.
@@ -103,8 +133,14 @@ export function MessageList({
     estimateSize: () => 88,
     overscan: 8,
     getItemKey: (index) => rows[index]?.key ?? index,
-    measureElement: (element) => element.getBoundingClientRect().height,
   })
+  useLayoutEffect(() => {
+    // The virtualizer owns size changes above a scrolled-up reader. At the
+    // bottom, the inner observer owns pinning, so the two do not both scroll.
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+      !stuckRef.current && !preserveRef.current && item.start < (instance.scrollOffset ?? 0)
+    return () => { virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined }
+  }, [virtualizer])
 
   // Jump to the message a search result named, then flash it for a moment.
   const focusIndex = focusId ? rows.findIndex((row) => row.key === focusId) : -1
@@ -138,6 +174,30 @@ export function MessageList({
     return () => observer.disconnect()
   }, [channelId])
 
+  const lastPendingKey = pendingList.at(-1)?.key
+  const seenPendingKey = useRef(lastPendingKey)
+  useLayoutEffect(() => {
+    if (lastPendingKey && lastPendingKey !== seenPendingKey.current) {
+      jumpLatest()
+    }
+    seenPendingKey.current = lastPendingKey
+  }, [lastPendingKey, rows.length])
+
+  const latestMineId = useMemo(() => {
+    if (!me.data?.id) return undefined
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index]?.author_id === me.data.id) return messages[index]?.id
+    }
+    return undefined
+  }, [messages, me.data?.id])
+  const seenMine = useRef({ channelId, id: latestMineId })
+  useLayoutEffect(() => {
+    if (seenMine.current.channelId === channelId && latestMineId && latestMineId !== seenMine.current.id) {
+      jumpLatest()
+    }
+    seenMine.current = { channelId, id: latestMineId }
+  }, [channelId, latestMineId])
+
   useLayoutEffect(() => {
     const el = parentRef.current
     const prev = preserveRef.current
@@ -150,6 +210,12 @@ export function MessageList({
     const el = parentRef.current
     if (!el) return
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    // A growing row can fire scroll before the inner ResizeObserver pins the
+    // bottom. Only input from the reader may release a pinned transcript.
+    if (stuckRef.current && distance >= 48 && Date.now() - userScrollAtRef.current > 250) {
+      el.scrollTop = el.scrollHeight
+      return
+    }
     const stuck = distance < 48
     stuckRef.current = stuck
     setUnstuck((current) => (current === !stuck ? current : !stuck))
@@ -214,6 +280,10 @@ export function MessageList({
         aria-label="Messages"
         className="min-h-0 flex-1 overflow-y-auto"
         onScroll={onScroll}
+        onWheel={() => { userScrollAtRef.current = Date.now() }}
+        onTouchMove={() => { userScrollAtRef.current = Date.now() }}
+        onPointerDown={() => { userScrollAtRef.current = Date.now() }}
+        onKeyDown={() => { userScrollAtRef.current = Date.now() }}
       >
         {messagesQuery.isPending ? (
           <p className="px-4 py-6 text-[13px] text-muted">Loading messages</p>
@@ -226,7 +296,7 @@ export function MessageList({
               if (!row) return null
               const grouped = row.kind === "message" && row.grouped
               const lastInGroup = row.kind === "message" && row.lastInGroup
-              const author = row.kind === "message" ? members.data?.find((member) => member.id === row.message.author_id) : undefined
+              const author = row.kind === "message" ? memberById.get(row.message.author_id) : undefined
               return (
                 <div
                   key={row.key}
@@ -247,30 +317,21 @@ export function MessageList({
                       pinned={pinnedIds.has(row.message.id)}
                       flash={flash === row.message.id}
                       channels={channelRefs}
-                      fresh={now - Date.parse(row.message.created_at) < 8000}
-                      run={runs.data?.find((entry) => entry.id === row.message.run_id)}
-                      compare={compares.data?.find((group) => group.message_id === row.message.id)}
+                      run={runById.get(row.message.run_id ?? "")}
+                      compare={compareByMessage.get(row.message.id)}
                       onOpenThread={onOpenThread}
                     />
                   )}
                   {row.kind === "day" && <Divider label={row.label} />}
                   {row.kind === "new" && <Divider label="New" tone="accent" />}
-                  {row.kind === "catchup" && onMarkRead && (
+                  {row.kind === "catchup" && onMarkRead && catchUp && (
                     <CatchUpCard
-                      data={buildCatchUp({
-                        channelId,
-                        unread: (messagesQuery.data ?? []).filter((message) => unreadSet.has(message.id)),
-                        all: messagesQuery.data ?? [],
-                        members: members.data ?? [],
-                        runs: runs.data ?? [],
-                        approvals: approvals.data ?? [],
-                        ...(summary.data?.text ? { summary: summary.data.text } : {}),
-                      })}
+                      data={catchUp}
                       onJump={jumpTo}
                       onMarkRead={onMarkRead}
                     />
                   )}
-                  {row.kind === "agents" && <AgentLine messages={row.messages} members={members.data ?? []} channels={channelRefs} />}
+                  {row.kind === "agents" && <AgentLine messages={row.messages} members={memberList} channels={channelRefs} />}
                   {row.kind === "notice" && <NoticeRow notice={row.notice} />}
                   {row.kind === "pending" && <PendingRow item={row.pending} onRetry={onRetry} />}
                 </div>
@@ -311,7 +372,7 @@ function Divider({ label, tone }: { label: string; tone?: "accent" }) {
   )
 }
 
-function MessageRow({
+const MessageRow = memo(function MessageRow({
   message,
   channelId,
   author,
@@ -322,7 +383,6 @@ function MessageRow({
   pinned,
   flash,
   channels,
-  fresh,
   run,
   compare,
   onOpenThread,
@@ -338,11 +398,11 @@ function MessageRow({
   pinned: boolean
   flash: boolean
   channels: ChannelRef[] | undefined
-  fresh: boolean
   run: Run | undefined
   compare: CompareGroup | undefined
   onOpenThread: ((message: Message) => void) | undefined
 }) {
+  const [fresh] = useState(() => Date.now() - Date.parse(message.created_at) < 8000)
   const replies = message.reply_count ?? 0
   const authorName = author?.display_name ?? "Member"
   const time = formatClock(message.created_at)
@@ -423,7 +483,7 @@ function MessageRow({
       </div>
     </article>
   )
-}
+})
 
 // Pin or unpin from the message row. The pins list refetches when the
 // message.pinned event arrives, and right away for the person who clicked.

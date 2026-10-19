@@ -77,6 +77,14 @@ describe("reduce", () => {
     ])
   })
 
+  it("keeps out-of-order output sorted and ignores duplicate line seq", () => {
+    let state = reduce(emptySnapshot(), envelope(1, "run.output", { run_id: runId, seq: 3, stream: "stdout", text: "three" }))
+    state = reduce(state, envelope(2, "run.output", { run_id: runId, seq: 1, stream: "stdout", text: "one" }))
+    state = reduce(state, envelope(3, "run.output", { run_id: runId, seq: 3, stream: "stdout", text: "again" }))
+    expect(state.output[runId]?.map((line) => line.seq)).toEqual([1, 3])
+    expect(state.output[runId]?.[1]?.text).toBe("three")
+  })
+
   it("keeps the latest approval and updates presence", () => {
     const member = {
       id: "01ARZ3NDEKTSV4RRFFQ69G5AA2",
