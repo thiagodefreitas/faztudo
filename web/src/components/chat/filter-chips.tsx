@@ -11,8 +11,8 @@ export function FilterChips({ value, onChange }: { value: ChatFilter; onChange: 
           aria-pressed={value === filter.id}
           onClick={() => onChange(filter.id)}
           className={cx(
-            "min-h-8 shrink-0 rounded-full border px-3 text-[12px]",
-            value === filter.id ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:bg-sidebar hover:text-ink",
+            "min-h-10 shrink-0 rounded-full border px-3 text-[12px] transition-colors duration-150 md:min-h-8",
+            value === filter.id ? "border-accent bg-accent-soft font-medium text-accent" : "border-line text-muted hover:bg-sidebar hover:text-ink",
           )}
         >
           {filter.label}

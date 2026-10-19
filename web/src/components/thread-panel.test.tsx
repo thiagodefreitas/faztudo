@@ -69,6 +69,18 @@ describe("ThreadPanel", () => {
     expect(await screen.findByText("second")).toBeInTheDocument()
   })
 
+  it("keeps a reply that failed to send", async () => {
+    const user = userEvent.setup()
+    localStorage.clear()
+    vi.spyOn(api, "thread").mockResolvedValue({ root, replies: [reply] })
+    vi.spyOn(api, "postMessage").mockRejectedValue(new Error("offline"))
+    await setup(() => <ThreadPanel channelId="c1" rootId={root.id} />)
+    await screen.findByText("first reply")
+    await user.type(screen.getByLabelText("Reply"), "lost words{Enter}")
+    expect(await screen.findByRole("alert")).toHaveTextContent("offline")
+    await waitFor(() => expect(screen.getByLabelText("Reply")).toHaveValue("lost words"))
+  })
+
   it("adds a streamed reply live", async () => {
     vi.spyOn(api, "thread").mockResolvedValue({ root, replies: [] })
     const client = await setup(() => <ThreadPanel channelId="c1" rootId={root.id} />)

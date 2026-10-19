@@ -181,7 +181,7 @@ export function ChannelPage() {
                 onClick={() => setMembersOpen(true)}
                 aria-label={`Members: ${membersLabel}`}
                 title="Members"
-                className="inline-flex shrink-0 items-center rounded-md hover:bg-sidebar"
+                className="-ml-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-sidebar md:h-8 md:w-8"
               >
                 <TeamIcon channel={channel} members={members.data ?? []} excludeId={me.data?.id} size={20} />
               </button>
@@ -210,7 +210,7 @@ export function ChannelPage() {
             <button
               type="button"
               onClick={() => setMembersOpen(true)}
-              className="hidden shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted hover:bg-sidebar hover:text-ink sm:flex"
+              className="hidden min-h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-muted hover:bg-sidebar hover:text-ink sm:flex"
               title="Members"
             >
               <span className="font-mono tabular-nums">{others}</span>
@@ -340,9 +340,12 @@ export function ChannelPage() {
           onMarkRead={markRead}
         />
         <Composer
+          key={channelId}
           members={members.data ?? []}
           channelName={channel.name}
           attach
+          draftKey={channelId}
+          autoFocus
           {...(direct ? { placeholder: `Message ${title}` } : {})}
           onSend={(body, attachments) => send(body, attachments)}
           onTask={(taskTitle) => setTaskTitle(taskTitle)}

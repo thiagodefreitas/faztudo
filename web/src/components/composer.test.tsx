@@ -1,9 +1,9 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError, api } from "../api/client"
 import type { Attachment, Member } from "../types"
-import { Composer } from "./composer"
+import { Composer, readDraft, writeDraft } from "./composer"
 
 const members: Member[] = [
   {
@@ -126,5 +126,137 @@ describe("Composer", () => {
     expect(await screen.findByText("file is larger than the upload limit")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Remove big.bin" }))
     expect(screen.queryByText("big.bin")).not.toBeInTheDocument()
+  })
+
+  it("matches a mention by display name and picks it with Tab", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Composer members={members} channelName="faztudo-dev" onSend={onSend} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await user.type(box, "hi @Ad")
+    expect(screen.getByRole("option", { name: /Ada/ })).toBeInTheDocument()
+    await user.keyboard("{Tab}")
+    expect(box).toHaveValue("hi @ada ")
+    expect(box).toHaveFocus()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("never sends while an IME is composing", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Composer members={members} channelName="faztudo-dev" onSend={onSend} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await user.type(box, "kanji")
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true })
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 })
+    expect(onSend).not.toHaveBeenCalled()
+    expect(box).toHaveValue("kanji")
+    fireEvent.keyDown(box, { key: "Enter" })
+    expect(onSend).toHaveBeenCalledWith("kanji")
+  })
+
+  it("disables Send until there is something to send", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Composer members={members} channelName="faztudo-dev" onSend={onSend} />)
+    const send = screen.getByRole("button", { name: "Send" })
+    expect(send).toBeDisabled()
+    await user.click(send)
+    expect(onSend).not.toHaveBeenCalled()
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "ready")
+    expect(send).toBeEnabled()
+    await user.click(send)
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(send).toBeDisabled()
+  })
+})
+
+describe("Composer drafts", () => {
+  afterEach(() => {
+    localStorage.clear()
+  })
+
+  it("restores the draft for its key and writes what is typed", async () => {
+    const user = userEvent.setup()
+    writeDraft("c1", "half a thought")
+    render(<Composer members={members} channelName="dev" draftKey="c1" onSend={vi.fn()} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    expect(box).toHaveValue("half a thought")
+    await user.type(box, " more")
+    await waitFor(() => expect(readDraft("c1")).toBe("half a thought more"))
+  })
+
+  it("keeps drafts apart per key and clears the draft on send", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    writeDraft("c1", "for dev")
+    writeDraft("c2", "for ops")
+    const { unmount } = render(<Composer key="c1" members={members} channelName="dev" draftKey="c1" onSend={onSend} />)
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("for dev")
+    unmount()
+    render(<Composer key="c2" members={members} channelName="ops" draftKey="c2" onSend={onSend} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    expect(box).toHaveValue("for ops")
+    await user.type(box, "{Enter}")
+    expect(onSend).toHaveBeenCalledWith("for ops")
+    expect(readDraft("c2")).toBe("")
+    expect(readDraft("c1")).toBe("for dev")
+  })
+
+  it("flushes the draft when the composer unmounts before the timer", async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<Composer members={members} channelName="dev" draftKey="c3" onSend={vi.fn()} />)
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "quick")
+    unmount()
+    expect(readDraft("c3")).toBe("quick")
+  })
+
+  it("survives a blocked store", () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    expect(readDraft("c1")).toBe("")
+    expect(() => writeDraft("c1", "x")).not.toThrow()
+    render(<Composer members={members} channelName="dev" draftKey="c1" onSend={vi.fn()} />)
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("")
+    getItem.mockRestore()
+    setItem.mockRestore()
+  })
+})
+
+describe("Composer focus", () => {
+  const original = window.matchMedia
+
+  function pointer(matches: boolean) {
+    window.matchMedia = (query: string) => ({ ...original(query), matches: query.includes("pointer: fine") && matches })
+  }
+
+  afterEach(() => {
+    window.matchMedia = original
+  })
+
+  it("takes focus on mount with a mouse and puts the cursor at the end of the draft", () => {
+    pointer(true)
+    writeDraft("c1", "draft")
+    render(<Composer members={members} channelName="dev" draftKey="c1" autoFocus onSend={vi.fn()} />)
+    const box = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement
+    expect(box).toHaveFocus()
+    expect(box.selectionStart).toBe(5)
+    localStorage.clear()
+  })
+
+  it("leaves the keyboard down on a phone", () => {
+    pointer(false)
+    render(<Composer members={members} channelName="dev" autoFocus onSend={vi.fn()} />)
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveFocus()
+  })
+
+  it("does not take focus unless asked", () => {
+    pointer(true)
+    render(<Composer members={members} channelName="dev" onSend={vi.fn()} />)
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveFocus()
   })
 })

@@ -9,7 +9,7 @@ import { mergeById } from "../state/merge"
 import { useMembers, useThread } from "../state/queries"
 import type { Member, Message, ThreadPage } from "../types"
 import { AgentAvatar } from "./agent-avatar"
-import { Composer } from "./composer"
+import { Composer, readDraft, writeDraft } from "./composer"
 import { AttachmentList } from "./attachments"
 import { Markdown } from "./markdown"
 
@@ -19,6 +19,9 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
   const members = useMembers()
   const thread = useThread(channelId, rootId)
   const [error, setError] = useState<string | null>(null)
+  // Bumped after a failed reply so the composer remounts with the text back.
+  const [attempt, setAttempt] = useState(0)
+  const draftKey = `${channelId}:${rootId}`
 
   function close() {
     void navigate({ to: "/c/$channelId", params: { channelId }, search: {} })
@@ -28,7 +31,8 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape" || event.defaultPrevented) return
       const target = event.target
-      if (target instanceof HTMLElement && target.closest("input, textarea, select, [role='dialog']")) return
+      // The reply box prevents default when Escape only closed its mention popup.
+      if (target instanceof HTMLElement && target.closest("input, select, [role='dialog']")) return
       void navigate({ to: "/c/$channelId", params: { channelId }, search: {} })
     }
     window.addEventListener("keydown", onKey)
@@ -43,7 +47,14 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
           page ? { ...page, replies: mergeById([reply], page.replies) } : page,
         )
       },
-      (cause: unknown) => setError(cause instanceof Error ? cause.message : "Send failed"),
+      (cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Send failed")
+        // Keep the reply, unless something new was typed meanwhile.
+        if (!readDraft(draftKey)) {
+          writeDraft(draftKey, body)
+          setAttempt((value) => value + 1)
+        }
+      },
     )
   }
 
@@ -65,7 +76,11 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
         <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium">
           Thread{count > 0 ? `, ${count} ${count === 1 ? "reply" : "replies"}` : ""}
         </h2>
-        <button type="button" onClick={close} className="min-h-8 rounded px-2 text-[12px]">
+        <button
+          type="button"
+          onClick={close}
+          className="min-h-10 rounded px-3 text-[12px] text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink md:min-h-8 md:px-2"
+        >
           Close
         </button>
       </header>
@@ -99,7 +114,16 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
           {error}
         </p>
       )}
-      <Composer members={members.data ?? []} channelName="" label="Reply" placeholder="Reply in thread" onSend={send} />
+      <Composer
+        key={`${draftKey}:${attempt}`}
+        members={members.data ?? []}
+        channelName=""
+        label="Reply"
+        placeholder="Reply in thread"
+        draftKey={draftKey}
+        autoFocus
+        onSend={send}
+      />
     </aside>
   )
 }

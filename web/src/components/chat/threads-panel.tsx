@@ -31,11 +31,13 @@ export function ThreadsPanel({
     [all, unread, me.data?.id],
   )
 
+  // Escape from the composer closes the panel too; the composer prevents
+  // default when the key closed its mention popup instead.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape" || event.defaultPrevented) return
       const target = event.target
-      if (target instanceof HTMLElement && target.closest("input, textarea, select, [role='dialog']")) return
+      if (target instanceof HTMLElement && target.closest("input, select, [role='dialog']")) return
       onClose()
     }
     window.addEventListener("keydown", onKey)
@@ -49,7 +51,11 @@ export function ThreadsPanel({
     >
       <header className="flex items-center gap-2 border-b border-line px-3 py-2">
         <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium">Threads</h2>
-        <button type="button" onClick={onClose} className="min-h-8 rounded px-2 text-[12px]">
+        <button
+          type="button"
+          onClick={onClose}
+          className="min-h-10 rounded px-3 text-[12px] text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink md:min-h-8 md:px-2"
+        >
           Close
         </button>
       </header>
@@ -63,7 +69,7 @@ export function ThreadsPanel({
                 <button
                   type="button"
                   onClick={() => onOpen(thread.root)}
-                  className="flex min-h-12 w-full flex-col gap-1 px-3 py-2 text-left hover:bg-sidebar"
+                  className="flex min-h-12 w-full flex-col gap-1 px-3 py-2 text-left transition-colors duration-150 hover:bg-sidebar"
                 >
                   <span className="flex items-center gap-2">
                     {thread.unread && <span role="img" aria-label="Unread replies" className="h-2 w-2 shrink-0 rounded-full bg-accent" />}

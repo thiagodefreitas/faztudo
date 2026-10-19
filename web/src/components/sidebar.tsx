@@ -44,9 +44,13 @@ const STATUS_LABEL = {
   closed: "Offline",
 } as const
 
-const ROW = "flex min-h-10 items-center gap-2 rounded-md px-2 text-[13px] md:min-h-7"
+const ROW = "flex min-h-10 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-150 md:min-h-7"
+// The open row is tinted and bold; a row with unread messages is bold too.
+const ACTIVE_ROW = "bg-accent-soft font-medium text-ink"
+const IDLE_ROW = "text-ink hover:bg-canvas"
 const HEADING = "px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint"
 const PLUS = "inline-flex h-10 w-10 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas md:h-7 md:w-7"
+const BADGE = "min-w-5 rounded-full px-1.5 text-center text-[11px] font-medium leading-[18px] tabular-nums text-canvas"
 
 const COLLAPSED_KEY = "faztudo-rail-collapsed"
 
@@ -135,7 +139,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
             className={cx(ROW, "mb-2 justify-between bg-warn-soft font-medium text-warn")}
           >
             <span>Needs you</span>
-            <span className="rounded-full bg-warn px-1.5 text-[11px] font-medium text-canvas" aria-label={`${waiting.length} waiting`}>
+            <span className={cx(BADGE, "bg-warn")} aria-label={`${waiting.length} waiting`}>
               {waiting.length}
             </span>
           </Link>
@@ -213,7 +217,8 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
                     to="/c/$channelId"
                     params={{ channelId: channel.id }}
                     onClick={onNavigate}
-                    className={cx(ROW, pathname === `/c/${channel.id}` ? "bg-accent-soft" : "hover:bg-canvas")}
+                    aria-current={pathname === `/c/${channel.id}` ? "page" : undefined}
+                    className={cx(ROW, pathname === `/c/${channel.id}` ? ACTIVE_ROW : IDLE_ROW, channel.unread > 0 && "font-medium")}
                   >
                     <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE.offline)} aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate">{channel.name}</span>
@@ -251,26 +256,34 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         <Link
           to="/tasks"
           onClick={onNavigate}
-          className={cx(ROW, "text-ink hover:bg-canvas", pathname.endsWith("/tasks") && "bg-accent-soft")}
+          aria-current={pathname.endsWith("/tasks") ? "page" : undefined}
+          className={cx(ROW, pathname.endsWith("/tasks") ? ACTIVE_ROW : IDLE_ROW)}
         >
           Tasks
         </Link>
         <Link
           to="/organization"
           onClick={onNavigate}
-          className={cx(ROW, "text-ink hover:bg-canvas", pathname === "/organization" && "bg-accent-soft")}
+          aria-current={pathname === "/organization" ? "page" : undefined}
+          className={cx(ROW, pathname === "/organization" ? ACTIVE_ROW : IDLE_ROW)}
         >
           Organization
         </Link>
         <Link
           to="/office"
           onClick={onNavigate}
-          className={cx(ROW, "justify-between text-ink hover:bg-canvas", pathname === "/office" && "bg-accent-soft")}
+          aria-current={pathname === "/office" ? "page" : undefined}
+          className={cx(ROW, "justify-between", pathname === "/office" ? ACTIVE_ROW : IDLE_ROW)}
         >
           <span>Office</span>
           <span className="font-mono text-[11px] text-faint">2D</span>
         </Link>
-        <Link to="/settings/devices" onClick={onNavigate} className={cx(ROW, "justify-between text-ink hover:bg-canvas")}>
+        <Link
+          to="/settings/devices"
+          onClick={onNavigate}
+          aria-current={pathname === "/settings/devices" ? "page" : undefined}
+          className={cx(ROW, "justify-between", pathname === "/settings/devices" ? ACTIVE_ROW : IDLE_ROW)}
+        >
           <span>Devices</span>
           <span className="font-mono text-[11px] text-faint">LAN</span>
         </Link>
@@ -319,23 +332,29 @@ function ProjectGroup({
   const listId = `project-${project.handle}-channels`
   return (
     <div className="mb-2" data-project={project.handle}>
-      <div className={cx(ROW, "gap-1 pl-0 pr-1", active ? "bg-accent-soft" : "hover:bg-canvas")}>
+      <div className={cx(ROW, "gap-1 pl-0 pr-1", active ? ACTIVE_ROW : IDLE_ROW)}>
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={!collapsed}
           aria-controls={listId}
           aria-label={`${collapsed ? "Expand" : "Collapse"} ${project.name}`}
-          className="inline-flex h-7 w-6 shrink-0 items-center justify-center rounded text-faint hover:text-ink"
+          className="inline-flex h-10 w-8 shrink-0 items-center justify-center rounded text-faint hover:text-ink md:h-7 md:w-6"
         >
           <svg viewBox="0 0 12 12" className={cx("h-3 w-3 transition-transform duration-100 motion-reduce:transition-none", collapsed && "-rotate-90")} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="m3 4.5 3 3 3-3" />
           </svg>
         </button>
-        <Link to="/p/$handle" params={{ handle: project.handle }} onClick={onNavigate} className="flex min-h-7 min-w-0 flex-1 items-center gap-2 font-medium text-ink">
+        <Link
+          to="/p/$handle"
+          params={{ handle: project.handle }}
+          onClick={onNavigate}
+          aria-current={active ? "page" : undefined}
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 font-medium text-ink md:min-h-7"
+        >
           <span className="min-w-0 flex-1 truncate">{project.name}</span>
           {counts.waiting > 0 && (
-            <span className="rounded-full bg-warn px-1.5 text-[11px] font-medium text-canvas" aria-label={`${counts.waiting} waiting for you`}>
+            <span className={cx(BADGE, "bg-warn")} aria-label={`${counts.waiting} waiting for you`}>
               {counts.waiting}
             </span>
           )}
@@ -375,7 +394,8 @@ function ChannelRow({
         to="/c/$channelId"
         params={{ channelId: channel.id }}
         onClick={onNavigate}
-        className={cx(ROW, active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")}
+        aria-current={active ? "page" : undefined}
+        className={cx(ROW, active ? ACTIVE_ROW : IDLE_ROW, channel.unread > 0 && "font-medium")}
       >
         {team ? (
           <TeamIcon channel={channel} members={members} excludeId={meId} size={20} layout="cluster" className="shrink-0" />
@@ -392,7 +412,7 @@ function ChannelRow({
 function Unread({ count }: { count: number }) {
   if (count <= 0) return null
   return (
-    <span className="rounded-full bg-accent px-1.5 text-[11px] font-medium text-canvas" aria-label={`${count} unread`}>
+    <span className={cx(BADGE, "bg-accent")} aria-label={`${count} unread`}>
       {count}
     </span>
   )
@@ -425,7 +445,7 @@ function PeerRow({
   // A quiet "busy for @persona" only when the CLI is not busy itself.
   const busyFor = member.presence === "busy" ? null : laneBorrower(member, runs, members)
   const active = channel ? pathname === `/c/${channel.id}` : false
-  const className = cx(ROW, "min-w-0 flex-1 text-left", active ? "bg-accent-soft text-ink" : "text-ink hover:bg-canvas")
+  const className = cx(ROW, "min-w-0 flex-1 text-left", active ? ACTIVE_ROW : IDLE_ROW, (channel?.unread ?? 0) > 0 && "font-medium")
   const inner = (
     <>
       {member.kind === "agent" ? (
@@ -453,7 +473,7 @@ function PeerRow({
   return (
     <li className="flex items-center gap-1" data-member={member.id}>
       {channel ? (
-        <Link to="/c/$channelId" params={{ channelId: channel.id }} onClick={onNavigate} className={className}>
+        <Link to="/c/$channelId" params={{ channelId: channel.id }} onClick={onNavigate} aria-current={active ? "page" : undefined} className={className}>
           {inner}
         </Link>
       ) : (

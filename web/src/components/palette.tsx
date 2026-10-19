@@ -19,7 +19,7 @@ export const OPEN_SETTINGS_EVENT = "faztudo:open-settings"
 export const OPEN_PALETTE_EVENT = "faztudo:open-palette"
 
 const itemClass =
-  "flex min-h-9 cursor-default items-center gap-2 rounded px-2 text-[13px] text-ink aria-selected:bg-accent-soft"
+  "flex min-h-10 cursor-default items-center gap-2 rounded px-2 text-[13px] text-ink aria-selected:bg-accent-soft md:min-h-9"
 const headingClass =
   "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-faint"
 

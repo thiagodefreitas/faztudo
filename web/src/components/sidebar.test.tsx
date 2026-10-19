@@ -101,6 +101,14 @@ describe("WorkspaceNav", () => {
     expect(screen.queryByText("dm-ada-coder")).not.toBeInTheDocument()
   })
 
+  it("marks the open channel as the current page and only that one", async () => {
+    await setup()
+    const open = await screen.findByRole("link", { name: /general/ })
+    expect(open).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: /Coder/ })).not.toHaveAttribute("aria-current")
+    expect(screen.getByRole("link", { name: "Tasks" })).not.toHaveAttribute("aria-current")
+  })
+
   it("marks a raw CLI busy for the persona using its lane", async () => {
     await setup({ members: [ada, claude, coder], runs: [coderRun] })
     const row = (await screen.findByText("Claude")).closest("li") as HTMLElement

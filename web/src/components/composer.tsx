@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react"
 import { ApiError, api } from "../api/client"
 import { formatSize } from "../lib/files"
 import { applyMention, filterMembers, mentionQuery } from "../lib/mentions"
@@ -18,12 +18,44 @@ function uploadError(error: unknown): string {
   return "Upload failed"
 }
 
+const DRAFT_PREFIX = "faztudo.draft."
+
+// A keystroke schedules the write; a long paste is not written on every key.
+const DRAFT_DELAY_MS = 300
+
+/** The unsent text kept for a composer, per browser. */
+export function readDraft(key: string | undefined): string {
+  if (!key) return ""
+  try {
+    return localStorage.getItem(DRAFT_PREFIX + key) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+export function writeDraft(key: string | undefined, text: string): void {
+  if (!key) return
+  try {
+    if (text) localStorage.setItem(DRAFT_PREFIX + key, text)
+    else localStorage.removeItem(DRAFT_PREFIX + key)
+  } catch {
+    // Private mode or a full store: the draft lasts until the page closes.
+  }
+}
+
+// Focusing on a phone would raise the keyboard over the channel.
+function hasPointer(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(hover: hover) and (pointer: fine)").matches
+}
+
 export function Composer({
   members,
   channelName,
   placeholder,
   label = "Message",
   attach = false,
+  draftKey,
+  autoFocus = false,
   onSend,
   onTask,
 }: {
@@ -33,12 +65,19 @@ export function Composer({
   label?: string
   /** Show the attach button and accept pasted or dropped files. */
   attach?: boolean
+  /**
+   * Keeps unsent text in local storage under this key and restores it when
+   * the composer mounts, so key the composer by the channel or thread.
+   */
+  draftKey?: string
+  /** Focus the box on mount, on devices with a pointer only. */
+  autoFocus?: boolean
   onSend: (body: string, attachments?: Attachment[]) => void
   /** Opens the task builder, with a title. Adds the Task button and the /task command. */
   onTask?: (title: string) => void
 }) {
   const listId = useId()
-  const [text, setText] = useState("")
+  const [text, setText] = useState(() => readDraft(draftKey))
   const [uploads, setUploads] = useState<Upload[]>([])
   const fileInput = useRef<HTMLInputElement>(null)
   const counter = useRef(0)
@@ -49,11 +88,13 @@ export function Composer({
   const [suppressed, setSuppressed] = useState<string | null>(null)
   const boxRef = useRef<HTMLTextAreaElement>(null)
   const pendingCursor = useRef<number | null>(null)
+  const draft = useRef({ key: draftKey, text })
   const query = mentionQuery(text, cursor)
   const matches = query ? filterMembers(members, query.query) : []
   const queryKey = query ? `${query.start}:${query.query}` : null
   const menuOpen = Boolean(query && matches.length > 0 && suppressed !== queryKey)
   const selected = matches[Math.min(active, Math.max(0, matches.length - 1))]
+  const canSend = !uploading && (text.trim().length > 0 || ready.length > 0)
 
   useLayoutEffect(() => {
     const el = boxRef.current
@@ -70,6 +111,39 @@ export function Composer({
     el.style.height = "auto"
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`
   }, [text])
+
+  useEffect(() => {
+    draft.current = { key: draftKey, text }
+    const timer = setTimeout(() => writeDraft(draftKey, text), DRAFT_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [draftKey, text])
+
+  // Leaving the channel or the page flushes what the timer has not written.
+  useEffect(() => {
+    function flush() {
+      writeDraft(draft.current.key, draft.current.text)
+    }
+    window.addEventListener("pagehide", flush)
+    return () => {
+      window.removeEventListener("pagehide", flush)
+      flush()
+    }
+  }, [])
+
+  useEffect(() => {
+    const el = boxRef.current
+    if (!autoFocus || !el || !hasPointer()) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+    setCursor(end)
+  }, [autoFocus])
+
+  // The arrow keys can move the choice past the visible part of the list.
+  useEffect(() => {
+    if (!menuOpen || !selected) return
+    document.getElementById(`${listId}-${selected.id}`)?.scrollIntoView({ block: "nearest" })
+  }, [listId, menuOpen, selected])
 
   function sync(target: HTMLTextAreaElement) {
     setCursor(target.selectionStart ?? target.value.length)
@@ -117,20 +191,28 @@ export function Composer({
     const command = onTask ? parseTaskCommand(body) : null
     if (command && onTask) {
       onTask(command.title)
-      setText("")
-      setCursor(0)
+      clear()
       return
     }
-    if ((!body && ready.length === 0) || uploading) return
+    if (!canSend) return
     if (ready.length > 0) onSend(body, ready)
     else onSend(body)
-    setText("")
-    setCursor(0)
+    clear()
     setUploads((current) => current.filter((item) => item.error))
   }
 
+  // The draft goes at once, not on the timer, so a reload cannot bring a
+  // sent message back.
+  function clear() {
+    setText("")
+    setCursor(0)
+    writeDraft(draftKey, "")
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing) return
+    // 229 is the key code browsers report while an IME is composing; some
+    // leave isComposing false on the Enter that confirms the text.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (menuOpen && selected) {
       if (event.key === "ArrowDown") {
         event.preventDefault()
@@ -186,7 +268,7 @@ export function Composer({
                   role="option"
                   aria-selected={member.id === selected?.id}
                   id={`${listId}-${member.id}`}
-                  className="flex w-full items-baseline gap-2 px-2 py-1.5 text-left text-[13px] aria-selected:bg-accent-soft"
+                  className="flex min-h-10 w-full items-baseline gap-2 px-2 py-1.5 text-left text-[13px] aria-selected:bg-accent-soft md:min-h-8"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => pick(member)}
                   onMouseEnter={() => setActive(index)}
@@ -213,7 +295,7 @@ export function Composer({
                   type="button"
                   aria-label={`Remove ${item.name}`}
                   onClick={() => setUploads((current) => current.filter((entry) => entry.key !== item.key))}
-                  className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted hover:text-ink"
+                  className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink"
                 >
                   <span aria-hidden="true">x</span>
                 </button>
@@ -287,7 +369,8 @@ export function Composer({
         <button
           type="submit"
           aria-label="Send"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 md:h-8 md:w-auto md:rounded-lg md:px-3 md:text-[13px]"
+          disabled={!canSend}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:opacity-40 disabled:hover:opacity-40 md:h-8 md:w-auto md:rounded-lg md:px-3 md:text-[13px]"
         >
           <svg viewBox="0 0 20 20" className="h-4 w-4 md:hidden" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 16V4M5 9l5-5 5 5" />

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
@@ -166,5 +166,27 @@ describe("ThreadsPanel", () => {
       </QueryClientProvider>,
     )
     expect(screen.getByText("No threads yet.")).toBeInTheDocument()
+  })
+
+  it("closes on Escape from the composer unless the key was already used", () => {
+    const onClose = vi.fn()
+    render(
+      <QueryClientProvider client={client()}>
+        <textarea aria-label="Message" />
+        <div role="dialog">
+          <input aria-label="Search" />
+        </div>
+        <ThreadsPanel channelId="c1" unread={0} onOpen={() => undefined} onClose={onClose} />
+      </QueryClientProvider>,
+    )
+    const box = screen.getByRole("textbox", { name: "Message" })
+    box.focus()
+    // The composer prevents default when Escape closed its mention popup.
+    box.addEventListener("keydown", (event) => event.preventDefault(), { once: true })
+    fireEvent.keyDown(box, { key: "Escape" })
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search" }), { key: "Escape" })
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.keyDown(box, { key: "Escape" })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

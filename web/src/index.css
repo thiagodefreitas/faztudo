@@ -117,6 +117,17 @@ body {
   height: 100%;
 }
 
+/* No double-tap zoom on controls, so a quick second tap on Send or a chip
+   does not zoom the page on a phone. */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+}
+
 ::selection {
   background: var(--color-accent-soft);
   color: var(--color-ink);
