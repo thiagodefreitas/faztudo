@@ -522,6 +522,17 @@ func TestQuotaSwitchesNextCoderRun(t *testing.T) {
 	if !switched || !notice {
 		t.Fatalf("switch and notice: %t %t", switched, notice)
 	}
+	// The first message's retry may still be writing its run directory;
+	// let every run finish before the temp dirs are removed.
+	waitFor(t, func() (bool, bool) {
+		runs, _ := s.Runs(context.Background(), ch.ID, "")
+		for _, r := range runs {
+			if !r.State.Terminal() {
+				return false, false
+			}
+		}
+		return true, true
+	})
 }
 
 func TestLanesCommandReadsStoredHealth(t *testing.T) {
