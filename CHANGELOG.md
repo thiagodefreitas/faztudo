@@ -6,6 +6,26 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The chat stays smooth while agents stream: each live event updates only
+  the data it touches, and the transcript no longer redraws every second.
+- Unsent text is kept per channel and per thread, across channel switches
+  and reloads, and a reply that fails to send comes back into the box.
+- The composer takes focus when a channel opens on a desktop, Send is
+  disabled with nothing to send, and small controls are easier to tap on
+  a phone.
+- The live connection retries with growing pauses instead of every 400 ms,
+  and reconnects at once when the network or the tab comes back.
+
+### Fixed
+
+- A mention inside inline code, a code block or a quoted line no longer
+  starts a run or notifies anyone.
+- Channel summaries were never written when the cheapest lane had no
+  read-only mode (agy); such lanes are now skipped, and a summary attempt
+  counts as a run only when it really starts.
+
 ## [0.1.4] - 2026-10-19
 
 ### Added
