@@ -195,3 +195,26 @@ func TestStopLeavesFaztudoWhenRunsRemain(t *testing.T) {
 		t.Fatalf("output %s", out.String())
 	}
 }
+
+func TestStopKeepsRunsWaitingForApproval(t *testing.T) {
+	listen, path, _, s := stopFixture(t)
+	waiting := domain.Run{ID: "waiting", ChannelID: "chan", AgentID: "agent", State: domain.RunWaitingApproval}
+	if _, err := s.Append(context.Background(), events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: "chan", Payload: waiting}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runStop(listen, path, []string{"--json"}, &out, func(string) (bool, error) { return true, nil }); err != nil {
+		t.Fatal(err)
+	}
+	var got stopResult
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Cancelled != 1 || got.Daemon != "stopped" {
+		t.Fatalf("got %+v", got)
+	}
+	r, err := s.Run(context.Background(), "waiting")
+	if err != nil || r.State != domain.RunWaitingApproval {
+		t.Fatalf("waiting run: %v %v", r.State, err)
+	}
+}
