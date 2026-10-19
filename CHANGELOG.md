@@ -20,6 +20,20 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- Agent runs survive a restart of faztudo. A run still going finishes
+  normally with its answer and approval, and a mention waiting for a free
+  lane is kept and started again. A run that cannot be recovered is
+  reported in its channel instead of stopping faztudo from starting.
+- Opening a run card no longer scans the whole event log, and reads no
+  longer wait behind writes, so a large workspace stays responsive.
+- A phone or tab that drops off the network is noticed and released;
+  before, each one kept polling the database until it reconnected.
+- Routines triggered by channel messages keep working after a database
+  read error.
+- An approval stays consistent when faztudo stops between a merge and
+  its record.
+- `faztudo stop` no longer gives up when a run waits for approval or for
+  a free lane; those runs are kept.
 - A mention inside inline code, a code block or a quoted line no longer
   starts a run or notifies anyone.
 - Channel summaries were never written when the cheapest lane had no
