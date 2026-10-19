@@ -99,3 +99,31 @@ func TestAgyQuotaOnExitZero(t *testing.T) {
 		t.Fatalf("%s %s", class, signal.Kind)
 	}
 }
+
+// A coordinating read run leaves plan mode so it can call delegate, and stays
+// read-only by allow-list: only read tools and faztudo tools, edits and Bash
+// denied.
+func TestClaudeCoordinatorReadRun(t *testing.T) {
+	mcp := &MCP{URL: "http://127.0.0.1:1/mcp", Token: "t", Dir: t.TempDir()}
+	cmd, err := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, MCP: mcp, Coordinator: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(cmd.Args, " ")
+	for _, want := range []string{"--permission-mode default", "--disallowedTools Write Edit MultiEdit NotebookEdit Bash", "Read Grep Glob LS", "mcp__faztudo__delegate"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("missing %q in %s", want, args)
+		}
+	}
+	plain, err := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, MCP: mcp})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(plain.Args, " "); !strings.Contains(args, "--permission-mode plan") || strings.Contains(args, "disallowedTools") {
+		t.Fatalf("plain read run: %s", args)
+	}
+	noMCP, _ := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, Coordinator: true})
+	if !strings.Contains(strings.Join(noMCP.Args, " "), "--permission-mode plan") {
+		t.Fatal("coordinator without MCP left plan mode")
+	}
+}
