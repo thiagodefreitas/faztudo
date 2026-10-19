@@ -126,6 +126,7 @@ func TestRecoveredNonzeroExitUsesRecordedCode(t *testing.T) {
 	if _, err := r.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	r.WaitRecovered()
 	m, err := r.load(run.ID)
 	if err != nil || m.Run.State != domain.RunFailed || m.Run.ExitCode == nil || *m.Run.ExitCode != 7 {
 		t.Fatalf("recovered failure: %+v %v", m.Run, err)

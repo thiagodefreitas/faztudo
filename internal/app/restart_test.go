@@ -13,6 +13,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/runner"
+	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/tasks"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
 )
@@ -83,6 +84,7 @@ func TestRecoveredWritePostsAnswerAndApproval(t *testing.T) {
 	if _, err := f.app.Runner.Recover(ctx); err != nil {
 		t.Fatal(err)
 	}
+	f.app.Runner.WaitRecovered()
 	got, err := f.s.Run(ctx, run.ID)
 	if err != nil || got.State != domain.RunWaitingApproval || got.Verification == nil || !got.Verification.OK || got.DiffStat == nil || got.DiffStat.Files != 1 {
 		t.Fatalf("recovered run: %+v %v", got, err)
@@ -513,5 +515,255 @@ func TestCancelledQueuedTaskDoesNotRunAfterRestart(t *testing.T) {
 	got, err := f.s.Run(ctx, run.ID)
 	if err != nil || got.State != domain.RunCancelled {
 		t.Fatalf("cancelled run: %+v %v", got, err)
+	}
+}
+
+// A worktree git cannot remove must not keep the daemon from starting, and
+// the run must not be reported again on the next start.
+func TestRecoveryCleanupFailureDoesNotStopStart(t *testing.T) {
+	ctx := context.Background()
+	f := newRoutineFixture(t, config.Defaults(), domain.LaneAvailable, "")
+	root := t.TempDir()
+	f.app.Paths.RunsDir = filepath.Join(root, "runs")
+	f.app.Paths.WorktreesDir = filepath.Join(root, "trees")
+	f.app.Runner.RunDir = f.app.Paths.RunsDir
+	repo := filepath.Join(root, "repo")
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, repo, "init", "-b", "main")
+	ch := f.general
+	ch.RepoPath = repo
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.ChannelUpdated, Actor: events.System, ChannelID: ch.ID, Payload: ch}); err != nil {
+		t.Fatal(err)
+	}
+	m := domain.Message{ID: "stray-message", ChannelID: ch.ID, AuthorID: f.human.ID, Body: "@coder change it", CreatedAt: time.Now().UTC()}
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(f.human.ID), ChannelID: ch.ID, Payload: m}); err != nil {
+		t.Fatal(err)
+	}
+	// A plain directory: git refuses to remove it as a worktree.
+	stray := filepath.Join(root, "stray")
+	if err := os.Mkdir(stray, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ended := time.Now().UTC().Add(-time.Second)
+	run := domain.Run{ID: "stray-worktree", ChannelID: ch.ID, TriggerMessageID: m.ID, AgentID: f.coder.ID, LaneID: "a", Mode: domain.RunWrite, State: domain.RunFailed, FailureClass: domain.FailureTransient, FailureReason: "outcome unknown after daemon restart", Worktree: stray, StartedAt: &ended, EndedAt: &ended}
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: ch.ID, Payload: run}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(f.app.Paths.RunsDir, run.ID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	pending := func() {
+		t.Helper()
+		metadata, _ := json.Marshal(runner.Metadata{Run: run, PendingFinalization: true})
+		if err := os.WriteFile(filepath.Join(dir, "run.json"), metadata, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	answers := func() int {
+		t.Helper()
+		messages, err := f.s.Messages(ctx, ch.ID, "", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, reply := range messages {
+			if reply.RunID == run.ID {
+				n++
+			}
+		}
+		return n
+	}
+	pending()
+	if _, err := f.app.Runner.Recover(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if !noticeContaining(t, f.s, ch.ID, "was not fully recovered") {
+		t.Fatal("cleanup failure was not reported")
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Fatalf("stray directory: %v", err)
+	}
+	if readMetadata(t, f.app, run.ID).PendingFinalization {
+		t.Fatal("run still pending finalization")
+	}
+	if n := answers(); n != 1 {
+		t.Fatalf("%d answers, want 1", n)
+	}
+	seq, err := f.s.LastSeq(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.app.Runner.Recover(ctx); err != nil {
+		t.Fatalf("second recover: %v", err)
+	}
+	if again, _ := f.s.LastSeq(ctx); again != seq {
+		t.Fatalf("second recover appended %d events", again-seq)
+	}
+	// Start sees the same state when the marker itself was lost.
+	pending()
+	startCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := f.app.Start(startCtx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if n := answers(); n != 1 {
+		t.Fatalf("%d answers after start, want 1", n)
+	}
+}
+
+func readMetadata(t *testing.T, a *App, id string) runner.Metadata {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(a.Paths.RunsDir, id, "run.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m runner.Metadata
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// laneBoundCLI fails with a login error on the "bad" model and answers on
+// any other, so a persona with two lanes falls back to its second one.
+type laneBoundCLI struct{}
+
+func (laneBoundCLI) Name() string { return "codex" }
+func (laneBoundCLI) Command(req adapters.Request) (adapters.Cmd, error) {
+	script := "echo done on the good lane"
+	if req.Model == "bad" {
+		script = "echo 'Not logged in. Please log in.' >&2; exit 1"
+	}
+	return adapters.Cmd{Path: "/bin/sh", Args: []string{"-c", script}, Dir: req.Workdir}, nil
+}
+func (laneBoundCLI) Classify(code int, tail string) (domain.FailureClass, adapters.LaneSignal, string) {
+	return (adapters.Codex{}).Classify(code, tail)
+}
+
+// newFallbackFixture has @coder on lane a, whose login is broken, and lane b.
+func newFallbackFixture(t *testing.T) (*App, *store.Store, domain.Member, domain.Channel, domain.Message) {
+	t.Helper()
+	ctx := context.Background()
+	root := t.TempDir()
+	s, err := store.Open(filepath.Join(root, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	agent := domain.Member{ID: "coder", Kind: domain.MemberAgent, Handle: "coder", Agent: &domain.AgentInfo{Lanes: []string{"a", "b"}, Mode: domain.RunRead}}
+	ch := domain.Channel{ID: "ch", Name: "work", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPublic}
+	m := domain.Message{ID: "m1", ChannelID: ch.ID, Body: "@coder review this", AuthorID: "human", CreatedAt: time.Now().UTC()}
+	for _, d := range []events.Draft{
+		{Type: events.MemberUpdated, Actor: events.System, Payload: agent},
+		{Type: events.LaneUpdated, Actor: events.System, Payload: domain.Lane{ID: "a", CLI: "codex", Model: "bad", Capacity: 1, Health: domain.LaneAvailable, Windows: []domain.LaneWindow{}}},
+		{Type: events.LaneUpdated, Actor: events.System, Payload: domain.Lane{ID: "b", CLI: "codex", Model: "good", Capacity: 1, Health: domain.LaneAvailable, Windows: []domain.LaneWindow{}}},
+		{Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch},
+		{Type: events.MessagePosted, Actor: events.Human("human"), ChannelID: ch.ID, Payload: m},
+	} {
+		if _, err := s.Append(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := New(ctx, s, config.Defaults(), config.Paths{DataDir: root, RunsDir: filepath.Join(root, "runs")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Adapters["codex"] = laneBoundCLI{}
+	return a, s, agent, ch, m
+}
+
+// The run that lost its lane is answered by its retry; a restart must not
+// report it a second time.
+func TestLaneFallbackFinalizesTheFailedRun(t *testing.T) {
+	ctx := context.Background()
+	a, s, agent, ch, m := newFallbackFixture(t)
+	if err := a.execute(ctx, m, agent, ""); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	runs, err := s.Runs(ctx, ch.ID, "")
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("runs: %+v %v", runs, err)
+	}
+	var failed, retried domain.Run
+	for _, run := range runs {
+		if run.RetryOf == "" {
+			failed = run
+		} else {
+			retried = run
+		}
+	}
+	if failed.State != domain.RunFailed || failed.LaneID != "a" || retried.State != domain.RunDone || retried.LaneID != "b" || retried.RetryOf != failed.ID {
+		t.Fatalf("fallback: %+v %+v", failed, retried)
+	}
+	if readMetadata(t, a, failed.ID).PendingFinalization {
+		t.Fatal("failed run still pending finalization")
+	}
+	seq, err := s.LastSeq(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Runner.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a.Runner.WaitRecovered()
+	if again, _ := s.LastSeq(ctx); again != seq {
+		t.Fatalf("restart appended %d events for a retried run", again-seq)
+	}
+}
+
+// A queued run dispatched after a restart still moves to the next lane when
+// its first lane fails.
+func TestRecoveredQueueFallsBackToTheNextLane(t *testing.T) {
+	ctx := context.Background()
+	a, s, agent, ch, m := newFallbackFixture(t)
+	queued, err := a.queueRun(ctx, m, agent, domain.RunRead, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.recoverQueued(ctx); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		runs, err := s.Runs(ctx, ch.ID, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, run := range runs {
+			if run.RetryOf == queued.ID && run.State == domain.RunDone {
+				if run.LaneID != "b" {
+					t.Fatalf("retry ran on %s", run.LaneID)
+				}
+				if noticeContaining(t, s, ch.ID, "context canceled") {
+					t.Fatal("retry was reported as cancelled")
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no retry on lane b: %+v", runs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The request that posted the message may be gone before its mention is
+// queued; the queue entry must still be written.
+func TestOnMessageQueuesAfterTheRequestEnds(t *testing.T) {
+	f := newRoutineFixture(t, config.Defaults(), domain.LaneAvailable, "")
+	f.app.queuedDispatch = func(context.Context, domain.Message, domain.Member, string) {}
+	m := domain.Message{ID: "hung-up", ChannelID: f.general.ID, AuthorID: f.human.ID, Body: "@coder do this", CreatedAt: time.Now().UTC()}
+	if _, err := f.s.Append(context.Background(), events.Draft{Type: events.MessagePosted, Actor: events.Human(f.human.ID), ChannelID: m.ChannelID, Payload: m}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f.app.OnMessage(ctx, m, []domain.Member{f.coder})
+	runs, err := f.s.Runs(context.Background(), m.ChannelID, string(domain.RunQueued))
+	if err != nil || len(runs) != 1 || runs[0].TriggerMessageID != m.ID {
+		t.Fatalf("queued after the request ended: %+v %v", runs, err)
 	}
 }

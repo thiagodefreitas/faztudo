@@ -172,10 +172,16 @@ func Open(path string) (*Store, error) {
 	// Search is optional: if this SQLite build has no FTS5 the table is not
 	// created and Search falls back to LIKE.
 	setupSearch(db)
+	// A file URL needs an absolute path: a relative one would read as a host.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	q := url.Values{}
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "query_only(1)")
-	rdb, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: path, RawQuery: q.Encode()}).String())
+	rdb, err := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: abs, RawQuery: q.Encode()}).String())
 	if err != nil {
 		db.Close()
 		return nil, err

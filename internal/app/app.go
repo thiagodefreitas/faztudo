@@ -529,6 +529,9 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 		if agent.Agent != nil && agent.Agent.Mode != "" {
 			mode = agent.Agent.Mode
 		}
+		// The queue entry outlives the request that posted the message: a
+		// client that hangs up right after the response must not cancel it.
+		ctx := context.WithoutCancel(ctx)
 		if mode == domain.RunWrite {
 			channel, err := a.Store.Channel(ctx, msg.ChannelID)
 			if err != nil {
@@ -626,7 +629,7 @@ func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member, ov
 }
 
 func (a *App) queueRun(ctx context.Context, m domain.Message, agent domain.Member, mode domain.RunMode, override, retryOf string, compare bool) (domain.Run, error) {
-	if id, ok := ctx.Value(queuedRunIDKey{}).(string); ok {
+	if id, ok := ctx.Value(queuedRunIDKey{}).(string); ok && id != "" {
 		run, err := a.Store.Run(ctx, id)
 		if err != nil {
 			return domain.Run{}, err
@@ -697,10 +700,18 @@ func (a *App) recoverQueued(ctx context.Context) error {
 			return err
 		}
 		m, err := a.Store.Message(ctx, run.TriggerMessageID)
+		if errors.Is(err, store.ErrNotFound) {
+			a.failQueuedRun(ctx, run.ID, errors.New("its request message is gone after the daemon restart"))
+			continue
+		}
 		if err != nil {
 			return err
 		}
 		agent, err := a.Store.Member(ctx, run.AgentID)
+		if errors.Is(err, store.ErrNotFound) {
+			a.failQueuedRun(ctx, run.ID, errors.New("its agent is gone after the daemon restart"))
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -765,7 +776,9 @@ func (a *App) execute(ctx context.Context, m domain.Message, agent domain.Member
 	var failed string
 	err := a.attempt(ctx, m, agent, override, "", &failed, false, "")
 	if failed != "" {
-		err = a.attempt(ctx, m, agent, "", failed, new(string), false, "")
+		// The retry is a new run. A queued run id from a restart dispatch
+		// names the first one only, so it must not reach the retry.
+		err = a.attempt(context.WithValue(ctx, queuedRunIDKey{}, ""), m, agent, "", failed, new(string), false, "")
 	}
 	return err
 }
@@ -930,7 +943,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		return err
 	}
 	run := queuedRun
-	run.LaneID = lane.ID
+	run.LaneID, run.Mode = lane.ID, mode
 	if _, err := a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run}); err != nil {
 		return err
 	}
@@ -982,6 +995,11 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		} else if retryOf == "" {
 			// Retry once, if another lane in the chain can take the work.
 			if _, left, perr := a.Registry.Pick(agent.Handle, ""); perr == nil || lanes.Busy(left) {
+				// The retry answers for both runs; this one must not replay
+				// its failure after a restart.
+				if err := a.Runner.MarkFinalized(run.ID); err != nil {
+					return err
+				}
 				*failed = run.ID
 				return nil
 			}
@@ -1148,12 +1166,22 @@ func (a *App) runTail(id, name string) string {
 	return string(b[:n])
 }
 
+// recoveredFinished finishes a run the runner settled after a restart. Only
+// a store failure is returned, so the start retries it; anything else the
+// run needed and lost (its message, its agent, a removable worktree) is
+// reported in the channel and the run is marked final so it does not replay.
 func (a *App) recoveredFinished(ctx context.Context, run domain.Run) error {
 	m, err := a.Store.Message(ctx, run.TriggerMessageID)
+	if errors.Is(err, store.ErrNotFound) {
+		return a.abandonRecovered(ctx, run, "its request message is gone")
+	}
 	if err != nil {
 		return err
 	}
 	agent, err := a.Store.Member(ctx, run.AgentID)
+	if errors.Is(err, store.ErrNotFound) {
+		return a.abandonRecovered(ctx, run, "its agent is gone")
+	}
 	if err != nil {
 		return err
 	}
@@ -1178,24 +1206,40 @@ func (a *App) recoveredFinished(ctx context.Context, run domain.Run) error {
 	}
 	a.syncTask(ctx, run.TriggerMessageID, true)
 	if (run.State == domain.RunFailed || run.State == domain.RunCancelled) && run.Worktree != "" {
-		if _, err := os.Stat(run.Worktree); os.IsNotExist(err) {
-			return a.Runner.MarkFinalized(run.ID)
-		} else if err != nil {
-			return err
-		}
 		channel, err := a.Store.Channel(ctx, run.ChannelID)
-		if err != nil {
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
 		}
-		manager := worktree.Manager{BaseDir: a.Paths.WorktreesDir}
-		w, err := manager.Open(ctx, channel.RepoPath, run.Worktree, "fz/"+run.ID, run.BaseCommit)
-		if err != nil {
-			return err
-		}
-		if err := manager.Cleanup(ctx, w); err != nil {
-			return err
+		if err := a.removeRecoveredWorktree(ctx, channel, run); err != nil {
+			return a.abandonRecovered(ctx, run, "its worktree "+run.Worktree+" was left in place: "+err.Error())
 		}
 	}
+	return a.Runner.MarkFinalized(run.ID)
+}
+
+// removeRecoveredWorktree drops the worktree of a failed or cancelled run.
+// A worktree that is already gone counts as removed.
+func (a *App) removeRecoveredWorktree(ctx context.Context, channel domain.Channel, run domain.Run) error {
+	if _, err := os.Stat(run.Worktree); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if channel.RepoPath == "" {
+		return errors.New("the channel has no repo_path")
+	}
+	manager := worktree.Manager{BaseDir: a.Paths.WorktreesDir}
+	w, err := manager.Open(ctx, channel.RepoPath, run.Worktree, "fz/"+run.ID, run.BaseCommit)
+	if err != nil {
+		return err
+	}
+	return manager.Cleanup(ctx, w)
+}
+
+// abandonRecovered records why a recovered run could not be finished and
+// marks it final anyway, so the next start does not report it again.
+func (a *App) abandonRecovered(ctx context.Context, run domain.Run, why string) error {
+	a.notice(ctx, run.ChannelID, "warn", fmt.Sprintf("Run %s was not fully recovered after the daemon restart: %s.", run.ID, why))
 	return a.Runner.MarkFinalized(run.ID)
 }
 

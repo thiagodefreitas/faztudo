@@ -147,6 +147,7 @@ type Runner struct {
 	outputMu          sync.Mutex
 	active            map[string]bool
 	recovered         map[string]context.CancelFunc
+	recovering        sync.WaitGroup
 }
 
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -977,11 +978,13 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 			continue
 		}
 		if code, ok := r.exitStatus(m.Run.ID); ok {
-			r.replayOutput(m)
-			if err := r.completeRecovered(ctx, &m.Run, code); err != nil {
-				return result, err
+			// The process ended while the daemon was away. Its result is
+			// settled in the background like a live reattached run, so a
+			// write run's verification does not hold up the start.
+			if r.claimRecoveredID(m.Run.ID) {
+				r.recovering.Add(1)
+				go r.finishRecovered(m, code)
 			}
-			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
 			result = append(result, m.Run)
 			continue
 		}
@@ -1096,6 +1099,21 @@ func (r *Runner) afterRecovered(ctx context.Context, run domain.Run) error {
 	}
 	return r.RecoveredFinished(ctx, run)
 }
+
+// finishRecovered settles a run whose process exited while the daemon was
+// away. Errors are not reported: the metadata stays pending, so the next
+// start tries again.
+func (r *Runner) finishRecovered(m Metadata, code int) {
+	defer r.recovering.Done()
+	defer r.releaseID(m.Run.ID)
+	defer os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+	r.replayOutput(m)
+	_ = r.completeRecovered(context.Background(), &m.Run, code)
+}
+
+// WaitRecovered returns once every recovery Recover started in the
+// background has finished.
+func (r *Runner) WaitRecovered() { r.recovering.Wait() }
 
 func (r *Runner) completeRecovered(ctx context.Context, run *domain.Run, code int) error {
 	state := domain.RunDone

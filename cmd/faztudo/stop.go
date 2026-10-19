@@ -22,8 +22,9 @@ import (
 var stopWait = 15 * time.Second
 
 // activeRunStates are the states a stop cancels. A run waiting for approval
-// has no process left; its approval survives the restart, so stop keeps it.
-var activeRunStates = []domain.RunState{domain.RunQueued, domain.RunRunning, domain.RunVerifying}
+// or for a free lane has no process; its approval or its place in the queue
+// survives the restart, so stop keeps it.
+var activeRunStates = []domain.RunState{domain.RunRunning, domain.RunVerifying}
 
 // stopResult is what `faztudo stop --json` prints. Daemon is "stopped" when
 // the systemd user unit was stopped, "not_running" when nothing answered, and
