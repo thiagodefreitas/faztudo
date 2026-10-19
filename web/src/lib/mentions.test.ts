@@ -33,6 +33,24 @@ describe("mentionHandles", () => {
   it("collects handles for the server parser", () => {
     expect(mentionHandles("Ask @Coder and @reviewer, not me@ada")).toEqual(["coder", "reviewer"])
   })
+
+  it.each<[string, string, string[]]>([
+    ["inline code", "use `@coder` here", []],
+    ["double backtick", "use ``a ` @coder`` here", []],
+    ["after closing backtick", "`x`@coder go", ["coder"]],
+    ["mention then code", "@coder run `@writer`", ["coder"]],
+    ["unclosed backtick", "a ` @coder", ["coder"]],
+    ["fence no language", "```\n@coder\n```\n@writer", ["writer"]],
+    ["fence with language", "```go\n@coder\n```", []],
+    ["tilde fence", "~~~\n@coder\n~~~\n@writer", ["writer"]],
+    ["unclosed fence", "```\n@coder", []],
+    ["long fence", "````\n```\n@coder\n````\n@writer", ["writer"]],
+    ["quote", "> @coder said\n@writer", ["writer"]],
+    ["nested quote", "> > @coder\n>> @coder", []],
+    ["indented quote", "  > @coder", []],
+  ])("skips code and quotes: %s", (_name, body, want) => {
+    expect(mentionHandles(body)).toEqual(want)
+  })
 })
 
 describe("filterMembers", () => {

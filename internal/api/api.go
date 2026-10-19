@@ -16,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/gorilla/websocket"
 	"github.com/thiagodefreitas/faztudo/internal/auth"
@@ -565,26 +564,9 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request) {
 }
 
 // mentionHandles lists the lowercased @handles in a message body, in order.
-func mentionHandles(body string) []string {
-	var out []string
-	for i := 0; i < len(body); i++ {
-		if body[i] != '@' || (i > 0 && (unicode.IsLetter(rune(body[i-1])) || unicode.IsDigit(rune(body[i-1])))) {
-			continue
-		}
-		j := i + 1
-		for j < len(body) {
-			c := body[j]
-			if c == '-' || c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
-				j++
-			} else {
-				break
-			}
-		}
-		out = append(out, strings.ToLower(body[i+1:j]))
-		i = j - 1
-	}
-	return out
-}
+// Code spans, fenced blocks and quoted lines do not count.
+func mentionHandles(body string) []string { return domain.MentionHandles(body) }
+
 func mentioned(body string, members []domain.Member) ([]string, []domain.Member) {
 	byHandle := map[string]domain.Member{}
 	for _, m := range members {
