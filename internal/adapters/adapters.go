@@ -196,6 +196,7 @@ func validate(r Request) error {
 
 var resetPattern = regexp.MustCompile(`(?i)(?:retry|try again|reset|resets)\s+(?:in\s+)?(\d+)\s*(seconds?|minutes?|hours?|days?)`)
 var resetClockPattern = regexp.MustCompile(`(?i)(?:try again|reset|resets)\s+at\s+(\d{1,2}:\d{2})\s*(am|pm)?\b`)
+var windowPattern = regexp.MustCompile(`(?i)(?:(\d{1,3})[- ]hours?|(daily|weekly))\s+(?:usage\s+|rate\s+)?(?:limit|window|quota)`)
 var serverErrorPattern = regexp.MustCompile(`\b5\d\d\b`)
 
 // authPattern matches the CLIs' own login and plan failures. A bare 401 or
@@ -306,6 +307,21 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 					until = until.AddDate(0, 0, 1)
 				}
 				reset = time.Until(until)
+			}
+		}
+	}
+	if reset == 0 {
+		// "your 5-hour usage limit" names the window but not when it ends;
+		// the window length is the latest it can end.
+		if m := windowPattern.FindStringSubmatch(s); m != nil {
+			switch {
+			case m[1] != "":
+				n, _ := strconv.Atoi(m[1])
+				reset = time.Duration(n) * time.Hour
+			case m[2] == "daily":
+				reset = 24 * time.Hour
+			case m[2] == "weekly":
+				reset = 7 * 24 * time.Hour
 			}
 		}
 	}

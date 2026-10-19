@@ -129,7 +129,7 @@ func TestRestoredExhaustionEndsAtItsReset(t *testing.T) {
 	}{
 		{"reset passed", &past, true},
 		{"reset ahead", &future, false},
-		{"no reset known", nil, false},
+		{"no reset known, failed just now", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := New(cfg, personas, &eventstest.Appender{})
@@ -137,7 +137,7 @@ func TestRestoredExhaustionEndsAtItsReset(t *testing.T) {
 				t.Fatal(err)
 			}
 			r.Restore(domain.Lane{ID: "a", CLI: "codex", Capacity: 1, Health: domain.LaneExhausted, HealthReason: "quota",
-				LastError: &domain.LaneError{Class: "exhausted", Message: "quota", ResetAt: tc.reset}})
+				LastError: &domain.LaneError{Class: "exhausted", Message: "quota", ResetAt: tc.reset, At: time.Now()}})
 			_, _, err = r.Pick("coder", "")
 			if (err == nil) != tc.usable {
 				t.Fatalf("usable=%v, pick error %v", tc.usable, err)
@@ -258,5 +258,25 @@ func TestUsageExpiresWithoutNewProbe(t *testing.T) {
 	drafts := log.Snapshot()
 	if len(drafts) != 3 || drafts[1].Type != events.LaneUsageRead || drafts[2].Payload.(domain.Lane).Health != domain.LaneUnknown {
 		t.Fatalf("expiry events: %+v", drafts)
+	}
+}
+
+// An exhaustion without a reset time is retried after unknownResetRetry
+// instead of lasting until a manual reset.
+func TestExhaustedWithoutResetIsRetried(t *testing.T) {
+	r, _ := New([]LaneConfig{{ID: "a", Capacity: 1}}, []PersonaConfig{{Handle: "coder", Lanes: []string{"a"}}}, nil)
+	if err := r.ApplySignal(context.Background(), "run", "coder", "a", adapters.LaneSignal{Kind: adapters.SignalExhausted}, "quota"); err != nil {
+		t.Fatal(err)
+	}
+	if until := r.ResetAt("a"); until.IsZero() || time.Until(until) > unknownResetRetry {
+		t.Fatalf("reset %v", until)
+	}
+}
+
+func TestRestoredExhaustionWithoutResetExpires(t *testing.T) {
+	r, _ := New([]LaneConfig{{ID: "a", Capacity: 1}}, []PersonaConfig{{Handle: "coder", Lanes: []string{"a"}}}, nil)
+	r.Restore(domain.Lane{ID: "a", Health: domain.LaneExhausted, LastError: &domain.LaneError{Class: string(adapters.SignalExhausted), At: time.Now().Add(-2 * unknownResetRetry)}})
+	if lane, _, err := r.Pick("coder", ""); err != nil || lane.ID != "a" {
+		t.Fatalf("pick after the retry time: %+v %v", lane, err)
 	}
 }

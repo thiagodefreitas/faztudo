@@ -306,6 +306,8 @@ func (r *Registry) Restore(lane domain.Lane) {
 		current.LastError = lane.LastError
 		if lane.Health == domain.LaneExhausted && lane.LastError != nil && lane.LastError.ResetAt != nil {
 			r.until[lane.ID] = *lane.LastError.ResetAt
+		} else if lane.Health == domain.LaneExhausted && lane.LastError != nil && lane.LastError.Class == string(adapters.SignalExhausted) {
+			r.until[lane.ID] = lane.LastError.At.Add(unknownResetRetry)
 		}
 	}
 }
@@ -563,6 +565,11 @@ func usageHealth(cli string, windows []domain.LaneWindow, threshold int, now tim
 	}
 	return domain.LaneAvailable, strings.Join(sources, ", ")
 }
+
+// unknownResetRetry is when an exhausted lane whose error named no reset
+// time is tried again.
+const unknownResetRetry = time.Hour
+
 func (r *Registry) ApplySignal(ctx context.Context, runID, persona, laneID string, signal adapters.LaneSignal, reason string) error {
 	return r.ApplySignalForChannel(ctx, runID, "", persona, laneID, signal, reason)
 }
@@ -577,6 +584,11 @@ func (r *Registry) ApplySignalForChannel(ctx context.Context, runID, channelID, 
 		return fmt.Errorf("unknown lane %s", laneID)
 	}
 	if signal.Kind == adapters.SignalExhausted {
+		if signal.Until.IsZero() {
+			// No reset in the error. Try the lane again later rather than
+			// leaving it exhausted until someone resets it by hand.
+			signal.Until = time.Now().Add(unknownResetRetry)
+		}
 		l.Health = domain.LaneExhausted
 		r.until[laneID] = signal.Until
 	} else {

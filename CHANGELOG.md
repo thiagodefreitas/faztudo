@@ -28,6 +28,9 @@ All notable changes are listed here. The format follows
   to waiting for approval.
 - agy write runs can use their shell tool again: agy gets a private copy of
   its bin directory, since it rewrites a launcher there before each command.
+- A lane out of quota without a stated reset time no longer stays exhausted
+  until a manual reset: a named window ("5-hour usage limit") sets the
+  reset, and otherwise the lane is tried again after an hour.
 - A missing agent CLI fails the run with "executable file not found" again,
   instead of exit 127 or a bare "exit -1".
 - Agent runs survive a restart of faztudo. A run still going finishes

@@ -92,3 +92,21 @@ func TestTransientAndSemanticFailuresAreNotAuth(t *testing.T) {
 		}
 	}
 }
+
+// A quota error that names its window but no reset time ends at the latest
+// when the window does.
+func TestQuotaWindowSetsReset(t *testing.T) {
+	for tail, want := range map[string]time.Duration{
+		"error: provider.auth_error: 403 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.": 5 * time.Hour,
+		"quota exceeded: you have hit your weekly limit.": 7 * 24 * time.Hour,
+		"daily quota exceeded":                            24 * time.Hour,
+	} {
+		_, signal, _ := Kimi{}.Classify(1, tail)
+		if signal.Kind != SignalExhausted {
+			t.Fatalf("%q: %s", tail, signal.Kind)
+		}
+		if got := time.Until(signal.Until); got < want-time.Minute || got > want {
+			t.Fatalf("%q: reset in %s, want %s", tail, got, want)
+		}
+	}
+}

@@ -407,8 +407,10 @@ Login and plan errors:
   401 or 403, `auth_error`, "not logged in", "please log in", "upgrade your
   plan", "subscription") marks the lane unavailable, with that line as the
   reason, on the Lanes page and in `/status`. A monthly or plan quota
-  message marks it exhausted, until the reset time when the message gives
-  one. Timeouts and 5xx errors stay transient and are retried on the same
+  message marks it exhausted until the reset time. When the message names
+  only its window ("your 5-hour usage limit", a daily or weekly limit), the
+  window's length is used; when it names nothing, the lane is tried again
+  after an hour. Timeouts and 5xx errors stay transient and are retried on the same
   lane. A failed task stays a failed task.
 - The run that hit the error is retried once on the next healthy lane in the
   persona's list, as a new run whose `retry_of` is the failed run. The
