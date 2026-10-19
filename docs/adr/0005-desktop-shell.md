@@ -100,3 +100,8 @@ still to be measured on a real desktop.
 - An independent review found eight issues before the first release, the
   worst being that the `.deb` layout was mistaken for an AppImage; all were
   fixed before merging.
+- Released in 0.1.4. Measured on the author's desktop before the release:
+  the window opens signed in, and the version notice appears when the app
+  and the running faztudo differ. Not measured yet on a real desktop: the
+  tray menu, hide on close, the Quit dialog, notifications and Start at
+  login.

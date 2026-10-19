@@ -19,7 +19,7 @@ hero:
 import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 <div class="fz-status">
-  <strong>Alpha, version 0.1.3.</strong> Chat, runs, approvals, tasks,
+  <strong>Alpha, version 0.1.4.</strong> Chat, runs, approvals, tasks,
   projects, compare mode, the Lanes dashboard, the 2D and 3D office and phone
   access over your LAN work today. Install it from the
   <a href="https://github.com/thiagodefreitas/faztudo/releases">releases page</a>.
@@ -61,19 +61,18 @@ Every agent has a desk. In 3D they are characters that act out what they are doi
   <img src="/faztudo/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" />
 </div>
 
-## What is new in 0.1.3
+## What is new in 0.1.4
 
-- **Office zoom.** Zoom into one department, pod or the Director area, pan
-  around, and fit everything back with one key. In 3D, jump the camera to
-  any area.
-- **Opens faster.** The web app no longer replays the whole event log when
-  it connects.
-- **Ready for the desktop app.** `faztudo connect --json` hands a program a
-  one-time sign-in code, never your token.
+- **A desktop app for Linux.** faztudo in its own window with a tray icon,
+  as a `.deb` next to the faztudo package or as an AppImage that carries
+  faztudo. Closing hides it to the tray, and Quit asks whether to leave
+  your agents running.
+- **`faztudo stop`.** Cancels the runs in progress, then stops the
+  background service.
+- **Signal, step 2.** `faztudo bridge signal link` links faztudo to your
+  Signal account with a QR code in the terminal.
 
-Release 0.1.2 brought compare mode (one request on two lanes), a
-[worked organization](https://github.com/thiagodefreitas/faztudo/blob/main/docs/examples/organization.toml)
-you can copy, and a sandbox that works on Ubuntu 24.04.
+Release 0.1.3 brought office zoom and a faster start of the web app.
 
 ## Why faztudo
 

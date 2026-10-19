@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-19
+
 ### Added
 
 - The desktop app for Linux: faztudo in its own window with a tray icon,
@@ -19,6 +21,14 @@ All notable changes are listed here. The format follows
   bridge protocol and a separate user-installed signal-cli process. A link
   command shows a terminal QR code, and doctor checks for the linked account.
   Signal approval replies remain for step 3.
+- `faztudo doctor` reports whether the AppArmor profile is installed and
+  whether this faztudo is the packaged one, on systems that restrict user
+  namespaces.
+
+### Fixed
+
+- A lane that hit its quota keeps its reset time across a daemon restart
+  instead of staying exhausted until changed by hand.
 
 ## [0.1.3] - 2026-10-18
 

@@ -6,17 +6,17 @@ for a change are written in the milestone's tracking issue.
 
 ## Where things stand
 
-As of 2026-10-18, release 0.1.3:
+As of 2026-10-19, release 0.1.4:
 
 | milestone | state |
 | :--- | :--- |
 | M0 Foundation | done |
 | M1 First dogfood, M1b Team chat and Lanes | done; faztudo is built inside faztudo |
-| M2 Usable alpha | done; released as 0.1.0, then 0.1.1 to 0.1.3 |
-| M3 Signal | in progress: the bridge protocol and the daemon side are in 0.1.2 (off by default); the signal-cli program is next |
+| M2 Usable alpha | done; released as 0.1.0, then 0.1.1 to 0.1.4 |
+| M3 Signal | in progress: the bridge protocol and daemon side (0.1.2) and the signal-cli bridge with linking (0.1.4); approval replies and alerts are next |
 | M4 2D office | the office is done, with zoom; agent computers are not started |
 | M5 Discord and extensions | the bridge protocol is documented; Discord and custom adapters are not started |
-| M6 3D office and desktop app | a first 3D office ships; the desktop app is in progress (`faztudo connect`, ADR-0005, a working test window) |
+| M6 3D office and desktop app | a first 3D office ships; the Linux desktop app ships in 0.1.4 as a `.deb` and an AppImage (ADR-0005) |
 | M7 Teams and federation | not started |
 
 Also shipped along the way: tasks with a board, an approvals inbox, project

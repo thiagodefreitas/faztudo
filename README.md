@@ -50,7 +50,7 @@ The full list is in the [changelog](CHANGELOG.md).
   <a href="docs/images/inbox-phone.png">phone inbox</a>
 </p>
 
-> **Status: alpha, version 0.1.0.** The chat, runs, approvals, tasks,
+> **Status: alpha, version 0.1.4.** The chat, runs, approvals, tasks,
 > projects, Lanes dashboard, Office and LAN mode for phones work today, and
 > faztudo is built inside itself. Expect rough edges and changing formats.
 > Issues and ideas are welcome. See the [roadmap](docs/roadmap.md).
