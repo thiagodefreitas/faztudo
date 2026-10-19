@@ -1,11 +1,12 @@
 import { Link } from "@tanstack/react-router"
 import { cx } from "../lib/cx"
-import { countPieces, delegationLine, delegationPieces, pieceLabel, type Piece, type PieceState } from "../lib/delegation"
+import { collectCount, countPieces, delegationLine, delegationPieces, pieceLabel, type Piece, type PieceState } from "../lib/delegation"
 import { formatElapsed } from "../lib/time"
 import { useNow } from "../state/now"
 import { useMembers, useRuns } from "../state/queries"
 import type { Message } from "../types"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
+import { Markdown } from "./markdown"
 
 const CHIP: Record<PieceState, string> = {
   pending: "border-line text-muted",
@@ -41,7 +42,7 @@ export function DelegationCard({ channelId, rootId, replies }: { channelId: stri
       <p className="text-[12px] font-medium text-ink">{line}</p>
       <ol className="mt-1.5 flex flex-col gap-1.5">
         {pieces.map((piece) => (
-          <PieceRow key={piece.message.id} piece={piece} channelId={channelId} />
+          <PieceRow key={piece.id} piece={piece} channelId={channelId} />
         ))}
       </ol>
     </section>
@@ -49,7 +50,7 @@ export function DelegationCard({ channelId, rootId, replies }: { channelId: stri
 }
 
 function PieceRow({ piece, channelId }: { piece: Piece; channelId: string }) {
-  const handle = piece.agent?.handle ?? piece.handoff.to
+  const handle = piece.agent?.handle ?? piece.to
   return (
     <li className="flex min-w-0 items-start gap-2 text-[12px]">
       <AgentAvatar member={piece.agent} size={20} state={RING[piece.state]} decorative className="mt-px" />
@@ -75,6 +76,23 @@ function PieceRow({ piece, channelId }: { piece: Piece; channelId: string }) {
         {piece.task && <p className="truncate text-muted" title={piece.task}>{piece.task}</p>}
       </div>
     </li>
+  )
+}
+
+// The digest that starts a collect run is a prompt, not conversation: show
+// one line and keep the text behind a disclosure for whoever wants it.
+export function CollectCard({ message, handle }: { message: Message; handle: string }) {
+  const count = collectCount(message.body)
+  return (
+    <details className="mt-1 rounded-lg border border-line bg-canvas px-2.5 py-1.5 text-[12px]" data-testid="collect-card">
+      <summary className="cursor-pointer select-none text-muted marker:text-faint">
+        <span className="font-medium text-ink">Collecting {count} {count === 1 ? "result" : "results"} for @{handle}</span>
+        <span className="ml-1.5">one combined answer follows</span>
+      </summary>
+      <div className="mt-1.5 text-[13px]">
+        <Markdown text={message.body} />
+      </div>
+    </details>
   )
 }
 

@@ -17,6 +17,9 @@ func (a *App) delegationNote(ctx context.Context, agent domain.Member, m domain.
 	if m.Handoff != nil && m.Handoff.Depth >= org.MaxDepth {
 		return ""
 	}
+	if m.CollectForRunID != "" {
+		return "" // a collect run combines results; the delegate tool refuses it
+	}
 	members, err := a.Store.Members(ctx)
 	if err != nil {
 		return ""

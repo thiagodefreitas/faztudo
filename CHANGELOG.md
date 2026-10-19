@@ -9,7 +9,9 @@ All notable changes are listed here. The format follows
 ### Added
 
 - Delegated results return to the delegating agent in one read-only collect
-  run. Request budget counts survive a restart.
+  run. Request budget counts survive a restart. Runs record the thread and
+  handoff of their trigger, so the chat shows a request's pieces after a
+  reload without opening the thread; the collect digest shows as one line.
 - Agents can read a whole thread, search messages and list the work handed
   out for their request (`read_thread`, `search_messages`, `list_handoffs`),
   inside their own project only. `delegate` takes an optional `done_when`.

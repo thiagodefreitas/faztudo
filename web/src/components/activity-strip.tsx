@@ -5,7 +5,6 @@ import { catchUpLine, channelActivity, isQuiet } from "../lib/activity"
 import { cx } from "../lib/cx"
 import { formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
-import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
 import { useApprovals, useChannelSummary, useLanes, useMembers, useMessages, useRuns } from "../state/queries"
 import type { Channel, Run } from "../types"
@@ -114,15 +113,17 @@ function Elapsed({ run }: { run: Run }) {
 }
 
 // The same cancel the run card offers; the strip only lists the states the
-// card lets you cancel (queued, running, verifying).
+// card lets you cancel (queued, running, verifying). The server only
+// acknowledges; the cancelled run reaches the cache through the stream, and
+// the refetch covers a stream that is down.
 function StopButton({ run, handle }: { run: Run; handle: string }) {
   const qc = useQueryClient()
   const [busy, setBusy] = useState(false)
   async function stop() {
     setBusy(true)
     try {
-      const next = await api.cancelRun(run.id)
-      qc.setQueryData<Run[]>(qk.runs, (list = []) => replaceById(list, next))
+      await api.cancelRun(run.id)
+      await qc.invalidateQueries({ queryKey: qk.runs })
     } catch {
       // The run card reports failures; the strip only updates once the cancel lands.
     } finally {

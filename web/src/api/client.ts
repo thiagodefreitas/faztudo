@@ -78,7 +78,8 @@ export interface Api {
   run: (id: ID) => Promise<Run>
   output: (id: ID, after?: number) => Promise<OutputPage>
   diff: (id: ID) => Promise<DiffPage>
-  cancelRun: (id: ID) => Promise<Run>
+  /** The server answers with an acknowledgement; the run itself arrives through the stream. */
+  cancelRun: (id: ID) => Promise<{ ok: boolean }>
   retryRun: (id: ID, body?: RetryBody) => Promise<Run>
   approvals: (state?: Approval["state"]) => Promise<Approval[]>
   resolveApproval: (id: ID, body: ResolveBody) => Promise<Approval>

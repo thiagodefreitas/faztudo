@@ -255,10 +255,15 @@ channels = ["general"]          # channel names that opt in
   answer. "A" allows another round of the same size, anything else stops the
   request. Committed counts survive a restart; open cards and approved extra
   rounds do not.
-- A delegated agent posts its result in the same thread. After all pieces
-  finish, faztudo starts one read-only follow-up for the delegating agent to
-  combine their answers. A refused piece is included with its reason. Set
-  `runs.collect_delegations = false` to turn this off.
+- A delegated agent posts its result in the same thread. After the
+  delegating run and all its pieces finish, faztudo starts one read-only
+  follow-up for the delegating agent to combine their answers. A refused
+  piece is included with its reason, and a piece whose run never started is
+  reported as not started. No follow-up starts when every piece was refused
+  (the agent already saw that), when a failed delegating run was retried on
+  another lane (the retry answers), or for work handed out before this
+  version. The digest that starts the follow-up is kept out of later runs'
+  context. Set `runs.collect_delegations = false` to turn this off.
 
 ### Routines
 

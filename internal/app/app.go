@@ -87,6 +87,7 @@ type App struct {
 	taskDispatch    func(ctx context.Context, m domain.Message, agent domain.Member, override string)
 	compareMu       sync.Mutex
 	collectMu       sync.Mutex
+	collectSettled  map[string]bool // parent runs with nothing left to collect, under collectMu
 	compareTails    sync.Map
 	compareDispatch func(context.Context, domain.Message, domain.Member, string) error
 	queuedDispatch  func(context.Context, domain.Message, domain.Member, string)
@@ -689,7 +690,7 @@ func (a *App) queueRun(ctx context.Context, m domain.Message, agent domain.Membe
 			return run, nil
 		}
 	}
-	run := domain.Run{ID: store.NewID(), ChannelID: m.ChannelID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: override, Mode: mode, State: domain.RunQueued, RetryOf: retryOf}
+	run := domain.Run{ID: store.NewID(), ChannelID: m.ChannelID, TriggerMessageID: m.ID, ThreadID: m.ThreadID, Handoff: m.Handoff != nil, AgentID: agent.ID, LaneID: override, Mode: mode, State: domain.RunQueued, RetryOf: retryOf}
 	_, err = a.Store.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: m.ChannelID, Payload: run})
 	return run, err
 }
@@ -1450,6 +1451,11 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 	messages = rolloverMessages(messages, summary.Text, a.Config.Runs.ContextLimitTokens)
 	b.WriteString("Recent channel messages (oldest first):\n")
 	for _, msg := range messages {
+		if msg.CollectForRunID != "" {
+			// A collect digest repeats answers that are already in the
+			// thread; replaying it would bloat every later prompt.
+			continue
+		}
 		body := msg.Body
 		if msg.ID == m.ID {
 			body = m.Body

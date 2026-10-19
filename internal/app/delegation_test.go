@@ -114,4 +114,10 @@ func TestDelegationNoteGuidesTheChiefAndLeadsOnly(t *testing.T) {
 	if note := a.delegationNote(ctx, who["architect"], one); note == "" {
 		t.Error("a lead handed work by the chief cannot split it")
 	}
+	// A collect run combines results; the delegate tool refuses it, so the
+	// chief must not be told to hand the digest over.
+	collect := domain.Message{ID: "m4", ChannelID: "general", ThreadID: "m1", CollectForRunID: "run1", Body: "Write one combined answer"}
+	if note := a.delegationNote(ctx, who["chief"], collect); note != "" {
+		t.Errorf("the chief was told to delegate in its collect run:\n%s", note)
+	}
 }

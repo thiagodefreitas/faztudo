@@ -28,7 +28,7 @@ way to the right agent.
 | Run budget per request (total and premium); over it, the Director gets a choice card | built; committed run counts are rebuilt from handoff events after a restart; open cards and approved extra rounds are not restored |
 | Routines: cron schedule in your time zone or a trigger on new messages, a daily debrief template, a Routines page with switch, run now and last result | built; they skip when the lane is exhausted, unavailable or in conserve, and stop at a daily cap |
 | `faztudo init --template solo\|team\|empty` | built |
-| A lead or the Chief of Staff collecting delegated results into one combined answer | built; a read-only follow-up starts when the parent and all pieces finish, including failed or refused pieces; the follow-up uses the request budget |
+| A lead or the Chief of Staff collecting delegated results into one combined answer | built; a read-only follow-up starts when the parent and all pieces finish, including failed, refused and never-started pieces; the follow-up uses the request budget; none for all-refused, retried or pre-version requests |
 | Routines for a trigger other than a new message (an issue, a failing CI run) | not built |
 | Working groups, drag-to-assign, lane budgets shared across projects, deleting a project from the app | not built, next pass |
 | A project's `repo_path` choosing where runs happen | not built: runs use the channel's `repo_path` |

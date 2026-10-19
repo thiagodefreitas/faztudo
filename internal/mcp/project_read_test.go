@@ -187,7 +187,7 @@ func TestDelegateDoneWhenIsInThePostedTask(t *testing.T) {
 	chief := f.session(t, "run-chief", "chief", f.root.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	res, err := chief.CallTool(ctx, &sdkmcp.CallToolParams{Name: "delegate", Arguments: map[string]any{"to": "coder", "task": "fix the bug", "done_when": "tests\npass"}})
+	res, err := chief.CallTool(ctx, &sdkmcp.CallToolParams{Name: "delegate", Arguments: map[string]any{"to": "coder", "task": "fix the bug", "done_when": "tests\npass @reviewer"}})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %s", err, toolText(res))
 	}
@@ -196,7 +196,7 @@ func TestDelegateDoneWhenIsInThePostedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(msg.Body, "fix the bug\n\nDone when: tests pass") {
+	if !strings.HasSuffix(msg.Body, "fix the bug\n\nDone when: tests pass reviewer") {
 		t.Fatalf("body %q", msg.Body)
 	}
 	res, err = chief.CallTool(ctx, &sdkmcp.CallToolParams{Name: "delegate", Arguments: map[string]any{"to": "coder", "task": "again", "done_when": strings.Repeat("z", 501)}})

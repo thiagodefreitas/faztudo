@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Member, Message, Run } from "../types"
-import { countPieces, delegationLine, delegationLines, delegationPieces, pieceLabel, runForMessage, taskLine } from "./delegation"
+import { collectCount, countPieces, delegationLine, delegationLines, delegationPieces, pieceLabel, runForMessage, taskLine } from "./delegation"
 
 const cos: Member = { id: "a0", kind: "agent", handle: "cos", display_name: "Chief of Staff", presence: "busy", agent: { lanes: ["claude/default"] } }
 const coder: Member = { id: "a1", kind: "agent", handle: "coder", display_name: "Coder", presence: "busy", agent: { lanes: ["codex/default"] } }
@@ -56,7 +56,7 @@ describe("delegationPieces", () => {
   it("lists handoff replies of the root with agent, task and run state", () => {
     const runs = [run("r1", "m1", "running"), run("r2", "m2", "done", { agent_id: "a2" }), run("r3", "m3", "failed")]
     const pieces = delegationPieces(root.id, [root, p3, plainReply, p1, p2], runs, members)
-    expect(pieces.map((item) => item.message.id)).toEqual(["m1", "m2", "m3"])
+    expect(pieces.map((item) => item.id)).toEqual(["m1", "m2", "m3"])
     expect(pieces.map((item) => item.agent?.handle)).toEqual(["coder", "reviewer", "coder"])
     expect(pieces.map((item) => item.state)).toEqual(["running", "done", "failed"])
     expect(pieces[0]?.task).toBe("Fix the login check")
@@ -72,6 +72,43 @@ describe("delegationPieces", () => {
   it("ignores replies under another root", () => {
     const elsewhere = { ...p1, id: "m8", thread_id: "other" }
     expect(delegationPieces(root.id, [elsewhere], [], members)).toEqual([])
+  })
+
+  // After a reload the channel holds roots only; a run that names the root
+  // as its thread and is marked as a handoff stands in for the reply.
+  it("finds a piece from its run alone when the reply is not loaded", () => {
+    const runs = [
+      run("r1", "m1", "failed", { thread_id: root.id, handoff: true }),
+      run("r2", "m1", "done", { thread_id: root.id, handoff: true, retry_of: "r1" }),
+      run("r3", "m2", "running", { thread_id: root.id, handoff: true, agent_id: "a2" }),
+      // The collect run and a reply someone mentioned an agent in are in the thread but are not pieces.
+      run("r4", "m7", "queued", { thread_id: root.id }),
+      run("r5", "m8", "done", { thread_id: "other", handoff: true }),
+    ]
+    const pieces = delegationPieces(root.id, [root], runs, members)
+    expect(pieces.map((item) => [item.id, item.run?.id, item.to, item.state, item.task])).toEqual([
+      ["m1", "r2", "coder", "done", ""],
+      ["m2", "r3", "reviewer", "running", ""],
+    ])
+    expect(pieces[0]?.message).toBeNull()
+    expect(pieces[1]?.agent?.id).toBe("a2")
+  })
+
+  it("prefers the loaded reply over the run-only view of the same piece", () => {
+    const runs = [run("r1", "m1", "done", { thread_id: root.id, handoff: true }), run("r3", "m2", "running", { thread_id: root.id, handoff: true, agent_id: "a2" })]
+    const pieces = delegationPieces(root.id, [root, p1], runs, members)
+    expect(pieces.map((item) => [item.id, item.task, item.message?.id ?? null])).toEqual([
+      ["m1", "Fix the login check", "m1"],
+      ["m2", "", null],
+    ])
+  })
+})
+
+describe("collectCount", () => {
+  it("counts one result line per delegated piece", () => {
+    const digest = "Write one combined answer.\n\nOriginal request:\n- @cos ship it\n\nDelegated results:\n- @coder: Fix the login check [done]\n  Fixed.\n- @reviewer: Review it [not started]\n  No run was started for this piece.\n"
+    expect(collectCount(digest)).toBe(2)
+    expect(collectCount("")).toBe(0)
   })
 })
 
@@ -104,5 +141,10 @@ describe("countPieces and delegationLine", () => {
       ["m0", "2 pieces: 1 done, 1 not started"],
       ["m5", "1 piece: 1 running"],
     ])
+  })
+
+  it("gives a root its line from handoff runs alone", () => {
+    const runs = [run("r1", "m1", "done", { thread_id: root.id, handoff: true }), run("r2", "m2", "running", { thread_id: root.id, handoff: true }), run("r4", "m7", "queued", { thread_id: root.id })]
+    expect([...delegationLines([root], runs, members).entries()]).toEqual([["m0", "2 pieces: 1 running, 1 done"]])
   })
 })

@@ -117,7 +117,8 @@ func (h *Handler) delegate(ctx context.Context, grant Grant, in delegateIn) (del
 	if task == "" {
 		return delegateOut{}, errors.New("task required")
 	}
-	if dw := strings.Join(strings.Fields(in.DoneWhen), " "); dw != "" {
+	// "@" is dropped so done_when cannot add mentions to the handoff.
+	if dw := strings.Join(strings.Fields(strings.ReplaceAll(in.DoneWhen, "@", "")), " "); dw != "" {
 		if utf8.RuneCountInString(dw) > maxDoneWhenRunes {
 			return delegateOut{}, fmt.Errorf("done_when is too long: at most %d characters", maxDoneWhenRunes)
 		}

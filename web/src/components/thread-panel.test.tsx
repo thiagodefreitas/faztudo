@@ -134,6 +134,44 @@ describe("ThreadPanel", () => {
     expect(card).toHaveTextContent("1 piece: 1 running")
     expect(screen.getByRole("link", { name: "Open the run of @coder" })).toHaveAttribute("href", `/c/c1?run=r1`)
   })
+
+  it("shows the pieces from their runs when the handoff replies are not loaded", async () => {
+    const coder: Member = { id: "agent-coder", kind: "agent", handle: "coder", display_name: "Coder", presence: "busy", agent: { lanes: ["codex/default"] } }
+    vi.spyOn(api, "thread").mockResolvedValue({ root, replies: [reply] })
+    await setup((qc) => {
+      qc.setQueryData(qk.members, [ada, coder])
+      qc.setQueryData(qk.messages("c1"), [root])
+      qc.setQueryData(qk.runs, [
+        { id: "r1", channel_id: "c1", trigger_message_id: "gone-reply", thread_id: root.id, handoff: true, agent_id: coder.id, lane_id: "codex/default", mode: "read", state: "done" },
+      ])
+      return <ThreadPanel channelId="c1" rootId={root.id} />
+    })
+    const card = await screen.findByRole("region", { name: "Delegation" })
+    expect(card).toHaveTextContent("1 piece: 1 done")
+    expect(card).toHaveTextContent("@coder")
+    expect(screen.getByRole("link", { name: "Open the run of @coder" })).toHaveAttribute("href", `/c/c1?run=r1`)
+  })
+
+  it("folds a collect digest into one line that opens on demand", async () => {
+    const cos: Member = { id: "agent-cos", kind: "agent", handle: "cos", display_name: "Chief of Staff", presence: "busy", agent: { lanes: ["claude/default"] } }
+    const digest: Message = {
+      ...reply,
+      id: "01CRZ3NDEKTSV4RRFFQ69G5CC9",
+      author_id: cos.id,
+      collect_for_run_id: "r0",
+      body: "Write one combined answer for the original request.\n\nOriginal request:\nroot message\n\nDelegated results:\n- @coder: Fix it [done]\n  Fixed.\n- @reviewer: Review it [failed]\n  Run failed: quota\n",
+    }
+    vi.spyOn(api, "thread").mockResolvedValue({ root, replies: [reply, digest] })
+    await setup((qc) => {
+      qc.setQueryData(qk.members, [ada, cos])
+      return <ThreadPanel channelId="c1" rootId={root.id} />
+    })
+    const card = await screen.findByTestId("collect-card")
+    expect(card).toHaveTextContent("Collecting 2 results for @cos")
+    expect(card).not.toHaveAttribute("open")
+    expect(screen.queryByText("Write one combined answer for the original request.")).not.toBeVisible()
+    expect(screen.getByText("first reply")).toBeInTheDocument()
+  })
 })
 
 describe("MessageList threads", () => {

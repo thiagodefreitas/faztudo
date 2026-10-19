@@ -11,7 +11,7 @@ import type { Member, Message, ThreadPage } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { Composer, readDraft, writeDraft } from "./composer"
 import { AttachmentList } from "./attachments"
-import { DelegationCard } from "./delegation-card"
+import { CollectCard, DelegationCard } from "./delegation-card"
 import { Markdown } from "./markdown"
 
 export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: string }) {
@@ -100,10 +100,14 @@ export function ThreadPanel({ channelId, rootId }: { channelId: string; rootId: 
                       {formatClock(message.created_at)}
                     </time>
                   </header>
-                  <div className="mt-1 text-[14px]">
-                    <Markdown text={message.body} />
-                    <AttachmentList attachments={message.attachments} />
-                  </div>
+                  {message.collect_for_run_id ? (
+                    <CollectCard message={message} handle={memberOf(message)?.handle ?? "agent"} />
+                  ) : (
+                    <div className="mt-1 text-[14px]">
+                      <Markdown text={message.body} />
+                      <AttachmentList attachments={message.attachments} />
+                    </div>
+                  )}
                   {index === 0 && <DelegationCard channelId={channelId} rootId={rootId} replies={thread.replies} />}
                 </article>
               </li>

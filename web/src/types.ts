@@ -69,6 +69,8 @@ export interface Message {
   routine?: string
   /** Id of the task whose start posted this message. */
   task?: ID
+  /** Set on the digest that starts the collect run for that delegating run. */
+  collect_for_run_id?: ID
   created_at: string
   edited_at?: string
   reply_count?: number
@@ -165,6 +167,10 @@ export interface Run {
   id: ID
   channel_id: ID
   trigger_message_id: ID
+  /** Thread of the trigger message; absent for a root or for a run recorded before it was kept. */
+  thread_id?: ID
+  /** True when the trigger message handed work over with the delegate tool. */
+  handoff?: boolean
   agent_id: ID
   base_commit?: string
   lane_id: string

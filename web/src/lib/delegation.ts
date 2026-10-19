@@ -3,20 +3,27 @@ import type { Handoff, Member, Message, Run, RunState } from "../types"
 // A delegation is the set of handoff replies under one request. The server
 // posts each handoff as a thread reply with a `handoff` field, and the run it
 // starts names that reply as its trigger, so a piece is a reply plus the run
-// that answers it. No separate handoff event is needed on the client.
+// that answers it. The channel page lists roots only, so the reply may not
+// be loaded; the run then stands in for it, carrying the thread it belongs
+// to and a `handoff` mark. No separate handoff event is needed on the client.
 
 /** A piece before its run exists is "pending". */
 export type PieceState = RunState | "pending"
 
 export interface Piece {
-  message: Message
-  handoff: Handoff
-  /** The agent the work went to, by handle. */
+  /** The handoff reply id, or the run's trigger id when the reply is not loaded. */
+  id: string
+  /** The handoff reply, null when only its run is known. */
+  message: Message | null
+  handoff: Handoff | null
+  /** The handle the work went to. */
+  to: string
+  /** The agent the work went to. */
   agent: Member | null
   /** The run that answers the piece: the latest one, retries included. */
   run: Run | null
   state: PieceState
-  /** First line of the task, without the leading mention. */
+  /** First line of the task, without the leading mention; empty without the reply. */
   task: string
 }
 
@@ -55,23 +62,56 @@ export function runForMessage(messageId: string, runs: Run[]): Run | null {
   return current.at(-1) ?? mine.at(-1) ?? null
 }
 
-/** The pieces handed out under a root message, in the order they were posted. */
+/** A run that answers a handoff reply under the root. */
+function pieceRun(rootId: string, run: Run): boolean {
+  return run.handoff === true && run.thread_id === rootId
+}
+
+/**
+ * The pieces handed out under a root message, in the order they were posted.
+ * Replies that are loaded come first; a piece known only from its run (the
+ * reply was posted before this session and the thread was not opened) follows,
+ * in run order.
+ */
 export function delegationPieces(rootId: string, messages: Message[], runs: Run[], members: Member[]): Piece[] {
   const byHandle = new Map(members.map((member) => [member.handle.toLowerCase(), member]))
-  return messages
+  const byId = new Map(members.map((member) => [member.id, member]))
+  const fromReplies = messages
     .filter((message): message is Message & { handoff: Handoff } => message.thread_id === rootId && message.handoff !== undefined)
     .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
-    .map((message) => {
+    .map((message): Piece => {
       const run = runForMessage(message.id, runs)
       return {
+        id: message.id,
         message,
         handoff: message.handoff,
+        to: message.handoff.to,
         agent: byHandle.get(message.handoff.to.toLowerCase()) ?? null,
         run,
         state: run?.state ?? "pending",
         task: taskLine(message.body),
       }
     })
+  const known = new Set(fromReplies.map((piece) => piece.id))
+  const triggers: string[] = []
+  for (const run of runs) {
+    if (pieceRun(rootId, run) && !known.has(run.trigger_message_id)) {
+      known.add(run.trigger_message_id)
+      triggers.push(run.trigger_message_id)
+    }
+  }
+  const fromRuns = triggers.flatMap((trigger): Piece[] => {
+    const run = runForMessage(trigger, runs)
+    if (!run) return []
+    const agent = byId.get(run.agent_id) ?? null
+    return [{ id: trigger, message: null, handoff: null, to: agent?.handle ?? run.agent_id, agent, run, state: run.state, task: "" }]
+  })
+  return [...fromReplies, ...fromRuns]
+}
+
+/** How many delegated results a collect digest carries: one "- @handle:" line each. */
+export function collectCount(body: string): number {
+  return body.split("\n").filter((line) => /^- @[\w-]+: /.test(line)).length
 }
 
 export function countPieces(pieces: Piece[]): PieceCounts {
@@ -131,13 +171,17 @@ export function pieceLabel(state: PieceState): string {
 }
 
 /**
- * Root message id to summary line, for the roots of one channel. Only roots
- * with handoff replies in the list get a line.
+ * Root message id to summary line, for the roots of one channel. A root gets
+ * a line when a handoff reply under it is in the list, or a run marked as a
+ * handoff names it as its thread.
  */
 export function delegationLines(messages: Message[], runs: Run[], members: Member[]): Map<string, string> {
   const roots = new Set<string>()
   for (const message of messages) {
     if (message.thread_id && message.handoff) roots.add(message.thread_id)
+  }
+  for (const run of runs) {
+    if (run.handoff === true && run.thread_id) roots.add(run.thread_id)
   }
   const out = new Map<string, string>()
   for (const rootId of roots) {

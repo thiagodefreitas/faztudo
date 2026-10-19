@@ -90,9 +90,8 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
         })
       }}
       onCancel={() => {
-        void api.cancelRun(run.id).then((next) => {
-          qc.setQueryData<Run[]>(qk.runs, (list = []) => replaceById(list, next))
-        })
+        // The server only acknowledges; the cancelled run arrives through the stream.
+        void api.cancelRun(run.id).then(() => qc.invalidateQueries({ queryKey: qk.runs }))
       }}
       onRetry={(laneId) => {
         void api.retryRun(run.id, { lane_id: laneId }).then((next) => {

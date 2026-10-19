@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
+import { applyEvent } from "../state/cache"
 import { qk } from "../state/keys"
 import type { Approval, Channel, Lane, Member, Message, Run } from "../types"
 import { ActivityStrip } from "./activity-strip"
@@ -58,8 +59,11 @@ const waiting: Approval = {
   state: "pending",
 }
 
+let lastClient: QueryClient
+
 function renderStrip(unread: number, data: { runs?: Run[]; approvals?: Approval[]; lanes?: Lane[]; summary?: string } = {}, onOpenRun = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  lastClient = client
   client.setQueryData(qk.runs, data.runs ?? [])
   client.setQueryData(qk.approvals, data.approvals ?? [])
   client.setQueryData(qk.lanes, data.lanes ?? [])
@@ -105,12 +109,29 @@ describe("ActivityStrip", () => {
     expect(open).toHaveBeenCalledWith("r1")
   })
 
+  // The server only acknowledges a cancel. The runs are refetched, and the
+  // cancelled run itself arrives through the stream; nothing but runs may
+  // land in the runs cache.
   it("stops a run from the strip and drops it once the cancel lands", async () => {
     const user = userEvent.setup()
-    const cancel = vi.spyOn(api, "cancelRun").mockResolvedValue({ ...running, state: "cancelled" })
+    const cancel = vi.spyOn(api, "cancelRun").mockResolvedValue({ ok: true })
+    const refetch = vi.spyOn(api, "runs").mockResolvedValue([running])
     renderStrip(0, { runs: [running] })
     await user.click(screen.getByRole("button", { name: "Stop the run of @coder" }))
     expect(cancel).toHaveBeenCalledWith("r1")
+    await waitFor(() => expect(refetch).toHaveBeenCalled())
+    expect(lastClient.getQueryData<Run[]>(qk.runs)?.map((run) => run.id)).toEqual(["r1"])
+    expect(screen.getByRole("button", { name: "Stop the run of @coder" })).toBeEnabled()
+    applyEvent(lastClient, {
+      seq: 2,
+      id: "01EVAAAAAAAAAAAAAAAAAAAAAC",
+      version: 1,
+      type: "run.updated",
+      actor: "system",
+      channel_id: "c1",
+      ts: "2026-10-18T12:02:00.000Z",
+      payload: { ...running, state: "cancelled", ended_at: "2026-10-18T12:02:00.000Z" },
+    })
     await waitFor(() => expect(screen.queryByRole("region", { name: "Channel activity" })).not.toBeInTheDocument())
   })
 

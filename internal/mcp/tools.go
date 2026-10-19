@@ -119,7 +119,9 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 		Description: "Post a message in this run's channel as this run's agent. Does not modify the work tree.",
 		Annotations: hints,
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in postIn) (*sdkmcp.CallToolResult, messageOut, error) {
-		out, err := h.post(ctx, grant, in.Body, in.ThreadID, nil, true)
+		// A collect run's mentions start nothing: it may not hand out work,
+		// and runs started by a mention would bypass the request budget.
+		out, err := h.post(ctx, grant, in.Body, in.ThreadID, nil, !h.collectRun(ctx, grant))
 		return nil, out, err
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
@@ -186,6 +188,22 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 		out, err := h.delegate(ctx, grant, in)
 		return nil, out, err
 	})
+}
+
+// collectRun reports whether the grant's run is a collect run. A read error
+// other than a missing record counts as one, so mentions fail closed.
+func (h *Handler) collectRun(ctx context.Context, grant Grant) bool {
+	run, err := h.store.Run(ctx, grant.RunID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false
+	} else if err != nil {
+		return true
+	}
+	trigger, err := h.store.Message(ctx, run.TriggerMessageID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false
+	}
+	return err != nil || trigger.CollectForRunID != ""
 }
 
 func (h *Handler) post(ctx context.Context, grant Grant, body, threadID string, choices []string, fanout bool) (messageOut, error) {
