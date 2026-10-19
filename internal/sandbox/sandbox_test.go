@@ -302,6 +302,9 @@ func TestAgyPrivateHomeMountsWork(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agy, "antigravity-oauth-token"), []byte("old\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(agy, "bin", "encoder"), []byte("tool\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: home, CLI: "agy", StateDir: state, Network: true})
 	if err != nil {
 		t.Fatal(err)
@@ -316,10 +319,19 @@ func TestAgyPrivateHomeMountsWork(t *testing.T) {
 		"if echo bad > " + filepath.Join(agy, "settings.json") + "; then exit 12; fi; " +
 		"echo new > " + filepath.Join(agy, "antigravity-oauth-token") + "; " +
 		"echo private > " + filepath.Join(agy, "conversations", "new.json") + "; " +
-		"echo private > " + filepath.Join(projects, "new.json")
+		"echo private > " + filepath.Join(projects, "new.json") + "; " +
+		"echo launcher > " + filepath.Join(agy, "bin", "agentapi") + " || exit 13; " +
+		"test \"$(cat " + filepath.Join(agy, "bin", "encoder") + ")\" = tool || exit 14; " +
+		"if echo bad > " + filepath.Join(agy, "bin", "encoder") + "; then exit 15; fi"
 	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", script)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("agy mount script: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(agy, "bin", "agentapi")); !os.IsNotExist(err) {
+		t.Fatalf("host agy bin changed: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(agy, "bin", "encoder")); err != nil || string(got) != "tool\n" {
+		t.Fatalf("host agy tool changed: %q, %v", got, err)
 	}
 	if got, err := os.ReadFile(filepath.Join(agy, "settings.json")); err != nil || string(got) != "original\n" {
 		t.Fatalf("host settings changed: %q, %v", got, err)

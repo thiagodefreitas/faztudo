@@ -26,6 +26,8 @@ All notable changes are listed here. The format follows
   state is now failed on the next start instead of staying active forever.
 - A restart no longer moves a run whose approval was already decided back
   to waiting for approval.
+- agy write runs can use their shell tool again: agy gets a private copy of
+  its bin directory, since it rewrites a launcher there before each command.
 - A missing agent CLI fails the run with "executable file not found" again,
   instead of exit 127 or a bare "exit -1".
 - Agent runs survive a restart of faztudo. A run still going finishes

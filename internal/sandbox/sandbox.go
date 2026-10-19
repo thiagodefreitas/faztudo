@@ -383,15 +383,58 @@ func kimiHome(o Options) ([]string, error) {
 
 func agyHome(o Options) ([]string, error) {
 	args, err := privateCLIHome(o, filepath.Join(".gemini", "antigravity-cli"), "agy-home",
-		[]string{"bin", "builtin", "settings.json", "keybindings.json", "installation_id", "knowledge"},
+		[]string{"builtin", "settings.json", "keybindings.json", "installation_id", "knowledge"},
 		[]string{"antigravity-oauth-token"})
 	if err != nil {
 		return nil, err
 	}
+	binArgs, err := agyBin(o)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, binArgs...)
 	for _, name := range []string{"conversations", "brain", "annotations", "cache", "crashes", "implicit", "log", "presence", "scratch", "updater"} {
 		if err := os.MkdirAll(filepath.Join(o.StateDir, "agy-home", name), 0700); err != nil {
 			return nil, err
 		}
+	}
+	return args, nil
+}
+
+// agyBin gives agy a private, writable bin directory. agy rewrites its
+// bin/agentapi launcher before every shell command, so a read-only bin breaks
+// its shell tool, while a writable host bin would let a run replace agy's own
+// programs. The other host files are mounted read-only inside the copy.
+func agyBin(o Options) ([]string, error) {
+	source := filepath.Join(o.Home, ".gemini", "antigravity-cli", "bin")
+	entries, err := os.ReadDir(source)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	private := filepath.Join(o.StateDir, "agy-home", "bin")
+	if err := os.MkdirAll(private, 0700); err != nil {
+		return nil, err
+	}
+	args := []string{"--bind", private, source}
+	for _, e := range entries {
+		if e.Name() == "agentapi" {
+			continue
+		}
+		from := filepath.Join(source, e.Name())
+		info, err := os.Lstat(from)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("unsafe CLI path: %s", from)
+		}
+		if err := os.WriteFile(filepath.Join(private, e.Name()), nil, 0600); err != nil {
+			return nil, err
+		}
+		args = append(args, "--ro-bind", from, filepath.Join(source, e.Name()))
 	}
 	return args, nil
 }
