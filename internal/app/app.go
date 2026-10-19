@@ -88,6 +88,20 @@ type App struct {
 	compareMu       sync.Mutex
 	compareTails    sync.Map
 	compareDispatch func(context.Context, domain.Message, domain.Member, string) error
+	queuedDispatch  func(context.Context, domain.Message, domain.Member, string)
+}
+
+type queuedReadyKey struct{}
+type queuedRunIDKey struct{}
+type queuedReady struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func signalQueuedReady(ctx context.Context) {
+	if ready, ok := ctx.Value(queuedReadyKey{}).(*queuedReady); ok {
+		ready.once.Do(func() { close(ready.ch) })
+	}
 }
 
 func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (*App, error) {
@@ -141,6 +155,8 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		"opencode": adapters.OpenCode{},
 	}}
 	a.Runner = &runner.Runner{RunDir: p.RunsDir, Appender: s, Lanes: reg, PersonaForRun: func(r domain.Run) string { return byID[r.AgentID] }}
+	a.Runner.RecoveredOutcome = a.recoveredOutcome
+	a.Runner.RecoveredFinished = a.recoveredFinished
 	reg.SetAlertChannels(func(ctx context.Context, laneID string) ([]string, error) {
 		channels, err := s.Channels(ctx)
 		if err != nil {
@@ -279,6 +295,9 @@ func (a *App) Start(ctx context.Context) error {
 		return err
 	}
 	if _, err := a.Runner.Recover(ctx); err != nil {
+		return err
+	}
+	if err := a.recoverQueued(ctx); err != nil {
 		return err
 	}
 	if err := a.recoverCompares(ctx); err != nil {
@@ -506,7 +525,30 @@ func (a *App) OnMessage(ctx context.Context, m domain.Message, agents []domain.M
 				continue
 			}
 		}
-		go a.run(context.Background(), msg, agent, override)
+		mode := domain.RunRead
+		if agent.Agent != nil && agent.Agent.Mode != "" {
+			mode = agent.Agent.Mode
+		}
+		if mode == domain.RunWrite {
+			channel, err := a.Store.Channel(ctx, msg.ChannelID)
+			if err != nil {
+				a.notice(ctx, m.ChannelID, "error", err.Error())
+				continue
+			}
+			if channel.RepoPath == "" {
+				a.notice(ctx, channel.ID, "warn", "Write runs need a channel repo_path. Set it with PATCH /api/v1/channels/"+channel.ID+".")
+				continue
+			}
+		}
+		if _, err := a.queueRun(ctx, msg, agent, mode, override, "", false); err != nil {
+			a.notice(ctx, m.ChannelID, "error", err.Error())
+			continue
+		}
+		if a.queuedDispatch != nil {
+			go a.queuedDispatch(context.Background(), msg, agent, override)
+		} else {
+			go a.run(context.Background(), msg, agent, override)
+		}
 	}
 }
 
@@ -576,9 +618,144 @@ func parseLaneOverride(body, handle string) (string, string, bool) {
 }
 
 func (a *App) run(ctx context.Context, m domain.Message, agent domain.Member, override string) {
+	defer signalQueuedReady(ctx)
 	if err := a.execute(ctx, m, agent, override); err != nil {
+		a.failQueued(context.Background(), m.ID, agent.ID, err)
 		a.notice(ctx, m.ChannelID, "error", err.Error())
 	}
+}
+
+func (a *App) queueRun(ctx context.Context, m domain.Message, agent domain.Member, mode domain.RunMode, override, retryOf string, compare bool) (domain.Run, error) {
+	if id, ok := ctx.Value(queuedRunIDKey{}).(string); ok {
+		run, err := a.Store.Run(ctx, id)
+		if err != nil {
+			return domain.Run{}, err
+		}
+		if run.State != domain.RunQueued {
+			return domain.Run{}, context.Canceled
+		}
+		return run, nil
+	}
+	queued, err := a.Store.Runs(ctx, m.ChannelID, string(domain.RunQueued))
+	if err != nil {
+		return domain.Run{}, err
+	}
+	for _, run := range queued {
+		if run.TriggerMessageID == m.ID && run.AgentID == agent.ID && run.RetryOf == retryOf && (!compare || run.LaneID == override) {
+			return run, nil
+		}
+	}
+	run := domain.Run{ID: store.NewID(), ChannelID: m.ChannelID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: override, Mode: mode, State: domain.RunQueued, RetryOf: retryOf}
+	_, err = a.Store.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: m.ChannelID, Payload: run})
+	return run, err
+}
+
+func (a *App) failQueued(ctx context.Context, messageID, agentID string, cause error) {
+	runs, err := a.Store.Runs(ctx, "", string(domain.RunQueued))
+	if err != nil {
+		return
+	}
+	for _, run := range runs {
+		if run.TriggerMessageID != messageID || run.AgentID != agentID {
+			continue
+		}
+		a.failQueuedRun(ctx, run.ID, cause)
+	}
+	a.syncTask(ctx, messageID, true)
+}
+
+func (a *App) failQueuedRun(ctx context.Context, id string, cause error) {
+	run, err := a.Store.Run(ctx, id)
+	if err != nil || run.State != domain.RunQueued {
+		return
+	}
+	run.State, run.FailureClass, run.FailureReason = domain.RunFailed, domain.FailureTransient, cause.Error()
+	if errors.Is(cause, context.Canceled) {
+		run.State = domain.RunCancelled
+	}
+	now := time.Now().UTC()
+	run.EndedAt = &now
+	_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: run.ChannelID, Payload: run})
+}
+
+func (a *App) recoverQueued(ctx context.Context) error {
+	queued, err := a.Store.Runs(ctx, "", string(domain.RunQueued))
+	if err != nil {
+		return err
+	}
+	type job struct {
+		run     domain.Run
+		message domain.Message
+		agent   domain.Member
+		compare bool
+	}
+	var jobs []job
+	for _, run := range queued {
+		if _, err := os.Stat(filepath.Join(a.Paths.RunsDir, run.ID, "run.json")); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		m, err := a.Store.Message(ctx, run.TriggerMessageID)
+		if err != nil {
+			return err
+		}
+		agent, err := a.Store.Member(ctx, run.AgentID)
+		if err != nil {
+			return err
+		}
+		groups, err := a.CompareList(ctx, run.ChannelID)
+		if err != nil {
+			return err
+		}
+		compare := false
+		for _, group := range groups {
+			if group.MessageID == run.TriggerMessageID && group.AgentID == run.AgentID {
+				compare = true
+				break
+			}
+		}
+		if !compare {
+			if _, body, found := parseLaneOverride(m.Body, agent.Handle); found {
+				m.Body = body
+			}
+		}
+		jobs = append(jobs, job{run: run, message: m, agent: agent, compare: compare})
+	}
+	sort.SliceStable(jobs, func(i, j int) bool {
+		if jobs[i].message.CreatedAt.Equal(jobs[j].message.CreatedAt) {
+			return jobs[i].run.ID < jobs[j].run.ID
+		}
+		return jobs[i].message.CreatedAt.Before(jobs[j].message.CreatedAt)
+	})
+	go func() {
+		for _, j := range jobs {
+			current, err := a.Store.Run(context.Background(), j.run.ID)
+			if err != nil || current.State != domain.RunQueued {
+				continue
+			}
+			if a.queuedDispatch != nil {
+				a.queuedDispatch(context.Background(), j.message, j.agent, j.run.LaneID)
+				continue
+			}
+			if j.compare {
+				go func(j job) {
+					j.message.Body, _ = parseCompareRequest(j.message.Body, j.agent.Handle)
+					ctx := context.WithValue(context.Background(), queuedRunIDKey{}, j.run.ID)
+					if err := a.attempt(ctx, j.message, j.agent, j.run.LaneID, j.run.RetryOf, new(string), true, ""); err != nil {
+						a.notice(context.Background(), j.run.ChannelID, "error", err.Error())
+					}
+				}(j)
+				continue
+			}
+			ready := &queuedReady{ch: make(chan struct{})}
+			ctx := context.WithValue(context.Background(), queuedReadyKey{}, ready)
+			ctx = context.WithValue(ctx, queuedRunIDKey{}, j.run.ID)
+			go a.run(ctx, j.message, j.agent, j.run.LaneID)
+			<-ready.ch
+		}
+	}()
+	return nil
 }
 
 // execute runs agent on m. When the lane fails because of its login or plan,
@@ -620,7 +797,7 @@ func (a *App) laneFailed(run domain.Run) bool {
 // attempt is one run of agent on m. It sets *failed to the id of the failed
 // run when the caller should retry on the next lane; retryOf is the failed
 // run when this attempt is that retry.
-func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string, compare bool, promptOverride string) error {
+func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string, compare bool, promptOverride string) (retErr error) {
 	explicit := override != "" // the human chose the lane for this message
 	if agent.Agent == nil {
 		return errors.New("agent has no lane chain")
@@ -649,15 +826,52 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	if mode == domain.RunWrite && channel.RepoPath == "" {
 		a.notice(ctx, channel.ID, "warn", "Write runs need a channel repo_path. Set it with PATCH /api/v1/channels/"+channel.ID+".")
+		a.failQueued(context.Background(), m.ID, agent.ID, errors.New("write run has no channel repo_path"))
 		return nil
 	}
-	lane, skipped, err := a.Registry.WaitPick(ctx, agent.Handle, override, func(busy []lanes.Skipped) {
+	queuedRun, err := a.queueRun(ctx, m, agent, mode, override, retryOf, compare)
+	if err != nil {
+		return err
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	a.activeMu.Lock()
+	if a.active == nil {
+		a.active = map[string]context.CancelFunc{}
+	}
+	if a.active[queuedRun.ID] != nil {
+		a.activeMu.Unlock()
+		cancel()
+		return nil
+	}
+	a.active[queuedRun.ID] = cancel
+	a.activeMu.Unlock()
+	defer func() {
+		cancel()
+		a.activeMu.Lock()
+		delete(a.active, queuedRun.ID)
+		a.activeMu.Unlock()
+	}()
+	defer func() {
+		if retErr != nil {
+			a.failQueuedRun(context.Background(), queuedRun.ID, retErr)
+		}
+	}()
+	current, err := a.Store.Run(ctx, queuedRun.ID)
+	if err != nil {
+		return err
+	}
+	if current.State != domain.RunQueued {
+		return context.Canceled
+	}
+	lane, skipped, err := a.Registry.WaitPick(runCtx, agent.Handle, override, func(busy []lanes.Skipped) {
+		signalQueuedReady(ctx)
 		ids := make([]string, 0, len(busy))
 		for _, b := range busy {
 			ids = append(ids, b.ID)
 		}
 		a.notice(ctx, channel.ID, "info", fmt.Sprintf("@%s is queued: %s busy; it starts when a lane frees up.", agent.Handle, strings.Join(ids, ", ")))
 	})
+	signalQueuedReady(ctx)
 	if err != nil {
 		if explicit && len(skipped) > 0 {
 			return fmt.Errorf("lane %s cannot run now: %s. A /lane override does not fall back to another lane.", override, skipped[0].Reason)
@@ -715,21 +929,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if err != nil {
 		return err
 	}
-	run := domain.Run{ID: store.NewID(), ChannelID: channel.ID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: lane.ID, Mode: mode, State: domain.RunQueued, RetryOf: retryOf}
-	runCtx, cancel := context.WithCancel(ctx)
-	a.activeMu.Lock()
-	if a.active == nil {
-		a.active = map[string]context.CancelFunc{}
-	}
-	a.active[run.ID] = cancel
-	a.activeMu.Unlock()
-	defer func() {
-		cancel()
-		a.activeMu.Lock()
-		delete(a.active, run.ID)
-		a.activeMu.Unlock()
-	}()
-	if _, err := a.Store.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: channel.ID, Payload: run}); err != nil {
+	run := queuedRun
+	run.LaneID = lane.ID
+	if _, err := a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run}); err != nil {
 		return err
 	}
 	a.syncTask(ctx, m.ID, false)
@@ -795,26 +997,12 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		}
 		a.recordRunUsage(ctx, &run, lane.CLI, dir)
 	}
-	var proposal string
-	if run.StartedAt != nil {
-		answer := adapters.CleanAnswer(adapter, a.answer(run.ID))
-		if mode == domain.RunWrite {
-			answer, proposal = splitCommit(answer)
-		}
-		answer = shortenAnswer(answer)
-		if err != nil {
-			if answer != "" {
-				answer = "Run failed: " + run.FailureReason + "\n\n" + answer
-			} else {
-				answer = "Run failed: " + run.FailureReason
-			}
-		}
-		if answer == "" {
-			answer = "Run completed without a final answer."
-		}
-		reply := domain.Message{ID: store.NewID(), ChannelID: channel.ID, ThreadID: m.ThreadID, AuthorID: agent.ID, Body: answer, Mentions: []string{}, RunID: run.ID, CreatedAt: time.Now().UTC()}
-		if _, postErr := a.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Agent(agent.ID), ChannelID: channel.ID, Payload: reply}); postErr != nil {
-			return postErr
+	if err := a.postRunResult(ctx, run, m, agent, adapter, compare); err != nil {
+		return err
+	}
+	if run.EndedAt != nil {
+		if err := a.Runner.MarkFinalized(run.ID); err != nil {
+			return err
 		}
 	}
 	if err != nil {
@@ -826,13 +1014,189 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if mode == domain.RunWrite && run.State == domain.RunDone && run.DiffStat != nil && run.DiffStat.Files == 0 {
 		a.notice(ctx, channel.ID, "info", fmt.Sprintf("No changes: @%s did not change any files, so there is nothing to approve.", agent.Handle))
 	}
-	if !compare && mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
-		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: channel.ID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", CommitMessage: buildCommitMessage(proposal, m.Body, run.ID), State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}
-		if _, err := a.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: channel.ID, Payload: approval}); err != nil {
+	return err
+}
+
+func (a *App) postRunResult(ctx context.Context, run domain.Run, m domain.Message, agent domain.Member, adapter adapters.Adapter, compare bool) error {
+	if run.StartedAt == nil {
+		return nil
+	}
+	if run.EndedAt != nil {
+		stored, err := a.Store.Run(ctx, run.ID)
+		if err != nil {
+			return err
+		}
+		if !terminalProjectionCurrent(run, stored) {
+			if err := a.Runner.ReconcileTerminal(run.ID); err != nil {
+				return err
+			}
+			stored, err = a.Store.Run(ctx, run.ID)
+			if err != nil {
+				return err
+			}
+			if !terminalProjectionCurrent(run, stored) {
+				return fmt.Errorf("terminal run %s was not recorded", run.ID)
+			}
+		}
+	}
+	answer := adapters.CleanAnswer(adapter, a.answer(run.ID))
+	proposal := ""
+	if run.Mode == domain.RunWrite {
+		answer, proposal = splitCommit(answer)
+	}
+	answer = shortenAnswer(answer)
+	if run.State == domain.RunFailed || run.State == domain.RunCancelled {
+		if answer != "" {
+			answer = "Run failed: " + run.FailureReason + "\n\n" + answer
+		} else {
+			answer = "Run failed: " + run.FailureReason
+		}
+	}
+	if answer == "" {
+		answer = "Run completed without a final answer."
+	}
+	reply := domain.Message{ID: store.NewID(), ChannelID: run.ChannelID, ThreadID: m.ThreadID, AuthorID: agent.ID, Body: answer, Mentions: []string{}, RunID: run.ID, CreatedAt: time.Now().UTC()}
+	if _, err := a.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Agent(agent.ID), ChannelID: run.ChannelID, IdempotencyKey: "run-answer:" + run.ID, Payload: reply}); err != nil {
+		return err
+	}
+	if !compare && run.Mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
+		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: run.ChannelID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", CommitMessage: buildCommitMessage(proposal, m.Body, run.ID), State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}
+		if _, err := a.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: run.ChannelID, IdempotencyKey: "run-approval:" + run.ID, Payload: approval}); err != nil {
 			return err
 		}
 	}
-	return err
+	return nil
+}
+
+func terminalProjectionCurrent(run, stored domain.Run) bool {
+	if run.State == stored.State && stored.EndedAt != nil {
+		return true
+	}
+	return run.State == domain.RunWaitingApproval && stored.State.Terminal() && stored.ApprovalOption != ""
+}
+
+func (a *App) recoveredOutcome(ctx context.Context, run *domain.Run, code int) (domain.RunState, domain.FailureClass, string, error) {
+	channel, err := a.Store.Channel(ctx, run.ChannelID)
+	if err != nil {
+		return domain.RunFailed, domain.FailureTransient, "", err
+	}
+	lane, ok := a.Registry.Snapshot(run.LaneID)
+	if !ok {
+		lane, _ = a.Store.Lane(ctx, run.LaneID)
+	}
+	adapter := a.Adapters[lane.CLI]
+	class, reason := domain.FailureTransient, ""
+	if adapter != nil {
+		classified, signal, classifiedReason := adapters.Classify(adapter, code, a.runTail(run.ID, "stdout.log"), a.runTail(run.ID, "stderr.log"))
+		class, reason = classified, classifiedReason
+		if signal.Kind != adapters.SignalNone {
+			if agent, err := a.Store.Member(ctx, run.AgentID); err == nil {
+				_ = a.Registry.ApplySignalForChannel(ctx, run.ID, run.ChannelID, agent.Handle, run.LaneID, signal, reason)
+			}
+			if reason == "" {
+				reason = "lane reported " + string(signal.Kind)
+			}
+			return domain.RunFailed, class, reason, nil
+		}
+	}
+	if code != 0 {
+		if reason == "" {
+			reason = fmt.Sprintf("process exited with code %d", code)
+		}
+		return domain.RunFailed, class, reason, nil
+	}
+	if run.Mode != domain.RunWrite {
+		return domain.RunDone, "", "", nil
+	}
+	mode := laneSandboxMode(a.Config.Runs.Sandbox, a.Config.Lanes.Lane, lane.ID)
+	network := true
+	for _, configured := range a.Config.Lanes.Lane {
+		if configured.ID == lane.ID && configured.SandboxNetwork != nil {
+			network = *configured.SandboxNetwork
+			break
+		}
+	}
+	opts := runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand, SandboxMode: mode, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly}
+	if err := a.Runner.RecoverWrite(ctx, run, adapter, adapters.Request{Mode: domain.RunWrite, Model: lane.Model, Workdir: run.Worktree}, opts); err != nil {
+		if run.Verification == nil {
+			run.Verification = &domain.Verification{OK: false, Detail: err.Error()}
+		}
+		return domain.RunFailed, domain.FailureSemantic, err.Error(), nil
+	}
+	if run.DiffStat == nil || run.DiffStat.Files == 0 {
+		return domain.RunDone, "", "", nil
+	}
+	return domain.RunWaitingApproval, "", "", nil
+}
+
+func (a *App) runTail(id, name string) string {
+	f, err := os.Open(filepath.Join(a.Paths.RunsDir, id, name))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return ""
+	}
+	start := info.Size() - 8192
+	if start < 0 {
+		start = 0
+	}
+	b := make([]byte, info.Size()-start)
+	n, _ := f.ReadAt(b, start)
+	return string(b[:n])
+}
+
+func (a *App) recoveredFinished(ctx context.Context, run domain.Run) error {
+	m, err := a.Store.Message(ctx, run.TriggerMessageID)
+	if err != nil {
+		return err
+	}
+	agent, err := a.Store.Member(ctx, run.AgentID)
+	if err != nil {
+		return err
+	}
+	lane, ok := a.Registry.Snapshot(run.LaneID)
+	if !ok {
+		lane, _ = a.Store.Lane(ctx, run.LaneID)
+	}
+	adapter := a.Adapters[lane.CLI]
+	groups, err := a.CompareList(ctx, run.ChannelID)
+	if err != nil {
+		return err
+	}
+	compare := false
+	for _, group := range groups {
+		if group.MessageID == run.TriggerMessageID && group.AgentID == run.AgentID {
+			compare = true
+			break
+		}
+	}
+	if err := a.postRunResult(ctx, run, m, agent, adapter, compare); err != nil {
+		return err
+	}
+	a.syncTask(ctx, run.TriggerMessageID, true)
+	if (run.State == domain.RunFailed || run.State == domain.RunCancelled) && run.Worktree != "" {
+		if _, err := os.Stat(run.Worktree); os.IsNotExist(err) {
+			return a.Runner.MarkFinalized(run.ID)
+		} else if err != nil {
+			return err
+		}
+		channel, err := a.Store.Channel(ctx, run.ChannelID)
+		if err != nil {
+			return err
+		}
+		manager := worktree.Manager{BaseDir: a.Paths.WorktreesDir}
+		w, err := manager.Open(ctx, channel.RepoPath, run.Worktree, "fz/"+run.ID, run.BaseCommit)
+		if err != nil {
+			return err
+		}
+		if err := manager.Cleanup(ctx, w); err != nil {
+			return err
+		}
+	}
+	return a.Runner.MarkFinalized(run.ID)
 }
 
 // recordRunUsage stores the tokens the CLI logged for this run, and a cost
@@ -873,12 +1237,18 @@ func mcpCLI(name string) bool {
 	return name == "claude" || name == "codex"
 }
 
-func (a *App) CancelRun(_ context.Context, id string) error {
+func (a *App) CancelRun(ctx context.Context, id string) error {
 	a.activeMu.Lock()
 	cancel := a.active[id]
 	a.activeMu.Unlock()
 	if cancel == nil {
 		if a.Runner.CancelRecovered(id) {
+			return nil
+		}
+		run, err := a.Store.Run(ctx, id)
+		if err == nil && run.State == domain.RunQueued {
+			a.failQueuedRun(ctx, id, context.Canceled)
+			go a.syncTask(context.Background(), run.TriggerMessageID, true)
 			return nil
 		}
 		return errors.New("run is not active")

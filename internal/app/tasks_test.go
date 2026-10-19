@@ -45,8 +45,14 @@ func (f *taskFixture) fakeRun(ctx context.Context, m domain.Message, agent domai
 	if wait != nil {
 		<-wait
 	}
-	run := domain.Run{ID: store.NewID(), ChannelID: m.ChannelID, TriggerMessageID: m.ID, AgentID: agent.ID, LaneID: "a", Mode: domain.RunRead, State: state}
-	_, _ = f.s.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: m.ChannelID, Payload: run})
+	runs, _ := f.s.Runs(ctx, m.ChannelID, string(domain.RunQueued))
+	for _, run := range runs {
+		if run.TriggerMessageID == m.ID && run.AgentID == agent.ID {
+			run.LaneID, run.State = "a", state
+			_, _ = f.s.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: m.ChannelID, Payload: run})
+			return
+		}
+	}
 }
 
 func (f *taskFixture) create(t *testing.T, in tasks.Input) domain.Task {
@@ -246,7 +252,9 @@ func TestStartRecoversTaskWhoseRunFailed(t *testing.T) {
 
 func TestTaskWithoutARunFails(t *testing.T) {
 	f := newTaskFixture(t)
-	f.app.taskDispatch = func(context.Context, domain.Message, domain.Member, string) {}
+	f.app.taskDispatch = func(ctx context.Context, m domain.Message, agent domain.Member, _ string) {
+		f.app.failQueued(ctx, m.ID, agent.ID, errors.New("dispatch failed before start"))
+	}
 	task := f.create(t, tasks.Input{Title: "Nothing", Assignee: "coder"})
 	if _, err := f.app.StartTask(context.Background(), f.human, task.ID); err != nil {
 		t.Fatal(err)

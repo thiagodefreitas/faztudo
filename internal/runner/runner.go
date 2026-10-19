@@ -119,27 +119,34 @@ func (c *Capacity) WaitAcquire(ctx context.Context, ids ...string) error {
 }
 
 type Metadata struct {
-	Run           domain.Run       `json:"run"`
-	PID           int              `json:"pid"`
-	PGID          int              `json:"pgid"`
-	StartTime     string           `json:"start_time"`
-	BaseTime      time.Time        `json:"base_time"`
-	OutputOffsets map[string]int64 `json:"output_offsets,omitempty"`
-	OutputSeq     int64            `json:"output_seq,omitempty"`
+	Run                 domain.Run       `json:"run"`
+	PID                 int              `json:"pid"`
+	PGID                int              `json:"pgid"`
+	StartTime           string           `json:"start_time"`
+	BaseTime            time.Time        `json:"base_time"`
+	OutputOffsets       map[string]int64 `json:"output_offsets,omitempty"`
+	OutputSeq           int64            `json:"output_seq,omitempty"`
+	PendingFinalization bool             `json:"pending_finalization,omitempty"`
+	SandboxMode         string           `json:"sandbox_mode,omitempty"`
+	TestCommand         string           `json:"test_command,omitempty"`
+	TestTimeout         time.Duration    `json:"test_timeout,omitempty"`
+	SandboxNetwork      *bool            `json:"sandbox_network,omitempty"`
 }
 type Runner struct {
-	RunDir         string
-	Appender       events.Appender
-	Capacity       *Capacity
-	ExtraEnvRemove []string
-	Grace          time.Duration
-	Backoff        []time.Duration
-	Lanes          *lanes.Registry
-	PersonaForRun  func(domain.Run) string
-	mu             sync.Mutex
-	outputMu       sync.Mutex
-	active         map[string]bool
-	recovered      map[string]context.CancelFunc
+	RunDir            string
+	Appender          events.Appender
+	Capacity          *Capacity
+	ExtraEnvRemove    []string
+	Grace             time.Duration
+	Backoff           []time.Duration
+	Lanes             *lanes.Registry
+	PersonaForRun     func(domain.Run) string
+	RecoveredOutcome  func(context.Context, *domain.Run, int) (domain.RunState, domain.FailureClass, string, error)
+	RecoveredFinished func(context.Context, domain.Run) error
+	mu                sync.Mutex
+	outputMu          sync.Mutex
+	active            map[string]bool
+	recovered         map[string]context.CancelFunc
 }
 
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -195,47 +202,7 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 	run.BaseCommit = w.BaseCommit
 	req.Workdir = w.Path
 	err = r.execute(ctx, run, adapter, req, &opts, func() error {
-		stat, diff, err := opts.Worktrees.Diff(ctx, w)
-		if err != nil {
-			return err
-		}
-		run.DiffStat = &stat
-		verifyTimeout := opts.TestTimeout
-		if verifyTimeout <= 0 {
-			verifyTimeout = 5 * time.Minute
-		}
-		if diff == "" {
-			// Nothing to approve. The run is done, unless the channel's test
-			// command fails on the untouched tree.
-			output, verifyErr := r.verifyWrite(ctx, run, w, opts.TestCommand, verifyTimeout, opts)
-			if err := r.recordVerification(run, "no changes", output, verifyErr); err != nil {
-				return err
-			}
-			if err := opts.Worktrees.Cleanup(context.Background(), w); err != nil {
-				return err
-			}
-			run.Worktree, run.BaseCommit = "", ""
-			return nil
-		}
-		if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
-			return err
-		}
-		output, verifyErr := r.verifyWrite(ctx, run, w, opts.TestCommand, verifyTimeout, opts)
-		detail := "diff exists"
-		if opts.TestCommand != "" {
-			detail = "diff exists and verification passed"
-		}
-		if err := r.recordVerification(run, detail, output, verifyErr); err != nil {
-			return err
-		}
-		_, after, err := opts.Worktrees.Diff(ctx, w)
-		if err != nil {
-			return err
-		}
-		if after != diff {
-			return errors.New("verification changed the worktree diff")
-		}
-		return nil
+		return r.verifyWorktree(ctx, run, w, opts)
 	}, domain.RunWaitingApproval)
 	if err != nil && run.StartedAt == nil {
 		cleanupErr := opts.Worktrees.Cleanup(context.Background(), w)
@@ -246,6 +213,94 @@ func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adap
 		return errors.Join(err, cleanupErr)
 	}
 	return err
+}
+
+func (r *Runner) verifyWorktree(ctx context.Context, run *domain.Run, w worktree.Worktree, opts WriteOptions) error {
+	stat, diff, err := opts.Worktrees.Diff(ctx, w)
+	if err != nil {
+		return err
+	}
+	run.DiffStat = &stat
+	verifyTimeout := opts.TestTimeout
+	if verifyTimeout <= 0 {
+		verifyTimeout = 5 * time.Minute
+	}
+	if diff == "" {
+		// Nothing to approve. The run is done, unless the channel's test
+		// command fails on the untouched tree.
+		output, verifyErr := r.verifyWrite(ctx, run, w, opts.TestCommand, verifyTimeout, opts)
+		if err := r.recordVerification(run, "no changes", output, verifyErr); err != nil {
+			return err
+		}
+		if err := opts.Worktrees.Cleanup(context.Background(), w); err != nil {
+			return err
+		}
+		run.Worktree, run.BaseCommit = "", ""
+		return nil
+	}
+	if err := os.WriteFile(filepath.Join(r.RunDir, run.ID, "diff.patch"), []byte(diff), 0600); err != nil {
+		return err
+	}
+	output, verifyErr := r.verifyWrite(ctx, run, w, opts.TestCommand, verifyTimeout, opts)
+	detail := "diff exists"
+	if opts.TestCommand != "" {
+		detail = "diff exists and verification passed"
+	}
+	if err := r.recordVerification(run, detail, output, verifyErr); err != nil {
+		return err
+	}
+	_, after, err := opts.Worktrees.Diff(ctx, w)
+	if err != nil {
+		return err
+	}
+	if after != diff {
+		return errors.New("verification changed the worktree diff")
+	}
+	return nil
+
+}
+
+// RecoverWrite verifies a completed agent process in its existing worktree.
+// It rebuilds the sandbox before running a configured test command.
+func (r *Runner) RecoverWrite(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, opts WriteOptions) error {
+	if m, err := r.load(run.ID); err == nil && m.SandboxNetwork != nil {
+		opts.SandboxMode = m.SandboxMode
+		opts.TestCommand = m.TestCommand
+		opts.TestTimeout = m.TestTimeout
+		opts.Network = *m.SandboxNetwork
+	}
+	w, err := opts.Worktrees.Open(ctx, opts.Repo, run.Worktree, "fz/"+run.ID, run.BaseCommit)
+	if err != nil {
+		return err
+	}
+	if opts.TestCommand != "" && opts.SandboxMode != "" && opts.SandboxMode != "off" {
+		if adapter == nil {
+			return errors.New("cannot rebuild verification sandbox without the original adapter")
+		}
+		req.Workdir = run.Worktree
+		req.Prompt = "recovery verification"
+		command, commandErr := adapter.Command(req)
+		if commandErr != nil {
+			return commandErr
+		}
+		defer removePaths(command.Remove)
+		opts.runStateDir = filepath.Join(r.RunDir, run.ID, "sandbox")
+		if _, err := sandboxCommand(ctx, command, adapter.Name(), req, &opts); err != nil {
+			return err
+		}
+	}
+	return r.verifyWorktree(ctx, run, w, opts)
+}
+
+func (r *Runner) MarkFinalized(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m, err := r.load(id)
+	if err != nil {
+		return err
+	}
+	m.PendingFinalization = false
+	return r.saveLocked(m)
 }
 
 func (r *Runner) recordVerification(run *domain.Run, passedDetail, output string, verifyErr error) error {
@@ -298,11 +353,11 @@ func (r *Runner) appendVerificationOutput(run *domain.Run, output string) error 
 		chunk := text[:n]
 		text = text[n:]
 		m.OutputSeq++
-		if err := r.emitRun(context.Background(), run, events.RunOutput, events.RunOutputPayload{RunID: run.ID, Seq: int(m.OutputSeq), Stream: "stderr", Text: chunk}); err != nil {
-			return err
-		}
 		offset += int64(n)
 		if err := r.updateOutput(run.ID, "stderr", offset, m.OutputSeq); err != nil {
+			return err
+		}
+		if err := r.emitRun(context.Background(), run, events.RunOutput, events.RunOutputPayload{RunID: run.ID, Seq: int(m.OutputSeq), Stream: "stderr", Text: chunk}); err != nil {
 			return err
 		}
 	}
@@ -376,7 +431,7 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 		if write != nil && write.scopeReport != "" {
 			_ = os.Remove(write.scopeReport)
 		}
-		code, tail, execErr := r.executeOnce(ctx, run, command, req.Timeout, &outputSeq)
+		code, tail, execErr := r.executeOnce(ctx, run, command, req.Timeout, &outputSeq, write)
 		stdoutTail := r.tailOf(run.ID, "stdout.log", outStart)
 		if ctx.Err() != nil {
 			state := domain.RunCancelled
@@ -519,12 +574,28 @@ func (r *Runner) finish(ctx context.Context, run *domain.Run, state domain.RunSt
 		m = Metadata{}
 	}
 	m.Run = *run
+	m.PendingFinalization = true
 	if err := r.save(m); err != nil {
 		return err
 	}
-	return r.emitRun(ctx, run, events.RunUpdated, *run)
+	if r.Appender == nil {
+		return nil
+	}
+	// The terminal record must outlive a cancelled request. Its key also
+	// makes a startup retry safe if the append succeeded before a crash.
+	var appendErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		_, appendErr = r.Appender.Append(context.Background(), events.Draft{Type: events.RunUpdated, Version: 1, Actor: events.System, ChannelID: run.ChannelID, IdempotencyKey: "run-final:" + run.ID, Payload: *run})
+		if appendErr == nil {
+			return nil
+		}
+		if attempt < 2 {
+			time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+		}
+	}
+	return appendErr
 }
-func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cmd, timeout time.Duration, seq *atomic.Int64) (int, string, error) {
+func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cmd, timeout time.Duration, seq *atomic.Int64, write *WriteOptions) (int, string, error) {
 	path := filepath.Join(r.RunDir, run.ID)
 	out, err := os.OpenFile(filepath.Join(path, "stdout.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
@@ -538,7 +609,13 @@ func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cm
 	defer errFile.Close()
 	startOutOffset, _ := out.Seek(0, io.SeekEnd)
 	startErrOffset, _ := errFile.Seek(0, io.SeekEnd)
-	cmd := exec.Command(c.Path, c.Args...)
+	exitPath := filepath.Join(path, "exit.status")
+	_ = os.Remove(exitPath)
+	// The shell remains the process group leader and records the child's exit
+	// even if the daemon that launched it is gone.
+	script := `status_file=$1; shift; "$@"; status=$?; printf '%s\n' "$status" > "$status_file.tmp" && mv "$status_file.tmp" "$status_file"; exit "$status"`
+	args := append([]string{"-c", script, "faztudo-run", exitPath, c.Path}, c.Args...)
+	cmd := exec.Command("/bin/sh", args...)
 	cmd.Dir = c.Dir
 	cmd.Env = stripEnv(os.Environ(), append(r.ExtraEnvRemove, c.EnvRemove...), c.EnvAdd, c.EnvAllow...)
 	cmd.Stdin = nil
@@ -554,7 +631,11 @@ func (r *Runner) executeOnce(ctx context.Context, run *domain.Run, c adapters.Cm
 		cmd.Wait()
 		return -1, "", err
 	}
-	meta := Metadata{Run: *run, PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartTime: start, BaseTime: time.Now().UTC()}
+	meta := Metadata{Run: *run, PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartTime: start, BaseTime: time.Now().UTC(), PendingFinalization: true}
+	if write != nil {
+		meta.SandboxMode, meta.TestCommand, meta.TestTimeout = write.SandboxMode, write.TestCommand, write.TestTimeout
+		meta.SandboxNetwork = &write.Network
+	}
 	if previous, err := r.load(run.ID); err == nil {
 		meta.OutputOffsets = previous.OutputOffsets
 		meta.OutputSeq = previous.OutputSeq
@@ -665,10 +746,11 @@ func (r *Runner) streamFile(run *domain.Run, path, stream string, offset int64, 
 			r.outputMu.Lock()
 			defer r.outputMu.Unlock()
 			n := seq.Add(1)
-			if err := r.emitRun(context.Background(), run, events.RunOutput, events.RunOutputPayload{RunID: run.ID, Seq: int(n), Stream: stream, Text: string(b)}); err == nil {
-				offset += int64(len(b))
-				_ = r.updateOutput(run.ID, stream, offset, n)
+			offset += int64(len(b))
+			if err := r.updateOutput(run.ID, stream, offset, n); err != nil {
+				return
 			}
+			_ = r.emitRun(context.Background(), run, events.RunOutput, events.RunOutputPayload{RunID: run.ID, Seq: int(n), Stream: stream, Text: string(b)})
 		}
 	}
 	read := func() {
@@ -872,7 +954,35 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 		if err = json.Unmarshal(b, &m); err != nil {
 			return result, err
 		}
+		if m.Run.State.Terminal() || m.Run.State == domain.RunWaitingApproval {
+			if source, ok := r.Appender.(interface {
+				Run(context.Context, string) (domain.Run, error)
+			}); ok {
+				stored, readErr := source.Run(ctx, m.Run.ID)
+				if readErr == nil && (stored.State != m.Run.State || stored.EndedAt == nil && m.Run.EndedAt != nil) {
+					if err := r.emitTerminal(&m.Run); err != nil {
+						return result, err
+					}
+				}
+			}
+			if m.PendingFinalization && r.RecoveredFinished != nil {
+				if err := r.RecoveredFinished(ctx, m.Run); err != nil {
+					return result, err
+				}
+			}
+			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+			continue
+		}
 		if m.Run.State != domain.RunRunning {
+			continue
+		}
+		if code, ok := r.exitStatus(m.Run.ID); ok {
+			r.replayOutput(m)
+			if err := r.completeRecovered(ctx, &m.Run, code); err != nil {
+				return result, err
+			}
+			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
+			result = append(result, m.Run)
 			continue
 		}
 		actual, err := startTime(m.PID)
@@ -881,15 +991,10 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 			if err != nil || actual == m.StartTime {
 				cleanupGroup(m.PGID, m.StartTime, r.Grace)
 			}
-			m.Run.State = domain.RunFailed
-			m.Run.FailureClass = domain.FailureTransient
-			m.Run.FailureReason = "outcome unknown after daemon restart"
-			now := time.Now().UTC()
-			m.Run.EndedAt = &now
-			if err = r.save(m); err != nil {
+			if err = r.finish(ctx, &m.Run, domain.RunFailed, domain.FailureTransient, "outcome unknown after daemon restart", nil); err != nil {
 				return result, err
 			}
-			if err = r.emitRun(ctx, &m.Run, events.RunUpdated, m.Run); err != nil {
+			if err = r.afterRecovered(ctx, m.Run); err != nil {
 				return result, err
 			}
 			_ = os.RemoveAll(filepath.Join(r.RunDir, m.Run.ID, "sandbox"))
@@ -922,34 +1027,6 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 		}
 		result = append(result, m.Run)
 	}
-	// A crash can happen after RunCreated but before the runner writes run.json.
-	// Those queued runs have no process to reattach and otherwise stay queued.
-	if source, ok := r.Appender.(interface {
-		Runs(context.Context, string, string) ([]domain.Run, error)
-	}); ok {
-		queued, err := source.Runs(ctx, "", string(domain.RunQueued))
-		if err != nil {
-			return result, err
-		}
-		for _, run := range queued {
-			_, err := os.Stat(filepath.Join(r.RunDir, run.ID, "run.json"))
-			if err == nil {
-				continue
-			}
-			if !os.IsNotExist(err) {
-				return result, err
-			}
-			run.State = domain.RunFailed
-			run.FailureClass = domain.FailureTransient
-			run.FailureReason = "run never started before daemon restart"
-			now := time.Now().UTC()
-			run.EndedAt = &now
-			if err := r.emitRun(ctx, &run, events.RunUpdated, run); err != nil {
-				return result, err
-			}
-			result = append(result, run)
-		}
-	}
 	return result, nil
 }
 
@@ -963,6 +1040,83 @@ func (r *Runner) CancelRecovered(id string) bool {
 	}
 	cancel()
 	return true
+}
+
+func (r *Runner) exitStatus(id string) (int, bool) {
+	b, err := os.ReadFile(filepath.Join(r.RunDir, id, "exit.status"))
+	if err != nil {
+		return 0, false
+	}
+	code, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	return code, err == nil && code >= 0 && code <= 255
+}
+
+func (r *Runner) replayOutput(m Metadata) {
+	stop := make(chan struct{})
+	close(stop)
+	var seq atomic.Int64
+	seq.Store(m.OutputSeq)
+	var wg sync.WaitGroup
+	for _, stream := range []string{"stdout", "stderr"} {
+		path := filepath.Join(r.RunDir, m.Run.ID, stream+".log")
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		wg.Add(1)
+		go func(stream, path string) {
+			defer wg.Done()
+			r.streamFile(&m.Run, path, stream, m.OutputOffsets[stream], stop, &seq)
+		}(stream, path)
+	}
+	wg.Wait()
+}
+
+func (r *Runner) emitTerminal(run *domain.Run) error {
+	if r.Appender == nil {
+		return nil
+	}
+	_, err := r.Appender.Append(context.Background(), events.Draft{Type: events.RunUpdated, Version: 1, Actor: events.System, ChannelID: run.ChannelID, IdempotencyKey: "run-final:" + run.ID, Payload: *run})
+	return err
+}
+
+func (r *Runner) ReconcileTerminal(id string) error {
+	m, err := r.load(id)
+	if err != nil {
+		return err
+	}
+	if !m.Run.State.Terminal() && m.Run.State != domain.RunWaitingApproval {
+		return fmt.Errorf("run %s has no terminal metadata", id)
+	}
+	return r.emitTerminal(&m.Run)
+}
+
+func (r *Runner) afterRecovered(ctx context.Context, run domain.Run) error {
+	if r.RecoveredFinished == nil {
+		return nil
+	}
+	return r.RecoveredFinished(ctx, run)
+}
+
+func (r *Runner) completeRecovered(ctx context.Context, run *domain.Run, code int) error {
+	state := domain.RunDone
+	class := domain.FailureClass("")
+	reason := ""
+	var outcomeErr error
+	if code != 0 {
+		state, class, reason = domain.RunFailed, domain.FailureTransient, fmt.Sprintf("process exited with code %d after daemon restart", code)
+	} else if run.Mode == domain.RunWrite {
+		state, class, reason = domain.RunFailed, domain.FailureTransient, "write run has no recovery verifier"
+	}
+	if r.RecoveredOutcome != nil {
+		state, class, reason, outcomeErr = r.RecoveredOutcome(ctx, run, code)
+		if outcomeErr != nil {
+			state, class, reason = domain.RunFailed, domain.FailureTransient, outcomeErr.Error()
+		}
+	}
+	if err := r.finish(context.Background(), run, state, class, reason, &code); err != nil {
+		return err
+	}
+	return r.afterRecovered(context.Background(), *run)
 }
 
 func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
@@ -1003,6 +1157,7 @@ func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 			close(stop)
 			wg.Wait()
 			_ = r.finish(context.Background(), &m.Run, domain.RunCancelled, domain.FailureTransient, "cancelled after daemon restart", nil)
+			_ = r.afterRecovered(context.Background(), m.Run)
 			return
 		case <-ticker.C:
 			actual, err := startTime(m.PID)
@@ -1018,13 +1173,12 @@ func (r *Runner) monitorRecovered(ctx context.Context, m Metadata) {
 				m.OutputOffsets = latest.OutputOffsets
 				m.OutputSeq = latest.OutputSeq
 			}
-			m.Run.State = domain.RunFailed
-			m.Run.FailureClass = domain.FailureTransient
-			m.Run.FailureReason = "outcome unknown after daemon restart"
-			now := time.Now().UTC()
-			m.Run.EndedAt = &now
-			_ = r.save(m)
-			_ = r.emitRun(context.Background(), &m.Run, events.RunUpdated, m.Run)
+			if code, ok := r.exitStatus(m.Run.ID); ok {
+				_ = r.completeRecovered(context.Background(), &m.Run, code)
+			} else {
+				_ = r.finish(context.Background(), &m.Run, domain.RunFailed, domain.FailureTransient, "outcome unknown after daemon restart", nil)
+				_ = r.afterRecovered(context.Background(), m.Run)
+			}
 			return
 		}
 	}

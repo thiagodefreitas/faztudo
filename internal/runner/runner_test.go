@@ -269,7 +269,7 @@ func TestRecoveryIdentity(t *testing.T) {
 	}
 }
 
-func TestRecoverQueuedRunWithoutMetadata(t *testing.T) {
+func TestRecoverLeavesQueuedRunForAppDispatch(t *testing.T) {
 	ctx := context.Background()
 	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
 	if err != nil {
@@ -282,11 +282,11 @@ func TestRecoverQueuedRunWithoutMetadata(t *testing.T) {
 	}
 	r := Runner{RunDir: t.TempDir(), Appender: s}
 	recovered, err := r.Recover(ctx)
-	if err != nil || len(recovered) != 1 || recovered[0].State != domain.RunFailed {
+	if err != nil || len(recovered) != 0 {
 		t.Fatalf("recover: %+v %v", recovered, err)
 	}
 	got, err := s.Run(ctx, run.ID)
-	if err != nil || got.FailureClass != domain.FailureTransient || !strings.Contains(got.FailureReason, "never started") || got.EndedAt == nil {
+	if err != nil || got.State != domain.RunQueued || got.EndedAt != nil {
 		t.Fatalf("queued run: %+v %v", got, err)
 	}
 	if second, err := r.Recover(ctx); err != nil || len(second) != 0 {
@@ -364,6 +364,10 @@ func TestExecuteWriteVerification(t *testing.T) {
 		t.Setenv("FAKE_WRITE_CONTENT", "hello\n")
 		run := domain.Run{ID: tc.id, Mode: domain.RunWrite, State: domain.RunQueued}
 		err := r.ExecuteWrite(context.Background(), &run, fakeAdapter{path}, adapters.Request{Mode: domain.RunWrite, Prompt: "x"}, WriteOptions{Repo: repo, Worktrees: m, TestCommand: tc.verify, TestTimeout: time.Second})
+		metadata, loadErr := r.load(run.ID)
+		if loadErr != nil || metadata.TestCommand != tc.verify || metadata.TestTimeout != time.Second || metadata.SandboxNetwork == nil {
+			t.Fatalf("%s recovery settings: %+v %v", tc.id, metadata, loadErr)
+		}
 		if tc.wantOK && (err != nil || run.State != domain.RunWaitingApproval || run.DiffStat == nil || run.DiffStat.Files != 1) {
 			t.Fatalf("%s: %+v %v", tc.id, run, err)
 		}
@@ -789,9 +793,9 @@ func TestDaemonKilledMidRun(t *testing.T) {
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		m, err := r.load("orphan")
-		if err == nil && m.Run.State == domain.RunFailed {
-			if m.Run.FailureClass != domain.FailureTransient || m.Run.FailureReason != "outcome unknown after daemon restart" {
-				t.Fatalf("recovery classification: %s %q", m.Run.FailureClass, m.Run.FailureReason)
+		if err == nil && m.Run.State == domain.RunDone {
+			if m.Run.ExitCode == nil || *m.Run.ExitCode != 0 {
+				t.Fatalf("recovery exit code: %+v", m.Run)
 			}
 			b, err := os.ReadFile(filepath.Join(dir, "orphan", "stdout.log"))
 			if err != nil || !strings.Contains(string(b), "recovered-output") {

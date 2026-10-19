@@ -144,6 +144,9 @@ func (a *App) StartTask(ctx context.Context, by domain.Member, id string) (domai
 	if _, err := a.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(by.ID), ChannelID: channel.ID, Payload: msg}); err != nil {
 		return domain.Task{}, err
 	}
+	if _, err := a.queueRun(ctx, msg, agent, t.Mode, t.Lane, "", false); err != nil {
+		return domain.Task{}, err
+	}
 	t.MessageID, t.Status, t.RunIDs, t.ApprovalID, t.UpdatedAt = msg.ID, domain.TaskRunning, []string{}, "", time.Now().UTC()
 	if _, err := a.Store.Append(ctx, events.Draft{Type: events.TaskUpdated, Actor: events.Human(by.ID), ChannelID: channel.ID, Payload: t}); err != nil {
 		return domain.Task{}, err
