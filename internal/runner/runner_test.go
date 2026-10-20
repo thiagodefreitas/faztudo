@@ -233,6 +233,9 @@ func TestRecoveryIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := Runner{RunDir: dir, Capacity: NewCapacity(map[string]int{"lane": 1})}
+	// Cleanups run before the TempDir removal registered above: the watcher
+	// of the recovered run writes its outcome there once the process dies.
+	t.Cleanup(r.WaitRecovered)
 	meta := Metadata{Run: domain.Run{ID: "live", LaneID: "lane", State: domain.RunRunning}, PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartTime: start}
 	if err := r.save(meta); err != nil {
 		t.Fatal(err)
