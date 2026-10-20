@@ -181,7 +181,7 @@ export function ChannelPage() {
                 onClick={() => setMembersOpen(true)}
                 aria-label={`Members: ${membersLabel}`}
                 title="Members"
-                className="-ml-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-sidebar md:h-8 md:w-8"
+                className="-ml-1 inline-flex h-9 min-w-9 shrink-0 items-center justify-center rounded-md px-1 hover:bg-sidebar md:h-8 md:min-w-8"
               >
                 <TeamIcon channel={channel} members={members.data ?? []} excludeId={me.data?.id} size={20} />
               </button>

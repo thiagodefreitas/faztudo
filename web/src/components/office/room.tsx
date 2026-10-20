@@ -154,7 +154,7 @@ function WallLaneStrip({ strip }: { strip: PlacedLaneStrip }) {
               x={x + w / 2}
               y={y + h + 4}
               textAnchor="middle"
-              fontSize="7"
+              fontSize="11"
               fontFamily="monospace"
               fill="var(--color-muted)"
             >

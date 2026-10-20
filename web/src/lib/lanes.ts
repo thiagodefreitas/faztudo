@@ -13,3 +13,16 @@ export function primaryWindow(lane: Lane): LaneWindow | undefined {
   }
   return best
 }
+
+function localDay(at: number): string {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+// runs_today counts the local day in runs_date. After midnight the server may
+// still report yesterday's count, so a count from another day is hidden.
+// A lane without runs_date comes from an older server and is shown as given.
+export function runsTodayOf(lane: Lane, now: number): number | undefined {
+  if (lane.runs_date && lane.runs_date !== localDay(now)) return undefined
+  return lane.runs_today
+}

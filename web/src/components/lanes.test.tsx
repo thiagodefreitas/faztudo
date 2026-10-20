@@ -2,6 +2,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import type { Lane } from "../types"
+import { runsTodayOf } from "../lib/lanes"
 import { LaneCardView, LanesGauge } from "./lanes"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
@@ -70,6 +71,25 @@ function renderCard(lane: Lane, overrides: Partial<Parameters<typeof LaneCardVie
   }
   return render(<LaneCardView {...props} />)
 }
+
+describe("runs today", () => {
+  const localDay = (at: number) => {
+    const d = new Date(at)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  }
+
+  it("shows the count when runs_date is today's local date or missing", () => {
+    expect(runsTodayOf({ ...availableLane, runs_today: 949, runs_date: localDay(now) }, now)).toBe(949)
+    expect(runsTodayOf({ ...availableLane, runs_today: 3 }, now)).toBe(3)
+  })
+
+  it("hides a count from another day, on the lane card too", () => {
+    const stale = { ...availableLane, runs_today: 949, runs_date: localDay(now - 3 * 86_400_000) }
+    expect(runsTodayOf(stale, now)).toBeUndefined()
+    renderCard(stale)
+    expect(screen.queryByText("949")).not.toBeInTheDocument()
+  })
+})
 
 describe("LaneCardView", () => {
   it("shows percent, source and age, capacity and runs for a healthy lane", () => {

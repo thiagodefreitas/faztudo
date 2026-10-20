@@ -108,6 +108,23 @@ describe("layoutRoom", () => {
     expect(room.width / room.height).toBeGreaterThan(1.5)
   })
 
+  it("lays rooms out in a grid that follows the container aspect, one column on phones", () => {
+    const desks = desksFor([...personas, ...clis])
+    const columns = (room: ReturnType<typeof layoutRoom>) => new Set(room.zones.map((zone) => Math.round(zone.x))).size
+    const wide = layoutRoom(desks, { aspect: 2.6 })
+    const square = layoutRoom(desks, { aspect: 1 })
+    const phone = layoutRoom(desks, { compact: true, aspect: 0.5 })
+    expect(wide.width).toBeGreaterThan(square.width)
+    expect(wide.width / wide.height).toBeGreaterThan(square.width / square.height)
+    expect(columns(wide)).toBeGreaterThan(1)
+    expect(phone.width).toBe(COMPACT_ROOM_W)
+    expect(columns(phone)).toBe(1)
+    for (const room of [wide, square]) {
+      for (const zone of room.zones) expect(zone.x + zone.w).toBeLessThanOrEqual(room.width)
+      expect(room.seats).toHaveLength(11)
+    }
+  })
+
   it("wraps extra pods and handles a room with no agents", () => {
     const many = layoutRoom(desksFor(Array.from({ length: 20 }, (_, i) => `claude-${i}`)))
     expect(many.seats).toHaveLength(21)

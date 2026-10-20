@@ -213,7 +213,12 @@ describe("OfficeScene", () => {
     expect(codexBtn).toHaveAttribute("data-state", "waiting_approval")
     expect(screen.getByTestId("monitor-glow-m-claude")).toBeInTheDocument()
     expect(screen.getByTestId("progress-pulse-m-claude")).toBeInTheDocument()
-    expect(screen.getByTestId("run-title-m-claude")).toHaveTextContent("Redesign the 2D floor...")
+    expect(screen.getByTestId("run-line-m-claude")).toHaveTextContent("1m - Redesign the 2D floor p...")
+    expect(claudeBtn.querySelector("title")).toHaveTextContent(
+      "Redesign the 2D floor plan and add department pods",
+    )
+    // An exhausted desk has no run line.
+    expect(screen.queryByTestId("run-line-m-grok")).not.toBeInTheDocument()
     expect(screen.getByTestId("elapsed-m-claude")).toHaveTextContent("1m 35s")
     expect(grokBtn).toHaveAttribute("data-out-of-quota", "true")
     expect(screen.getByTestId("quota-tag-m-grok")).toHaveTextContent("out of quota")
@@ -389,10 +394,13 @@ describe("OfficeScene", () => {
     expect(screen.getByTestId("slumped-pose-m-reviewer")).toBeInTheDocument()
     expect(screen.getByTestId("red-lamp-m-reviewer")).toBeInTheDocument()
 
-    // Out of quota -> empty chair with "back at 17:45" note
-    expect(screen.getByTestId("desk-m-grok")).toHaveAttribute("data-seated", "false")
-    expect(screen.getByTestId("empty-chair-m-grok")).toBeInTheDocument()
-    expect(screen.getByTestId("quota-note-m-grok")).toHaveTextContent("back at 17:45")
+    // Out of quota -> the avatar stays, dimmed; the reset note is said once, in the badge under the name
+    expect(screen.getByTestId("desk-m-grok")).toHaveAttribute("data-seated", "true")
+    expect(screen.queryByTestId("empty-chair-m-grok")).not.toBeInTheDocument()
+    expect(screen.getByTestId("desk-avatar-m-grok")).toBeInTheDocument()
+    expect(screen.getByTestId("dimmed-avatar-m-grok")).toHaveAttribute("opacity", "0.55")
+    expect(screen.queryByTestId("quota-note-m-grok")).not.toBeInTheDocument()
+    expect(screen.getAllByText(/back at 17:45/)).toHaveLength(1)
     expect(screen.getByTestId("quota-tag-m-grok")).toHaveTextContent("back at 17:45")
 
     // Waiting for approval -> raised arm + floating approval card

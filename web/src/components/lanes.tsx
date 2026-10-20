@@ -5,6 +5,7 @@ import { api } from "../api/client"
 import { cx } from "../lib/cx"
 import { compactTokens, displayPct, formatCostEstimate, formatCountdown, formatTokens, sparklinePath } from "../lib/lane-format"
 import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
+import { runsTodayOf } from "../lib/lanes"
 import { formatAge } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
@@ -217,7 +218,7 @@ export function LaneCardView({
         </div>
         <div>
           <dt className="text-[11px] uppercase tracking-wide text-faint">Runs today</dt>
-          <dd className="font-mono text-[12px] tabular-nums text-ink">{lane.runs_today}</dd>
+          <dd className="font-mono text-[12px] tabular-nums text-ink">{runsTodayOf(lane, now) ?? "-"}</dd>
         </div>
         <div>
           <dt className="text-[11px] uppercase tracking-wide text-faint">Tokens last hour</dt>

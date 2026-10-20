@@ -156,18 +156,25 @@ export function OfficeScene({
     return list
   }, [lanesProp, desks])
 
-  const room = useMemo(() => layoutRoom(desks, { departments, compact }), [desks, departments, compact])
+  // The room is laid out for the box it is drawn in, rounded to a tenth so a
+  // window drag does not re-lay it out at every pixel.
+  const roomRef = useRef<HTMLDivElement>(null)
+  const [measured, setMeasured] = useState<number | null>(null)
+  const layoutAspect = measured === null ? undefined : Math.max(0.2, Math.round(measured * 10) / 10)
+  const room = useMemo(
+    () => layoutRoom(desks, { departments, compact, aspect: layoutAspect }),
+    [desks, departments, compact, layoutAspect],
+  )
   const areas = useMemo(() => roomAreas(room), [room])
   const empty = desks.length === 0
 
   // The window onto the room. Its aspect follows the box the room is drawn in.
-  const roomRef = useRef<HTMLDivElement>(null)
-  const [aspect, setAspect] = useState(room.width / room.height)
+  const aspect = measured ?? room.width / room.height
   useEffect(() => {
     const el = roomRef.current
     if (!el || typeof ResizeObserver === "undefined") return
     const measure = () => {
-      if (el.clientWidth > 0 && el.clientHeight > 0) setAspect(el.clientWidth / el.clientHeight)
+      if (el.clientWidth > 0 && el.clientHeight > 0) setMeasured(el.clientWidth / el.clientHeight)
     }
     measure()
     const observer = new ResizeObserver(measure)

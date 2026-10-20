@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useSyncExternalStore } from "react"
 import { identityOf } from "../../lib/avatar"
 import { plainPreview } from "../../lib/inbox"
+import { runRequestOf } from "../../lib/request"
 import { useTheme, type ThemeChoice } from "../../lib/theme"
 import { formatElapsed } from "../../lib/time"
 import { qk } from "../../state/keys"
@@ -71,6 +72,8 @@ export interface DeskInfo {
   doneRecently?: boolean | undefined
   currentRun: Run | null
   runTitle: string | undefined
+  // The request behind the active run, whole, for the line under the name and the hover title.
+  runRequest?: string | undefined
   pendingApproval: Approval | null
   approvalChannelId: ID | undefined
   elapsedText: string | undefined
@@ -221,6 +224,9 @@ export function formatResetTime(resetsAt: string | undefined): string | undefine
   return `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`
 }
 
+
+export { runRequestOf }
+
 export function formatRunTitle(body: string | undefined, maxWords = 6, maxChars = 38): string | undefined {
   if (!body) return undefined
   // Strip leading @mention or /lane <cli/name> override so the task words come first.
@@ -318,6 +324,7 @@ export function deriveMemberDesk({
     doneRecently,
     currentRun,
     runTitle,
+    runRequest: runRequestOf(triggerBody),
     pendingApproval,
     approvalChannelId,
     elapsedText,

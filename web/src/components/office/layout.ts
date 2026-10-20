@@ -124,6 +124,8 @@ export interface RoomLayout {
 export interface LayoutRoomOptions {
   departments?: readonly Department[] | undefined
   compact?: boolean | undefined
+  // Width over height of the box the room is drawn in. Without it the room is ROOM_W wide.
+  aspect?: number | undefined
 }
 
 function podHeight(count: number): number {
@@ -179,9 +181,32 @@ function boxZone(spec: ZoneSpec, maxCols: number): ZoneBox {
   return { id: spec.id, label: spec.label, x: 0, y: 0, w: width, h: height, pods: placedPods, seats }
 }
 
+// The widths a wide room may take. Wider rooms put more zones on one row.
+const WIDE_ROOM_WIDTHS = [600, 800, 1000, ROOM_W, 1600, 2000, 2400]
+
+// Lays the room out in the width whose drawing is largest in a container of the
+// given aspect (width over height): more columns on wide screens, one on phones.
 export function layoutRoom(desks: DeskInfo[], options?: LayoutRoomOptions): RoomLayout {
   const compact = Boolean(options?.compact)
-  const roomWidth = compact ? COMPACT_ROOM_W : ROOM_W
+  const aspect = options?.aspect
+  if (compact || !aspect || !Number.isFinite(aspect) || aspect <= 0) return layoutRoomAt(desks, options, compact ? COMPACT_ROOM_W : ROOM_W)
+  let best: RoomLayout | null = null
+  let bestScale = 0
+  for (const width of WIDE_ROOM_WIDTHS) {
+    const room = layoutRoomAt(desks, options, width)
+    if (room.zones.some((zone) => zone.x + zone.w > width - MARGIN + 0.5)) continue
+    // The scale at which the room fits the container: the tighter axis wins.
+    const scale = Math.min(aspect / room.width, 1 / room.height)
+    if (scale > bestScale * 1.0001) {
+      best = room
+      bestScale = scale
+    }
+  }
+  return best ?? layoutRoomAt(desks, options, ROOM_W)
+}
+
+function layoutRoomAt(desks: DeskInfo[], options: LayoutRoomOptions | undefined, roomWidth: number): RoomLayout {
+  const compact = Boolean(options?.compact)
   const margin = compact ? COMPACT_MARGIN : MARGIN
   const specs = zonesOf(desks, options?.departments)
   const maxCols = compact ? 1 : specs.length === 1 ? 3 : 2
@@ -268,7 +293,7 @@ const BOARD_PAD = 8
 const NOTE_W = 84
 const NOTE_H = 32
 const NOTE_GAP = 6
-const BAR_W = 38
+const BAR_W = 52
 const BAR_H = 26
 const BAR_GAP = 6
 const BOARD_GAP = 14

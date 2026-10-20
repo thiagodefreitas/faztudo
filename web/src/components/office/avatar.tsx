@@ -189,7 +189,8 @@ export function derive2DCharacterView(
     identity,
     pose,
     facing,
-    seated: pose.seated,
+    // An agent out of quota keeps its seat and its face; the desk dims it.
+    seated: pose.seated || pose.pose === "out_of_quota",
     headCenter: { x: 60, y: baseHeadY + headOffsetY },
     torsoRect: { x: 45, y: torsoY, w: 30, h: 15 },
     leftShoulder: { x: 46, y: shoulderY },

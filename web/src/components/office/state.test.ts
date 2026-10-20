@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Approval, Department, Lane, Member, Run } from "../../types"
 import { derive2DCharacterView, deriveLaneMeterBars, deriveTaskBoardNotes } from "./avatar"
+import { runLineOf } from "./desk"
 import { layoutRoom, layoutWallFixtures } from "./layout"
 import {
   deriveMemberDesk,
@@ -131,6 +132,18 @@ describe("deriveMemberDesk", () => {
     expect(desk.elapsedText).toBe("1m 25s")
     expect(desk.currentRun?.id).toBe(running.id)
     expect(desk.runTitle).toBe("Refactor the office layout and add...")
+    expect(desk.runRequest).toBe("Refactor the office layout and add tests for pods")
+  })
+
+  it("builds the run line from the request: elapsed first, request cut at 48 characters", () => {
+    expect(runLineOf("Fix the lane strip", "2m 05s")).toBe("2m - Fix the lane strip")
+    expect(runLineOf("Fix the lane strip", "45s")).toBe("45s - Fix the lane strip")
+    expect(runLineOf(undefined, "2m")).toBeUndefined()
+    const long = "Refactor the office layout and add tests for pods and rooms and the zoom controls"
+    const line = runLineOf(long, "1h 3m") ?? ""
+    expect(line.startsWith("1h - Refactor the office")).toBe(true)
+    expect(line.endsWith("...")).toBe(true)
+    expect(line.length).toBeLessThan(long.length)
   })
 
   it("strips leading mentions and lane commands in formatRunTitle", () => {
@@ -429,7 +442,8 @@ describe("derive2DCharacterView and layoutWallFixtures", () => {
       now,
     })
     const quotaView = derive2DCharacterView(quotaDesk)
-    expect(quotaView.seated).toBe(false)
+    expect(quotaView.seated).toBe(true)
+    expect(quotaView.pose.seated).toBe(false)
     expect(quotaView.pose.quotaNote).toBe("back at 16:20")
 
     // Busy for persona -> monitor shows persona badge motif

@@ -124,6 +124,20 @@ function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
 }
 
+export const RUN_LINE_CHARS = 48
+// Only this much of the request fits under a 120 unit desk without touching its neighbors.
+const RUN_LINE_SHOWN = 26
+
+// "2m - Redesign the 2D floor..." under the name of a desk with an active run.
+// The request is cut at RUN_LINE_CHARS; the drawn line is cut further to fit.
+export function runLineOf(request: string | undefined, elapsedText: string | undefined): string | undefined {
+  if (!request) return undefined
+  const cut = clip(request, RUN_LINE_CHARS)
+  const shown = clip(cut, RUN_LINE_SHOWN)
+  const elapsed = elapsedText?.split(" ")[0]
+  return elapsed ? `${elapsed} - ${shown}` : shown
+}
+
 const SCREEN_STROKE: Partial<Record<DeskState, string>> = {
   waiting_approval: "var(--color-warn)",
   failed: "var(--color-danger)",
@@ -329,12 +343,10 @@ function DeskChair2D({
   faceUp,
   empty,
   memberId,
-  quotaNote,
 }: {
   faceUp: boolean
   empty: boolean
   memberId: string
-  quotaNote: string | null
 }) {
   const backY = faceUp ? 54 : 3
   const seatY = faceUp ? 45 : 20
@@ -364,31 +376,6 @@ function DeskChair2D({
         stroke="var(--color-line)"
         strokeWidth="1.2"
       />
-      {empty && quotaNote && (
-        <g data-testid={`quota-note-${memberId}`}>
-          <rect
-            x="24"
-            y={faceUp ? "52" : "8"}
-            width="72"
-            height="14"
-            rx="5"
-            fill="var(--color-surface)"
-            stroke="var(--color-danger)"
-            strokeWidth="1.1"
-          />
-          <text
-            x="60"
-            y={faceUp ? "61.5" : "17.5"}
-            textAnchor="middle"
-            fontSize="7.5"
-            fontFamily="monospace"
-            fontWeight="600"
-            fill="var(--color-danger)"
-          >
-            {quotaNote}
-          </text>
-        </g>
-      )}
     </g>
   )
 }
@@ -643,7 +630,27 @@ export function RoomDesk({
     : state === "working" && elapsedText
       ? `${member.display_name} - working (${elapsedText})`
       : `${member.display_name} - ${stateLabel}`
-  const hoverTitle = runTitle ? `${baseHover}: ${runTitle}` : baseHover
+  const request = desk.runRequest ?? runTitle
+  const hoverTitle = request ? `${baseHover}: ${request}` : baseHover
+  const activeRun = state === "working" || state === "queued" || state === "waiting_approval"
+  const runLine = activeRun && desk.currentRun ? runLineOf(request, elapsedText) : undefined
+
+  // An exhausted agent keeps its face so the team stays recognizable; it is dimmed and greyed.
+  const character = (
+    <g
+      data-testid={dimmed ? `dimmed-avatar-${member.id}` : undefined}
+      opacity={dimmed ? 0.55 : 1}
+      style={dimmed ? { filter: "grayscale(0.8)" } : undefined}
+    >
+      <SeatedCharacter2D
+        view={view}
+        memberId={member.id}
+        hue={hue}
+        busyForHandle={busyFor?.handle}
+        glanceDelay={glanceDelay}
+      />
+    </g>
+  )
 
   function handleApprovalClick(event: MouseEvent<SVGGElement>) {
     event.stopPropagation()
@@ -858,39 +865,13 @@ export function RoomDesk({
           {faceUp ? (
             <>
               {deskElement}
-              <DeskChair2D
-                faceUp={faceUp}
-                empty={!view.seated}
-                memberId={member.id}
-                quotaNote={pose.quotaNote}
-              />
-              {view.seated && (
-                <SeatedCharacter2D
-                  view={view}
-                  memberId={member.id}
-                  hue={hue}
-                  busyForHandle={busyFor?.handle}
-                  glanceDelay={glanceDelay}
-                />
-              )}
+              <DeskChair2D faceUp={faceUp} empty={!view.seated} memberId={member.id} />
+              {view.seated && character}
             </>
           ) : (
             <>
-              <DeskChair2D
-                faceUp={faceUp}
-                empty={!view.seated}
-                memberId={member.id}
-                quotaNote={pose.quotaNote}
-              />
-              {view.seated && (
-                <SeatedCharacter2D
-                  view={view}
-                  memberId={member.id}
-                  hue={hue}
-                  busyForHandle={busyFor?.handle}
-                  glanceDelay={glanceDelay}
-                />
-              )}
+              <DeskChair2D faceUp={faceUp} empty={!view.seated} memberId={member.id} />
+              {view.seated && character}
               {deskElement}
             </>
           )}
@@ -996,32 +977,25 @@ export function RoomDesk({
             </g>
           )}
 
-          {runTitle && (
-            <g
-              data-testid={`run-title-${member.id}`}
-              className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
-            >
-              <rect
-                x="4"
-                y="90"
-                width="112"
-                height="16"
-                rx="6"
-                fill="var(--color-surface)"
-                stroke="var(--color-line)"
-              />
-              <text x="60" y="101" textAnchor="middle" fontSize="8.5" fill="var(--color-muted)">
-                {clip(runTitle, 24)}
-              </text>
-            </g>
-          )}
         </g>
 
         <text x="60" y="86" textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--color-ink)">
           {clip(member.display_name, 16)}
         </text>
+        {runLine && !dimmed && (
+          <text
+            data-testid={`run-line-${member.id}`}
+            x="60"
+            y="99"
+            textAnchor="middle"
+            fontSize="8"
+            fill="var(--color-muted)"
+          >
+            {runLine}
+          </text>
+        )}
         {dimmed && (
-          <g data-testid={`quota-tag-${member.id}`} className={runTitle ? "group-hover:opacity-0" : undefined}>
+          <g data-testid={`quota-tag-${member.id}`}>
             <rect x="24" y="91" width="72" height="13" rx="6.5" fill="var(--color-danger-soft)" stroke="var(--color-danger)" strokeOpacity="0.5" />
             <text x="60" y="100.5" textAnchor="middle" fontSize="8" fontWeight="600" fill="var(--color-danger)">
               {pose.quotaNote ?? "out of quota"}
