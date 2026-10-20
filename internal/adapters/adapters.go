@@ -22,21 +22,19 @@ type Request struct {
 	MCP       *MCP
 	// AllowedTools lists the tools a claude run may use without asking.
 	// Nil means the adapter default: DefaultClaudeWriteTools for write runs,
-	// nothing extra for read runs. The faztudo MCP tools are always added
+	// ReadRunTools for read runs. The faztudo MCP tools are always added
 	// when MCP is set.
 	AllowedTools []string
-	// Coordinator marks a read run that may hand work on with the faztudo
-	// delegate tool (the Chief of Staff or a department lead).
-	Coordinator bool
 }
 
-// CoordinatorReadTools are what a coordinating claude read run may use besides
-// the faztudo MCP tools. Such a run is not in plan mode, which makes the model
-// write a plan instead of calling delegate; it stays read-only because claude
-// -p refuses every tool that is not allowed, and the edit tools are denied.
-var CoordinatorReadTools = []string{"Read", "Grep", "Glob", "LS"}
+// ReadRunTools are what a claude read run may use besides the faztudo MCP
+// tools. Read runs are not in plan mode: it makes the model write a plan
+// file under ~/.claude/plans and answer with the plan instead of calling
+// delegate. They stay read-only because claude -p refuses every tool that
+// is not allowed, and the edit tools are denied.
+var ReadRunTools = []string{"Read", "Grep", "Glob", "LS"}
 
-var coordinatorDeniedTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"}
+var readRunDeniedTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"}
 
 // DefaultClaudeWriteTools is what a claude write run may execute when the
 // lane sets no allowed_tools: the usual checks and read-only git and gh
@@ -121,16 +119,14 @@ func (Claude) Command(r Request) (Cmd, error) {
 	if r.Effort != "" {
 		args = append(args, "--effort", r.Effort)
 	}
-	permission := "plan"
+	permission := "default"
 	if r.Mode == domain.RunWrite {
 		permission = "acceptEdits"
-	} else if r.coordinating() {
-		permission = "default"
 	}
 	args = append(args, "--permission-mode", permission)
-	if r.coordinating() {
+	if r.Mode == domain.RunRead {
 		args = append(args, "--disallowedTools")
-		args = append(args, coordinatorDeniedTools...)
+		args = append(args, readRunDeniedTools...)
 	}
 	for _, dir := range r.ExtraDirs {
 		args = append(args, "--add-dir", dir)
@@ -142,12 +138,6 @@ func (Claude) Command(r Request) (Cmd, error) {
 	return claudeMCP(r, args)
 }
 
-// coordinating reports whether a read run gets the coordinator setup. It
-// needs the MCP server, since delegating is the reason for it.
-func (r Request) coordinating() bool {
-	return r.Mode == domain.RunRead && r.Coordinator && r.MCP != nil
-}
-
 // claudeTools builds the --allowedTools list: the lane's list or the write
 // default, then the faztudo MCP tools when an MCP config is passed.
 func claudeTools(r Request) []string {
@@ -157,8 +147,8 @@ func claudeTools(r Request) []string {
 		tools = append(tools, r.AllowedTools...)
 	case r.Mode == domain.RunWrite:
 		tools = append(tools, DefaultClaudeWriteTools...)
-	case r.coordinating():
-		tools = append(tools, CoordinatorReadTools...)
+	case r.Mode == domain.RunRead:
+		tools = append(tools, ReadRunTools...)
 	}
 	if r.MCP != nil {
 		tools = append(tools, allowedMCPTools...)

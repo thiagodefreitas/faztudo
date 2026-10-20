@@ -1014,12 +1014,10 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if mode == domain.RunWrite {
 		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
 	}
-	coordinator := false
 	if mcpReachable && mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
 		prompt += "\n\n" + mcpPromptNote
 		if note := a.delegationNote(ctx, agent, m); note != "" {
 			prompt += "\n\n" + note
-			coordinator = true
 		}
 	}
 	timeout, err := time.ParseDuration(a.Config.Runs.DefaultTimeout)
@@ -1041,7 +1039,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			return err
 		}
 	}
-	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout, AllowedTools: a.allowedTools(lane.ID), Coordinator: coordinator}
+	req := adapters.Request{Prompt: prompt, Mode: mode, Model: lane.Model, Workdir: workdir, Timeout: timeout, AllowedTools: a.allowedTools(lane.ID)}
 	if mcpReachable && mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
 		token, issueErr := a.MCP.Issue(run.ID, agent.ID, channel.ID)
 		if issueErr != nil {

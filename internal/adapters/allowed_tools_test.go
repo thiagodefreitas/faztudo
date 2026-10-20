@@ -36,9 +36,9 @@ func TestClaudeAllowedTools(t *testing.T) {
 		{"write default", Request{Mode: domain.RunWrite}, DefaultClaudeWriteTools},
 		{"write custom", Request{Mode: domain.RunWrite, AllowedTools: []string{"Bash(make:*)"}}, []string{"Bash(make:*)"}},
 		{"write empty list allows none", Request{Mode: domain.RunWrite, AllowedTools: []string{}}, nil},
-		{"read default", Request{Mode: domain.RunRead}, nil},
+		{"read default", Request{Mode: domain.RunRead}, ReadRunTools},
 		{"read custom", Request{Mode: domain.RunRead, AllowedTools: []string{"Read"}}, []string{"Read"}},
-		{"read with mcp", Request{Mode: domain.RunRead, MCP: mcp}, allowedMCPTools},
+		{"read with mcp", Request{Mode: domain.RunRead, MCP: mcp}, append(append([]string{}, ReadRunTools...), allowedMCPTools...)},
 		{"write default with mcp", Request{Mode: domain.RunWrite, MCP: mcp}, append(append([]string{}, DefaultClaudeWriteTools...), allowedMCPTools...)},
 		{"write custom with mcp", Request{Mode: domain.RunWrite, MCP: mcp, AllowedTools: []string{"Bash(make:*)"}}, append([]string{"Bash(make:*)"}, allowedMCPTools...)},
 	} {
@@ -100,30 +100,31 @@ func TestAgyQuotaOnExitZero(t *testing.T) {
 	}
 }
 
-// A coordinating read run leaves plan mode so it can call delegate, and stays
-// read-only by allow-list: only read tools and faztudo tools, edits and Bash
-// denied.
-func TestClaudeCoordinatorReadRun(t *testing.T) {
+// A claude read run is never in plan mode (it writes plan files and will not
+// call delegate) and stays read-only by allow-list: only read tools and
+// faztudo tools, edits and Bash denied.
+func TestClaudeReadRunIsReadOnlyWithoutPlanMode(t *testing.T) {
 	mcp := &MCP{URL: "http://127.0.0.1:1/mcp", Token: "t", Dir: t.TempDir()}
-	cmd, err := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, MCP: mcp, Coordinator: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := strings.Join(cmd.Args, " ")
-	for _, want := range []string{"--permission-mode default", "--disallowedTools Write Edit MultiEdit NotebookEdit Bash", "Read Grep Glob LS", "mcp__faztudo__delegate"} {
-		if !strings.Contains(args, want) {
-			t.Fatalf("missing %q in %s", want, args)
+	for _, m := range []*MCP{mcp, nil} {
+		cmd, err := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, MCP: m})
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := strings.Join(cmd.Args, " ")
+		for _, want := range []string{"--permission-mode default", "--disallowedTools Write Edit MultiEdit NotebookEdit Bash", "--allowedTools Read Grep Glob LS"} {
+			if !strings.Contains(args, want) {
+				t.Fatalf("missing %q in %s", want, args)
+			}
+		}
+		if strings.Contains(args, "plan") {
+			t.Fatalf("read run in plan mode: %s", args)
+		}
+		if (m != nil) != strings.Contains(args, "mcp__faztudo__delegate") {
+			t.Fatalf("faztudo tools with MCP %v: %s", m != nil, args)
 		}
 	}
-	plain, err := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, MCP: mcp})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if args := strings.Join(plain.Args, " "); !strings.Contains(args, "--permission-mode plan") || strings.Contains(args, "disallowedTools") {
-		t.Fatalf("plain read run: %s", args)
-	}
-	noMCP, _ := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunRead, Workdir: t.TempDir(), Timeout: time.Second, Coordinator: true})
-	if !strings.Contains(strings.Join(noMCP.Args, " "), "--permission-mode plan") {
-		t.Fatal("coordinator without MCP left plan mode")
+	write, _ := Claude{}.Command(Request{Prompt: "p", Mode: domain.RunWrite, Workdir: t.TempDir(), Timeout: time.Second})
+	if args := strings.Join(write.Args, " "); !strings.Contains(args, "--permission-mode acceptEdits") || strings.Contains(args, "disallowedTools") {
+		t.Fatalf("write run: %s", args)
 	}
 }

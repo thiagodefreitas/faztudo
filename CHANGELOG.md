@@ -45,9 +45,10 @@ All notable changes are listed here. The format follows
   so it applies with `git apply` as downloaded.
 - The Lanes page measures Codex again when its runs are sandboxed: a run's
   rate limit readings are kept before its private Codex home is deleted.
-- The Chief of Staff and department leads on Claude can delegate: their read
-  runs left plan mode, where the model wrote a plan instead of calling the
-  delegate tool, and stay read-only through an allow-list.
+- Claude read runs no longer use plan mode, where the model wrote a plan
+  file under `~/.claude/plans` and the Chief of Staff and department leads
+  answered with a plan instead of calling the delegate tool. They stay
+  read-only through an allow-list.
 - A missing agent CLI fails the run with "executable file not found" again,
   instead of exit 127 or a bare "exit -1".
 - Agent runs survive a restart of faztudo. A run still going finishes

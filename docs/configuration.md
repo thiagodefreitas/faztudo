@@ -387,13 +387,13 @@ the nine faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
 `read_thread`, `search_messages`, `list_handoffs`); that is not
 configurable.
 
-Claude read runs use plan mode, except a run of the Chief of Staff or a
-department lead that may delegate. In plan mode the model writes a plan
-instead of calling `delegate`, so such a run uses the default permission
-mode with `Read`, `Grep`, `Glob` and `LS` allowed (or the lane's
-`allowed_tools`), the faztudo tools, and `Write`, `Edit`, `MultiEdit`,
-`NotebookEdit` and `Bash` denied. `claude -p` refuses any tool that is not
-allowed, so the run stays read-only.
+Claude read runs do not use plan mode, which makes the model write a plan
+file under `~/.claude/plans` and answer with the plan instead of calling
+`delegate`. They use the default permission mode with `Read`, `Grep`,
+`Glob` and `LS` allowed (or the lane's `allowed_tools`), the faztudo tools,
+and `Write`, `Edit`, `MultiEdit`, `NotebookEdit` and `Bash` denied.
+`claude -p` refuses any tool that is not allowed, so the run stays
+read-only.
 
 The last three only read. `read_thread` returns a thread (up to 100
 messages, oldest first), `search_messages` finds message text (up to 30
