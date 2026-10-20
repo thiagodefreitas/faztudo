@@ -12,6 +12,19 @@ function world() {
 }
 
 describe("mock world", () => {
+  it("serves prompt context for a run", () => {
+    const { world: mock } = world()
+    const posted = mock.postMessage(IDS.dev, { body: "@coder explain café" })
+    if (!posted.ok) throw new Error("post failed")
+    const runs = mock.getRuns(IDS.dev)
+    if (!runs.ok) throw new Error("runs unavailable")
+    const run = runs.data.find((item) => item.trigger_message_id === posted.data.id)
+    if (!run) throw new Error("run missing")
+    const response = handleMock(mock, "GET", new URL(`http://localhost/api/v1/runs/${run.id}/prompt`))
+    expect(response.status).toBe(200)
+    expect(JSON.stringify(response.body)).toContain("explain café")
+  })
+
   it("uses synthetic ulids", () => {
     for (const id of Object.values(IDS)) expect(isUlid(id)).toBe(true)
   })

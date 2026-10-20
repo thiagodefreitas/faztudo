@@ -27,6 +27,7 @@ describe("api client", () => {
     await api.postMessage("ch-1", { body: "hi @coder", idempotency_key: "key-1" })
     await api.runs({ channel_id: "ch-1", state: "running" })
     await api.output("run-1", 4)
+    await api.prompt("run-1")
     await api.diff("run-1")
     await api.retryRun("run-1", { lane_id: "claude/opus" })
     await api.approvals("pending")
@@ -41,6 +42,7 @@ describe("api client", () => {
       "POST /api/v1/channels/ch-1/messages",
       "GET /api/v1/runs?channel_id=ch-1&state=running",
       "GET /api/v1/runs/run-1/output?after=4",
+      "GET /api/v1/runs/run-1/prompt",
       "GET /api/v1/runs/run-1/diff",
       "POST /api/v1/runs/run-1/retry",
       "GET /api/v1/approvals?state=pending",
@@ -51,7 +53,7 @@ describe("api client", () => {
     ])
     expect(calls[2]?.body).toEqual({ body: "hi @coder", idempotency_key: "key-1" })
     expect(calls.every((call) => call.credentials === "same-origin")).toBe(true)
-    expect(calls[6]?.body).toEqual({ lane_id: "claude/opus" })
+    expect(calls[7]?.body).toEqual({ lane_id: "claude/opus" })
   })
 
   it("reads the error envelope", async () => {

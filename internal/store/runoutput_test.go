@@ -89,7 +89,7 @@ func TestRunOutputIndexIsBackfilledOnOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	fillOutput(t, s, 2000, 10)
-	if _, err := s.db.Exec("DROP INDEX events_run_output; DELETE FROM schema_version WHERE version=10"); err != nil {
+	if _, err := s.db.Exec("DROP INDEX events_run_output; DELETE FROM schema_version WHERE version>=10"); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()

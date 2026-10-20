@@ -21,6 +21,7 @@ import type {
   MessageCreate,
   Org,
   OutputPage,
+  RunPrompt,
   PairBody,
   PairingTicket,
   Pin,
@@ -77,6 +78,7 @@ export interface Api {
   runs: (query?: { channel_id?: ID; state?: RunState }) => Promise<Run[]>
   run: (id: ID) => Promise<Run>
   output: (id: ID, after?: number) => Promise<OutputPage>
+  prompt: (id: ID) => Promise<RunPrompt>
   diff: (id: ID) => Promise<DiffPage>
   /** The server answers with an acknowledgement; the run itself arrives through the stream. */
   cancelRun: (id: ID) => Promise<{ ok: boolean }>
@@ -174,6 +176,7 @@ export function createApi(options: ApiOptions = {}): Api {
     runs: (params = {}) => request("GET", query("/runs", params)),
     run: (id) => request("GET", `/runs/${encodeURIComponent(id)}`),
     output: (id, after) => request("GET", query(`/runs/${encodeURIComponent(id)}/output`, { after })),
+    prompt: (id) => request("GET", `/runs/${encodeURIComponent(id)}/prompt`),
     diff: (id) => request("GET", `/runs/${encodeURIComponent(id)}/diff`),
     cancelRun: (id) => request("POST", `/runs/${encodeURIComponent(id)}/cancel`),
     retryRun: (id, body = {}) => request("POST", `/runs/${encodeURIComponent(id)}/retry`, body),

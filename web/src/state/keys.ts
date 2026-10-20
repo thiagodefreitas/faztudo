@@ -7,6 +7,7 @@ export const qk = {
   messagePins: (channelId: string) => ["pins", channelId] as const,
   runs: ["runs"] as const,
   output: (id: string) => ["output", id] as const,
+  prompt: (id: string) => ["prompt", id] as const,
   diff: (id: string) => ["diff", id] as const,
   approvals: ["approvals"] as const,
   lanes: ["lanes"] as const,

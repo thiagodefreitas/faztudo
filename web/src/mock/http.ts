@@ -172,6 +172,12 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     return send(world.getOutput(id, num(url.searchParams.get("after")) ?? 0))
   }
 
+  if (parts[0] === "runs" && parts[2] === "prompt" && method === "GET") {
+    const id = parts[1]
+    if (!id) return send(err(404, "not_found", "run not found"))
+    return send(world.getPrompt(id))
+  }
+
   if (parts[0] === "runs" && parts[2] === "diff" && method === "GET") {
     const id = parts[1]
     if (!id) return send(err(404, "not_found", "run not found"))

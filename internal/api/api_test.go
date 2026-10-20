@@ -201,6 +201,7 @@ func TestEndpointSurface(t *testing.T) {
 		{"GET", "/api/v1/channels/" + ch.ID + "/messages?limit=1", "", 200}, {"GET", "/api/v1/messages/" + msg.ID + "/thread", "", 200},
 		{"POST", "/api/v1/channels/" + ch.ID + "/read", `{"event_id":"` + evts[2].ID + `"}`, 200},
 		{"GET", "/api/v1/runs", "", 200}, {"GET", "/api/v1/runs/" + run.ID, "", 200}, {"GET", "/api/v1/runs/" + run.ID + "/output", "", 200},
+		{"GET", "/api/v1/runs/" + run.ID + "/prompt", "", 404},
 		{"GET", "/api/v1/runs/" + run.ID + "/diff", "", 409}, {"POST", "/api/v1/runs/" + run.ID + "/cancel", "{}", 409}, {"POST", "/api/v1/runs/" + run.ID + "/retry", "{}", 409},
 		{"GET", "/api/v1/approvals?state=pending", "", 200}, {"POST", "/api/v1/approvals/" + approval.ID + "/resolve", `{"option":"yes"}`, 200},
 		{"GET", "/api/v1/lanes", "", 200}, {"PATCH", "/api/v1/lanes/codex/default", `{"capacity":2}`, 200}, {"POST", "/api/v1/lanes/codex/default/probe", "{}", 409},

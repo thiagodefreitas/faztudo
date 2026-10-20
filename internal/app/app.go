@@ -909,7 +909,7 @@ func (a *App) laneFailed(run domain.Run) bool {
 // attempt is one run of agent on m. It sets *failed to the id of the failed
 // run when the caller should retry on the next lane; retryOf is the failed
 // run when this attempt is that retry.
-func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string, compare bool, promptOverride string) (retErr error) {
+func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member, override, retryOf string, failed *string, compare bool, promptOverride string, overrideSections ...[]events.PromptSection) (retErr error) {
 	explicit := override != "" // the human chose the lane for this message
 	if agent.Agent == nil {
 		return errors.New("agent has no lane chain")
@@ -1021,23 +1021,69 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	runStarted := time.Now().UTC()
 	a.Registry.RecordRun(lane.ID)
 	prompt := promptOverride
+	var sections []events.PromptSection
 	if prompt == "" {
-		prompt, err = a.promptForRun(ctx, m, queuedRun.ID, mode)
+		prompt, sections, err = a.promptPartsForRun(ctx, m, queuedRun.ID, mode)
 		if err != nil {
 			return err
 		}
+	} else {
+		if len(overrideSections) > 0 {
+			for _, section := range overrideSections[0] {
+				section.Spans = append([]events.PromptSpan(nil), section.Spans...)
+				sections = append(sections, section)
+			}
+		} else {
+			sections = []events.PromptSection{{Name: "request", Bytes: len(prompt), Spans: []events.PromptSpan{{Offset: 0, Bytes: len(prompt)}}}}
+		}
 	}
-	prompt = withInstructions(a.instructions(agent.Handle), prompt)
+	if instruction := a.instructions(agent.Handle); instruction != "" {
+		basePrompt := prompt
+		prompt = withInstructions(instruction, prompt)
+		prefix := prompt[:len(prompt)-len(basePrompt)]
+		for i := range sections {
+			for j := range sections[i].Spans {
+				sections[i].Spans[j].Offset += len(prefix)
+			}
+		}
+		foundInstructions := false
+		for i := range sections {
+			if sections[i].Name == "instructions" {
+				sections[i].Bytes += len(prefix)
+				sections[i].Spans = append([]events.PromptSpan{{Offset: 0, Bytes: len(prefix)}}, sections[i].Spans...)
+				foundInstructions = true
+				break
+			}
+		}
+		if !foundInstructions {
+			sections = append(sections, events.PromptSection{Name: "instructions", Bytes: len(prefix), Spans: []events.PromptSpan{{Offset: 0, Bytes: len(prefix)}}})
+		}
+	}
+	appendInstruction := func(value string) {
+		if value == "" {
+			return
+		}
+		span := events.PromptSpan{Offset: len(prompt), Bytes: len(value)}
+		prompt += value
+		for i := range sections {
+			if sections[i].Name == "instructions" {
+				sections[i].Bytes += len(value)
+				sections[i].Spans = append(sections[i].Spans, span)
+				return
+			}
+		}
+		sections = append(sections, events.PromptSection{Name: "instructions", Bytes: len(value), Spans: []events.PromptSpan{span}})
+	}
 	if extra := a.extraContext(m.ID); extra != "" {
-		prompt += "\n\nFacts for this request:\n" + extra
+		appendInstruction("\n\nFacts for this request:\n" + extra)
 	}
 	if mode == domain.RunWrite {
-		prompt += "\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body."
+		appendInstruction("\n\nDo not commit changes in the worktree.\nEnd your answer with a line \"COMMIT: <imperative subject under 72 characters>\", optionally followed by a short body.")
 	}
 	if mcpReachable && mcpCLI(lane.CLI) && a.MCP != nil && a.MCPBase != "" {
-		prompt += "\n\n" + mcpPromptNote
+		appendInstruction("\n\n" + mcpPromptNote)
 		if note := a.delegationNote(ctx, agent, m); note != "" {
-			prompt += "\n\n" + note
+			appendInstruction("\n\n" + note)
 		}
 	}
 	timeout, err := time.ParseDuration(a.Config.Runs.DefaultTimeout)
@@ -1068,6 +1114,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			defer a.MCP.RevokeRun(run.ID)
 			req.MCP = &adapters.MCP{URL: strings.TrimRight(a.MCPBase, "/") + "/mcp", Token: token, Dir: filepath.Join(a.Paths.RunsDir, run.ID)}
 		}
+	}
+	if err == nil {
+		_, err = a.Store.Append(ctx, events.Draft{Type: events.RunPrompt, Actor: events.System, ChannelID: channel.ID, Payload: events.RunPromptPayload{RunID: run.ID, Prompt: req.Prompt, Sections: sections}})
 	}
 	if err == nil {
 		if mode == domain.RunWrite {
@@ -1434,6 +1483,11 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 }
 
 func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, mode domain.RunMode) (string, error) {
+	prompt, _, err := a.promptPartsForRun(ctx, m, runID, mode)
+	return prompt, err
+}
+
+func (a *App) promptPartsForRun(ctx context.Context, m domain.Message, runID string, mode domain.RunMode) (string, []events.PromptSection, error) {
 	n := a.Config.Runs.ContextMessages
 	if n < 1 {
 		n = 1
@@ -1459,11 +1513,11 @@ func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, 
 	lock.Unlock()
 	messages, err := a.Store.Messages(ctx, m.ChannelID, "", n)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	members, err := a.Store.Members(ctx)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	handles := map[string]string{}
 	for _, member := range members {
@@ -1473,16 +1527,24 @@ func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, 
 	if m.CollectForRunID == "" {
 		working, err = a.workingPrompt(ctx, m.ChannelID, runID, mode, handles)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		pins, err = a.pinnedPrompt(ctx, m.ChannelID, handles)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 	var b strings.Builder
+	sections := []events.PromptSection{}
+	add := func(name, value string) {
+		if value == "" {
+			return
+		}
+		sections = append(sections, events.PromptSection{Name: name, Bytes: len(value), Spans: []events.PromptSpan{{Offset: b.Len(), Bytes: len(value)}}})
+		b.WriteString(value)
+	}
 	if summary.Text != "" {
-		fmt.Fprintf(&b, "Channel summary through %s (lane %s):\n%s\n\n", summary.ThroughMessageID, summary.LaneID, summary.Text)
+		add("summary", fmt.Sprintf("Channel summary through %s (lane %s). It is older context: when it disagrees with the recent messages or the repository, they win.\n%s\n\n", summary.ThroughMessageID, summary.LaneID, summary.Text))
 	}
 	if summary.ThroughMessageID != "" {
 		for i, msg := range messages {
@@ -1493,13 +1555,14 @@ func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, 
 		}
 	}
 	if working != "" {
-		b.WriteString(working)
+		add("working", working)
 	}
 	if pins != "" {
-		b.WriteString(pins)
+		add("pinned", pins)
 	}
 	messages = rolloverMessages(messages, summary.Text+pins, a.Config.Runs.ContextLimitTokens)
-	b.WriteString("Recent channel messages (oldest first):\n")
+	var transcript strings.Builder
+	transcript.WriteString("Recent channel messages (oldest first):\n")
 	for _, msg := range messages {
 		if msg.CollectForRunID != "" {
 			// A collect digest repeats answers that are already in the
@@ -1510,11 +1573,12 @@ func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, 
 		if msg.ID == m.ID {
 			body = m.Body
 		}
-		fmt.Fprintf(&b, "@%s: %s\n", handles[msg.AuthorID], body)
+		fmt.Fprintf(&transcript, "@%s: %s\n", handles[msg.AuthorID], body)
 	}
-	fmt.Fprintf(&b, "\nRequest:\n%s", m.Body)
-	b.WriteString("\n\nStart your answer with a summary of one or two plain sentences (no heading), then give the detail.")
-	return b.String(), nil
+	add("transcript", transcript.String())
+	add("request", fmt.Sprintf("\nRequest:\n%s", m.Body))
+	add("instructions", "\n\nStart your answer with a summary of one or two plain sentences (no heading), then give the detail.")
+	return b.String(), sections, nil
 }
 
 func (a *App) summaryLock(channelID string) *sync.Mutex {
@@ -1590,7 +1654,7 @@ func (a *App) refreshSummary(ctx context.Context, current domain.Message, previo
 		return previous, err
 	}
 	var input strings.Builder
-	input.WriteString("Summarize this channel for future agent runs in under 1800 characters. Preserve decisions, constraints, open tasks and named facts. Do not invent facts. Return only the summary.\n\n")
+	input.WriteString("Summarize this channel for future agent runs in under 1800 characters. Preserve decisions, constraints, open tasks and named facts. When a later message changes an earlier fact, keep only the current state, and drop tasks that were finished. Do not invent facts. Return only the summary.\n\n")
 	if previous.Text != "" {
 		input.WriteString("Previous summary:\n" + previous.Text + "\n\n")
 	}

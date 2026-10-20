@@ -27,7 +27,7 @@ export interface ChannelSearch {
   thread?: string;
   /** A message to scroll to, set by search results. */
   m?: string;
-  view?: "diff" | "timeline";
+  view?: "diff" | "timeline" | "context";
 }
 
 function validateSearch(search: Record<string, unknown>): ChannelSearch {
@@ -36,7 +36,7 @@ function validateSearch(search: Record<string, unknown>): ChannelSearch {
   if (typeof search.thread === "string" && search.thread)
     result.thread = search.thread;
   if (typeof search.m === "string" && search.m) result.m = search.m;
-  if (search.view === "diff" || search.view === "timeline")
+  if (search.view === "diff" || search.view === "timeline" || search.view === "context")
     result.view = search.view;
   return result;
 }

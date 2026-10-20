@@ -24,6 +24,7 @@ const (
 	RunCreated        Type = "run.created"
 	RunUpdated        Type = "run.updated"
 	RunOutput         Type = "run.output"
+	RunPrompt         Type = "run.prompt"
 	ApprovalRequested Type = "approval.requested"
 	ApprovalResolved  Type = "approval.resolved"
 	DepartmentUpdated Type = "department.updated"
@@ -120,6 +121,24 @@ type RunOutputPayload struct {
 	Seq    int    `json:"seq"`
 	Stream string `json:"stream"` // "stdout" or "stderr"
 	Text   string `json:"text"`
+}
+
+// PromptSpan locates a UTF-8 byte range in the exact prompt sent to the CLI.
+type PromptSpan struct {
+	Offset int `json:"offset"`
+	Bytes  int `json:"bytes"`
+}
+
+type PromptSection struct {
+	Name  string       `json:"name"`
+	Bytes int          `json:"bytes"`
+	Spans []PromptSpan `json:"spans"`
+}
+
+type RunPromptPayload struct {
+	RunID    string          `json:"run_id"`
+	Prompt   string          `json:"prompt"`
+	Sections []PromptSection `json:"sections"`
 }
 
 // LaneSwitchedPayload is the payload of a lane.switched event.

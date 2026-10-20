@@ -19,11 +19,13 @@ export function RunTimeline({
   channelId,
   onShowDiff,
   onShowLog,
+  onShowContext,
 }: {
   run: Run
   channelId: string
   onShowDiff: () => void
   onShowLog: () => void
+  onShowContext: () => void
 }) {
   const now = useNow()
   const runs = useRuns()
@@ -71,6 +73,9 @@ export function RunTimeline({
         )}
         <button type="button" onClick={onShowLog} className="min-h-8 font-medium text-accent hover:underline">
           Raw log
+        </button>
+        <button type="button" onClick={onShowContext} className="min-h-8 font-medium text-accent hover:underline">
+          Context
         </button>
       </p>
     </div>

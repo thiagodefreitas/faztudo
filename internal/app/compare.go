@@ -71,7 +71,7 @@ func (a *App) startCompare(ctx context.Context, m domain.Message, agent domain.M
 		}
 		return fmt.Errorf("@%s x2 needs two healthy lanes; found %d. %s. No run started", agent.Handle, count, strings.Join(reasons, "; "))
 	}
-	prompt, err := a.promptForRun(ctx, m, "", domain.RunWrite)
+	prompt, sections, err := a.promptPartsForRun(ctx, m, "", domain.RunWrite)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (a *App) startCompare(ctx context.Context, m domain.Message, agent domain.M
 			if a.compareDispatch != nil {
 				err = a.compareDispatch(context.Background(), m, agent, laneID)
 			} else {
-				err = a.attempt(context.Background(), m, agent, laneID, "", new(string), true, prompt)
+				err = a.attempt(context.Background(), m, agent, laneID, "", new(string), true, prompt, sections)
 			}
 			if err != nil {
 				a.notice(context.Background(), m.ChannelID, "error", fmt.Sprintf("x2 candidate on %s failed: %v", laneID, err))

@@ -278,6 +278,7 @@ export interface Lane {
   health_reason?: string
   windows: LaneWindow[]
   runs_today: number
+  runs_date?: string
   tokens_last_hour?: number
   cost_today_usd?: number
   alerted?: boolean
@@ -302,6 +303,23 @@ export interface RunOutputPayload extends OutputLine {
 
 export interface OutputPage {
   lines: OutputLine[]
+}
+
+export interface PromptSpan {
+  offset: number
+  bytes: number
+}
+
+export interface PromptSection {
+  name: string
+  bytes: number
+  spans: PromptSpan[]
+}
+
+export interface RunPrompt {
+  run_id: ID
+  prompt: string
+  sections: PromptSection[]
 }
 
 export interface DiffPage {

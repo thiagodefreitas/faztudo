@@ -24,6 +24,7 @@ import type {
   Org,
   OutputLine,
   OutputPage,
+  RunPrompt,
   PairBody,
   PairingTicket,
   Pin,
@@ -653,6 +654,25 @@ export class MockWorld {
     if (!Number.isFinite(after) || after < 0) return err(400, "bad_request", "after must be a line seq")
     const lines = (this.outputs.get(id) ?? []).filter((line) => line.seq > after)
     return ok({ lines: structuredClone(lines) })
+  }
+
+  getPrompt(id: ID): Result<RunPrompt> {
+    const run = this.runs.find((item) => item.id === id)
+    if (!run) return err(404, "not_found", "run not found")
+    const trigger = this.messages.find((item) => item.id === run.trigger_message_id)
+    const parts = [
+      { name: "transcript", text: "Recent channel messages (oldest first):\n" },
+      { name: "request", text: `\nRequest:\n${trigger?.body ?? "Mock request"}` },
+      { name: "instructions", text: "\n\nStart your answer with a summary of one or two plain sentences (no heading), then give the detail." },
+    ]
+    let offset = 0
+    const sections = parts.map((part) => {
+      const bytes = new TextEncoder().encode(part.text).length
+      const section = { name: part.name, bytes, spans: [{ offset, bytes }] }
+      offset += bytes
+      return section
+    })
+    return ok({ run_id: id, prompt: parts.map((part) => part.text).join(""), sections })
   }
 
   getDiff(id: ID): Result<DiffPage> {

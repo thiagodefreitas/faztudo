@@ -175,6 +175,7 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/runs", a.runs)
 	m.HandleFunc("GET /api/v1/runs/{id}", a.run)
 	m.HandleFunc("GET /api/v1/runs/{id}/output", a.output)
+	m.HandleFunc("GET /api/v1/runs/{id}/prompt", a.runPrompt)
 	m.HandleFunc("GET /api/v1/runs/{id}/diff", a.diff)
 	m.HandleFunc("POST /api/v1/runs/{id}/cancel", a.cancel)
 	m.HandleFunc("POST /api/v1/runs/{id}/retry", a.retry)
@@ -910,6 +911,19 @@ func (a *API) output(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, v)
+}
+func (a *API) runPrompt(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := a.Store.Run(r.Context(), id); err != nil {
+		failErr(w, err)
+		return
+	}
+	prompt, err := a.Store.RunPrompt(r.Context(), id)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	respond(w, 200, prompt)
 }
 func (a *API) diff(w http.ResponseWriter, r *http.Request) {
 	v, e := a.Store.Run(r.Context(), r.PathValue("id"))

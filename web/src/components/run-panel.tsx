@@ -7,6 +7,7 @@ import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { useOutput, useRuns } from "../state/queries"
 import { DiffView } from "./diff-view"
+import { RunContext } from "./run-context"
 import { RunTimeline } from "./run-timeline"
 
 function useReducedMotion(): boolean {
@@ -29,7 +30,7 @@ export function RunPanel({
 }: {
   channelId: string
   runId: string
-  view?: "diff" | "timeline"
+  view?: "diff" | "timeline" | "context"
 }) {
   const navigate = useNavigate()
   const reduced = useReducedMotion()
@@ -39,6 +40,12 @@ export function RunPanel({
     queryKey: qk.diff(runId),
     queryFn: () => api.diff(runId),
     enabled: view === "diff",
+    retry: false,
+  })
+  const prompt = useQuery({
+    queryKey: qk.prompt(runId),
+    queryFn: () => api.prompt(runId),
+    enabled: view === "context",
     retry: false,
   })
   const run = runs.data?.find((item) => item.id === runId)
@@ -59,7 +66,7 @@ export function RunPanel({
     })
   }
 
-  function show(next: "output" | "diff" | "timeline") {
+  function show(next: "output" | "diff" | "timeline" | "context") {
     void navigate({
       to: "/c/$channelId",
       params: { channelId },
@@ -94,6 +101,9 @@ export function RunPanel({
         <Tab pressed={view === undefined} onClick={() => show("output")}>
           Output
         </Tab>
+        <Tab pressed={view === "context"} onClick={() => show("context")}>
+          Context
+        </Tab>
         <Tab pressed={view === "diff"} onClick={() => show("diff")}>
           Diff
         </Tab>
@@ -104,10 +114,12 @@ export function RunPanel({
       <div className="min-h-0 flex-1 overflow-auto">
         {view === "timeline" ? (
           run ? (
-            <RunTimeline run={run} channelId={channelId} onShowDiff={() => show("diff")} onShowLog={() => show("output")} />
+            <RunTimeline run={run} channelId={channelId} onShowDiff={() => show("diff")} onShowLog={() => show("output")} onShowContext={() => show("context")} />
           ) : (
             <p className="p-3 text-[13px] text-muted">The run is not loaded yet.</p>
           )
+        ) : view === "context" ? (
+          prompt.data ? <RunContext data={prompt.data} /> : <p className="p-3 text-[13px] text-muted">{prompt.isError ? "Context is not available for this run." : "Loading context"}</p>
         ) : view === "diff" ? (
           <div className="p-2">
             {diff.isPending && <p className="text-[13px] text-muted">Loading diff</p>}

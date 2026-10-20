@@ -169,6 +169,16 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 11 {
+		migration, err = migrations.ReadFile("migrations/011.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	// Search is optional: if this SQLite build has no FTS5 the table is not
 	// created and Search falls back to LIKE.
 	setupSearch(db)
@@ -877,6 +887,20 @@ func (s *Store) RunOutput(ctx context.Context, id string, after int) ([]events.R
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) RunPrompt(ctx context.Context, id string) (events.RunPromptPayload, error) {
+	var payload []byte
+	err := s.rdb.QueryRowContext(ctx, "SELECT payload FROM events WHERE type='run.prompt' AND json_extract(payload,'$.run_id')=? ORDER BY seq DESC LIMIT 1", id).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return events.RunPromptPayload{}, ErrNotFound
+	}
+	if err != nil {
+		return events.RunPromptPayload{}, err
+	}
+	var prompt events.RunPromptPayload
+	err = json.Unmarshal(payload, &prompt)
+	return prompt, err
 }
 func (s *Store) Unread(ctx context.Context, channelID, memberID string) (int, error) {
 	var n int

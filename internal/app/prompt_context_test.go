@@ -146,6 +146,100 @@ func TestPromptContextEmptyAndCollect(t *testing.T) {
 	}
 }
 
+func TestAttemptStoresExactPromptAndSections(t *testing.T) {
+	ctx := context.Background()
+	f := newRoutineFixture(t, config.Defaults(), domain.LaneAvailable, "")
+	f.app.Config.Lanes.Persona = []config.Persona{{Handle: "coder", Instructions: "Explain choices briefly."}}
+	f.app.Paths.RunsDir = filepath.Join(t.TempDir(), "runs")
+	f.app.Runner.RunDir = f.app.Paths.RunsDir
+	var sent string
+	f.app.Adapters["codex"] = summaryAdapter{name: "codex", prompt: &sent}
+	m := domain.Message{ID: "prompt-request", ChannelID: f.general.ID, AuthorID: f.human.ID, Body: "@coder explain café", CreatedAt: time.Now().UTC()}
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(f.human.ID), ChannelID: m.ChannelID, Payload: m}); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.app.attempt(ctx, m, f.coder, "", "", new(string), false, "")
+	runs, err := f.s.Runs(ctx, m.ChannelID, "")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs: %+v %v", runs, err)
+	}
+	stored, err := f.s.RunPrompt(ctx, runs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptEvents, err := f.s.EventsOfTypes(ctx, m.ChannelID, events.RunPrompt)
+	if err != nil || len(promptEvents) != 1 {
+		t.Fatalf("prompt events: %d %v", len(promptEvents), err)
+	}
+	if sent == "" || stored.Prompt != sent {
+		t.Fatalf("stored prompt differs from CLI prompt: stored=%q sent=%q", stored.Prompt, sent)
+	}
+	if !strings.HasPrefix(stored.Prompt, "Standing instructions for this role:\nExplain choices briefly.\n\n") {
+		t.Fatalf("missing standing instructions: %q", stored.Prompt)
+	}
+	total := 0
+	covered := make([]bool, len(stored.Prompt))
+	for _, section := range stored.Sections {
+		if section.Name == "" {
+			t.Fatal("unnamed section")
+		}
+		size := 0
+		for _, span := range section.Spans {
+			size += span.Bytes
+			if span.Offset < 0 || span.Offset+span.Bytes > len(covered) {
+				t.Fatalf("invalid span: %+v", span)
+			}
+			for i := span.Offset; i < span.Offset+span.Bytes; i++ {
+				if covered[i] {
+					t.Fatalf("byte %d covered twice", i)
+				}
+				covered[i] = true
+			}
+		}
+		if section.Bytes != size {
+			t.Fatalf("%s size %d, spans %d", section.Name, section.Bytes, size)
+		}
+		total += size
+	}
+	if total != len(stored.Prompt) {
+		t.Fatalf("sections cover %d bytes, prompt has %d", total, len(stored.Prompt))
+	}
+}
+
+func TestAttemptPreservesPrebuiltPromptSections(t *testing.T) {
+	ctx := context.Background()
+	f := newRoutineFixture(t, config.Defaults(), domain.LaneAvailable, "")
+	f.app.Paths.RunsDir = filepath.Join(t.TempDir(), "runs")
+	f.app.Runner.RunDir = f.app.Paths.RunsDir
+	var sent string
+	f.app.Adapters["codex"] = summaryAdapter{name: "codex", prompt: &sent}
+	m := domain.Message{ID: "compare-request", ChannelID: f.general.ID, AuthorID: f.human.ID, Body: "@coder compare", CreatedAt: time.Now().UTC()}
+	if _, err := f.s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(f.human.ID), ChannelID: m.ChannelID, Payload: m}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, sections, err := f.app.promptPartsForRun(ctx, m, "", domain.RunRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.app.attempt(ctx, m, f.coder, "", "", new(string), true, prompt, sections)
+	runs, err := f.s.Runs(ctx, m.ChannelID, "")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs: %+v %v", runs, err)
+	}
+	stored, err := f.s.RunPrompt(ctx, runs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Prompt != sent || len(stored.Sections) != len(sections) {
+		t.Fatalf("prebuilt prompt sections lost: %+v", stored)
+	}
+	for i, section := range sections {
+		if stored.Sections[i].Name != section.Name {
+			t.Fatalf("section %d: %q, want %q", i, stored.Sections[i].Name, section.Name)
+		}
+	}
+}
+
 // A handoff that never started a run stops counting as open work after
 // staleHandoff; one with a live run stays.
 func TestPromptDropsStaleUnstartedHandoffs(t *testing.T) {
