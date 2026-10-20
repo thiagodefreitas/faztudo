@@ -8,6 +8,8 @@ All notable changes are listed here. The format follows
 
 ### Added
 
+- Agent prompts show active work and open handoffs in the channel, plus pinned
+  messages before the rolling chat history.
 - Delegated results return to the delegating agent in one read-only collect
   run. Request budget counts survive a restart. Runs record the thread and
   handoff of their trigger, so the chat shows a request's pieces after a
@@ -32,6 +34,10 @@ All notable changes are listed here. The format follows
 
 ### Fixed
 
+- Failure reasons and failed checks are readable: no escape codes, no echoed
+  patches, killed runs say which signal, and a failed check shows the failing
+  tests or compiler errors instead of dozens of passing packages. Long check
+  output and reasons fold behind "Show all" on the run and approval cards.
 - A run left as running when faztudo stopped before saving its process
   state is now failed on the next start instead of staying active forever.
 - A restart no longer moves a run whose approval was already decided back

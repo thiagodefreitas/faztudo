@@ -2,7 +2,6 @@ package adapters
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -239,7 +238,7 @@ func ProviderRefusal(tail string) bool {
 	if testFailure.MatchString(tail) {
 		return false
 	}
-	for _, line := range strings.Split(tail, "\n") {
+	for _, line := range strings.Split(StripANSI(tail), "\n") {
 		line = strings.TrimSpace(line)
 		if ownErrorLine.MatchString(line) && refusalPattern.MatchString(line) {
 			return true
@@ -254,7 +253,7 @@ func authLine(tail string) string {
 	if testFailure.MatchString(tail) {
 		return ""
 	}
-	for _, l := range strings.Split(tail, "\n") {
+	for _, l := range strings.Split(StripANSI(tail), "\n") {
 		l = strings.TrimSpace(l)
 		if l != "" && ownErrorLine.MatchString(l) && authPattern.MatchString(l) {
 			return oneSentence(l)
@@ -277,7 +276,7 @@ func oneSentence(line string) string {
 }
 
 func quotaLine(tail string) string {
-	for _, line := range strings.Split(tail, "\n") {
+	for _, line := range strings.Split(StripANSI(tail), "\n") {
 		line = strings.TrimSpace(line)
 		if ownErrorLine.MatchString(line) && (quotaPattern.MatchString(line) || strings.Contains(line, "429") || strings.Contains(strings.ToLower(line), "rate limit")) {
 			return oneSentence(line)
@@ -291,9 +290,10 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 		return "", LaneSignal{Kind: SignalNone}, ""
 	}
 	if ProviderRefusal(tail) {
-		return domain.FailureSemantic, LaneSignal{Kind: SignalNone}, tail
+		return domain.FailureSemantic, LaneSignal{Kind: SignalNone}, messageReason(code, tail)
 	}
-	s := strings.ToLower(tail)
+	// Escape codes glue to the words around them and break \b matching.
+	s := strings.ToLower(StripANSI(tail))
 	signal := LaneSignal{Kind: SignalNone}
 	var reset time.Duration
 	if m := resetPattern.FindStringSubmatch(s); m != nil {
@@ -353,8 +353,8 @@ func classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 		signal.Kind = SignalUnavailable
 		return domain.FailureSemantic, signal, authLine(tail)
 	case strings.Contains(s, "429"), strings.Contains(s, "rate limit"), strings.Contains(s, "timeout"), strings.Contains(s, "timed out"), strings.Contains(s, "connection reset"), strings.Contains(s, "connection refused"), serverErrorPattern.MatchString(s):
-		return domain.FailureTransient, signal, tail
+		return domain.FailureTransient, signal, messageReason(code, tail)
 	default:
-		return domain.FailureUnknown, signal, fmt.Sprintf("exit %d: %s", code, tail)
+		return domain.FailureUnknown, signal, ReadableReason(code, tail)
 	}
 }

@@ -5,6 +5,7 @@ import { relativeTime } from "../lib/inbox"
 import { useNow } from "../state/now"
 import type { Approval, Run } from "../types"
 import { DiffPreview } from "./approvals/diff-preview"
+import { FoldedText } from "./folded-text"
 import { Markdown } from "./markdown"
 
 const BUTTON = "min-h-11 rounded-md border px-4 text-[14px] md:min-h-9 md:px-3 md:text-[13px]"
@@ -121,7 +122,7 @@ export function ApprovalCard({
             <summary className="min-h-7 cursor-pointer text-[13px] font-medium">
               {run.verification.ok ? "Checks passed" : "Checks failed"}
             </summary>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-5">{run.verification.detail}</pre>
+            <FoldedText text={run.verification.detail} className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-5" />
           </details>
         </div>
       )}

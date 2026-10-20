@@ -15,6 +15,7 @@ import { approvalForRun, useApprovals, useLanes, useMembers, useNotices, useOutp
 import type { Approval, Lane, Member, OutputLine, Run, RunState } from "../types"
 import { ApprovalCard } from "./approval-card"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
+import { FoldedText } from "./folded-text"
 import { LaneChip } from "./lane-chip"
 
 const RING: Partial<Record<RunState, AvatarState>> = {
@@ -194,7 +195,7 @@ export function RunCardView({
         {failedChecks && (
           <div className="mt-2 ml-7 rounded-md border-l-2 border-danger bg-danger-soft px-2.5 py-2">
             <p className="text-[13px] font-medium">Failed</p>
-            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-5">{failedChecks.detail}</pre>
+            <FoldedText text={failedChecks.detail} className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-5" />
           </div>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
@@ -247,10 +248,10 @@ export function RunCardView({
             {run.verification?.ok && (
               <div className="rounded-md border-l-2 border-ok bg-ok-soft px-2.5 py-2">
                 <p className="text-[13px] font-medium">Passed</p>
-                <pre className="mt-1 whitespace-pre-wrap font-mono text-[12px] leading-5">{run.verification.detail}</pre>
+                <FoldedText text={run.verification.detail} className="mt-1 whitespace-pre-wrap font-mono text-[12px] leading-5" />
               </div>
             )}
-            {run.failure_reason && !run.verification && <p className="text-[13px] text-danger">{run.failure_reason}</p>}
+            {run.failure_reason && !run.verification && <FoldedText text={run.failure_reason} className="whitespace-pre-wrap text-[13px] text-danger" />}
             <pre className="max-h-40 overflow-auto rounded-md bg-code px-2 py-1.5 font-mono text-[12px] leading-5">
               {tail.length === 0 ? (
                 <span className="text-faint">No output yet.</span>

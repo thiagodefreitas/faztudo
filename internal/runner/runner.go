@@ -314,14 +314,7 @@ func (r *Runner) MarkFinalized(id string) error {
 }
 
 func (r *Runner) recordVerification(run *domain.Run, passedDetail, output string, verifyErr error) error {
-	detail := passedDetail
-	if verifyErr != nil {
-		detail = verifyErr.Error()
-	}
-	if output != "" {
-		detail += "\n" + strings.TrimRight(output, "\n")
-	}
-	run.Verification = &domain.Verification{OK: verifyErr == nil, Detail: detail}
+	run.Verification = &domain.Verification{OK: verifyErr == nil, Detail: verificationDetail(passedDetail, output, verifyErr)}
 	if output != "" {
 		if err := r.appendVerificationOutput(run, output); err != nil {
 			return errors.Join(verifyErr, fmt.Errorf("record verification output: %w", err))
