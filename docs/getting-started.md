@@ -1,6 +1,6 @@
 # Getting started
 
-faztudo is an alpha; the current release is 0.1.5. This page installs it from
+faztudo is an alpha; the current release is 0.1.6. This page installs it from
 a release first. Building from source is at the end.
 
 ## Requirements

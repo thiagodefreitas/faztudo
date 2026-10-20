@@ -6,13 +6,13 @@ for a change are written in the milestone's tracking issue.
 
 ## Where things stand
 
-As of 2026-10-20, release 0.1.5:
+As of 2026-10-20, release 0.1.6:
 
 | milestone | state |
 | :--- | :--- |
 | M0 Foundation | done |
 | M1 First dogfood, M1b Team chat and Lanes | done; faztudo is built inside faztudo |
-| M2 Usable alpha | done; released as 0.1.0, then 0.1.1 to 0.1.5 |
+| M2 Usable alpha | done; released as 0.1.0, then 0.1.1 to 0.1.6 |
 | M3 Signal | in progress: the bridge protocol and daemon side (0.1.2) and the signal-cli bridge with linking (0.1.4); approval replies and alerts are next |
 | M4 2D office | the office is done, with zoom; agent computers are not started |
 | M5 Discord and extensions | the bridge protocol is documented; Discord and custom adapters are not started |
