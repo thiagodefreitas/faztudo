@@ -58,6 +58,7 @@ func TestSplitCommit(t *testing.T) {
 		{"with body", "Done.\nCOMMIT: Add the thing\n\nIt helps.\nA second line.\n", "Done.", "Add the thing\n\nIt helps.\nA second line."},
 		{"last block wins", "COMMIT: First\nmid\nCOMMIT: Second", "COMMIT: First\nmid", "Second"},
 		{"not at line start", "see COMMIT: x", "see COMMIT: x", ""},
+		{"repeated closing lines", "Done.\n\nCOMMIT: Add it\nNothing changed since.\n\nCOMMIT: Add it\nSame again.\n\nCOMMIT: Add it", "Done.", "Add it"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reply, proposal := splitCommit(tc.answer)

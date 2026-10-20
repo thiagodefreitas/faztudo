@@ -1956,14 +1956,26 @@ func fitSubject(line string) string {
 }
 
 // splitCommit cuts the last COMMIT: block (that line and everything after it)
-// out of an answer and returns it as the proposed message.
+// out of an answer and returns it as the proposed message. Some CLIs repeat
+// their closing lines when late background output arrives; the reply ends at
+// the first COMMIT: line with the final subject, so the repeats are dropped.
 func splitCommit(answer string) (reply, proposal string) {
 	locs := commitLine.FindAllStringIndex(answer, -1)
 	if len(locs) == 0 {
 		return answer, ""
 	}
 	last := locs[len(locs)-1]
-	return strings.TrimSpace(answer[:last[0]]), strings.TrimSpace(answer[last[1]:])
+	proposal = strings.TrimSpace(answer[last[1]:])
+	subject, _, _ := strings.Cut(proposal, "\n")
+	cut := last[0]
+	for _, loc := range locs[:len(locs)-1] {
+		line, _, _ := strings.Cut(answer[loc[1]:], "\n")
+		if strings.TrimSpace(line) == strings.TrimSpace(subject) {
+			cut = loc[0]
+			break
+		}
+	}
+	return strings.TrimSpace(answer[:cut]), proposal
 }
 
 var (
