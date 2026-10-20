@@ -32,6 +32,13 @@ All notable changes are listed here. The format follows
   summaries keep only the current state of facts that changed.
 - Lane cards hide a runs-today count left from a previous day.
 
+### Security
+
+- A signed-in member outside a private channel could read that channel's
+  runs, their output, diffs and stored prompts by run id. Every run route now
+  answers 404 unless the caller can see the run's channel, and the run list
+  leaves those runs out.
+
 ### Fixed
 
 - Channel summaries never worked: the prompt went over the 128 KiB a single
