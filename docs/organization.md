@@ -35,6 +35,11 @@ way to the right agent.
 
 The rest of this page describes where the design is going.
 
+Each regular agent run sees the other active runs and open handoffs in its
+channel before the recent messages, including who owns each task. It also sees
+up to eight pinned messages, newest first. Pins use the run's context budget
+before older chat messages. Collect runs keep their own digest prompt.
+
 ## Roles
 
 | role | who | does |

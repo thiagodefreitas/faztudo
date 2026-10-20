@@ -71,7 +71,7 @@ func (a *App) startCompare(ctx context.Context, m domain.Message, agent domain.M
 		}
 		return fmt.Errorf("@%s x2 needs two healthy lanes; found %d. %s. No run started", agent.Handle, count, strings.Join(reasons, "; "))
 	}
-	prompt, err := a.prompt(ctx, m)
+	prompt, err := a.promptForRun(ctx, m, "", domain.RunWrite)
 	if err != nil {
 		return err
 	}

@@ -1002,7 +1002,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	a.Registry.RecordRun(lane.ID)
 	prompt := promptOverride
 	if prompt == "" {
-		prompt, err = a.prompt(ctx, m)
+		prompt, err = a.promptForRun(ctx, m, queuedRun.ID, mode)
 		if err != nil {
 			return err
 		}
@@ -1410,6 +1410,10 @@ func (a *App) RetryRun(ctx context.Context, id, laneID string) error {
 }
 
 func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
+	return a.promptForRun(ctx, m, "", domain.RunRead)
+}
+
+func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, mode domain.RunMode) (string, error) {
 	n := a.Config.Runs.ContextMessages
 	if n < 1 {
 		n = 1
@@ -1436,6 +1440,17 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 	for _, member := range members {
 		handles[member.ID] = member.Handle
 	}
+	working, pins := "", ""
+	if m.CollectForRunID == "" {
+		working, err = a.workingPrompt(ctx, m.ChannelID, runID, mode, handles)
+		if err != nil {
+			return "", err
+		}
+		pins, err = a.pinnedPrompt(ctx, m.ChannelID, handles)
+		if err != nil {
+			return "", err
+		}
+	}
 	var b strings.Builder
 	if summary.Text != "" {
 		fmt.Fprintf(&b, "Channel summary through %s (lane %s):\n%s\n\n", summary.ThroughMessageID, summary.LaneID, summary.Text)
@@ -1448,7 +1463,13 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 			}
 		}
 	}
-	messages = rolloverMessages(messages, summary.Text, a.Config.Runs.ContextLimitTokens)
+	if working != "" {
+		b.WriteString(working)
+	}
+	if pins != "" {
+		b.WriteString(pins)
+	}
+	messages = rolloverMessages(messages, summary.Text+pins, a.Config.Runs.ContextLimitTokens)
 	b.WriteString("Recent channel messages (oldest first):\n")
 	for _, msg := range messages {
 		if msg.CollectForRunID != "" {
