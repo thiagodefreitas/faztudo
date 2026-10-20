@@ -882,26 +882,53 @@ func (a *API) read(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, 200, map[string]bool{"ok": true})
 }
+
+// visibleRun loads the run named in the path. A run in a channel the caller
+// cannot see answers 404, like the channel's messages: its output, diff and
+// stored prompt carry that channel's text.
+func (a *API) visibleRun(w http.ResponseWriter, r *http.Request) (domain.Run, bool) {
+	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
+	if err != nil {
+		failErr(w, err)
+		return domain.Run{}, false
+	}
+	if !a.canSee(r.Context(), current(r).ID, run.ChannelID) {
+		fail(w, 404, "not_found", "resource not found")
+		return domain.Run{}, false
+	}
+	return run, true
+}
 func (a *API) runs(w http.ResponseWriter, r *http.Request) {
 	v, e := a.Store.Runs(r.Context(), r.URL.Query().Get("channel_id"), r.URL.Query().Get("state"))
 	if e != nil {
 		failErr(w, e)
 		return
 	}
-	respond(w, 200, v)
+	me := current(r).ID
+	seen := map[string]bool{}
+	kept := v[:0]
+	for _, run := range v {
+		ok, known := seen[run.ChannelID]
+		if !known {
+			ok = a.canSee(r.Context(), me, run.ChannelID)
+			seen[run.ChannelID] = ok
+		}
+		if ok {
+			kept = append(kept, run)
+		}
+	}
+	respond(w, 200, kept)
 }
 func (a *API) run(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.Run(r.Context(), r.PathValue("id"))
-	if e != nil {
-		failErr(w, e)
+	v, ok := a.visibleRun(w, r)
+	if !ok {
 		return
 	}
 	respond(w, 200, v)
 }
 func (a *API) output(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, e := a.Store.Run(r.Context(), id); e != nil {
-		failErr(w, e)
+	if _, ok := a.visibleRun(w, r); !ok {
 		return
 	}
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
@@ -914,8 +941,7 @@ func (a *API) output(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) runPrompt(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, err := a.Store.Run(r.Context(), id); err != nil {
-		failErr(w, err)
+	if _, ok := a.visibleRun(w, r); !ok {
 		return
 	}
 	prompt, err := a.Store.RunPrompt(r.Context(), id)
@@ -926,9 +952,8 @@ func (a *API) runPrompt(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, prompt)
 }
 func (a *API) diff(w http.ResponseWriter, r *http.Request) {
-	v, e := a.Store.Run(r.Context(), r.PathValue("id"))
-	if e != nil {
-		failErr(w, e)
+	v, ok := a.visibleRun(w, r)
+	if !ok {
 		return
 	}
 	if v.Worktree == "" {
@@ -972,9 +997,8 @@ func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
 	if !humanOnly(w, r, "cancel runs") {
 		return
 	}
-	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
-	if err != nil {
-		failErr(w, err)
+	run, ok := a.visibleRun(w, r)
+	if !ok {
 		return
 	}
 	if run.State.Terminal() || a.CancelRun == nil {
@@ -991,9 +1015,8 @@ func (a *API) retry(w http.ResponseWriter, r *http.Request) {
 	if !humanOnly(w, r, "retry runs") {
 		return
 	}
-	run, err := a.Store.Run(r.Context(), r.PathValue("id"))
-	if err != nil {
-		failErr(w, err)
+	run, ok := a.visibleRun(w, r)
+	if !ok {
 		return
 	}
 	if !run.State.Terminal() || a.RetryRun == nil {

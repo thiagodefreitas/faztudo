@@ -57,3 +57,51 @@ func TestRunPromptRouteReturnsLatestAndMissing(t *testing.T) {
 		t.Fatalf("latest prompt: %+v %v", got, err)
 	}
 }
+
+func TestRunsOfAPrivateChannelAreHiddenFromNonMembers(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	outsider := domain.Member{ID: "outsider", Kind: domain.MemberHuman, Handle: "outsider"}
+	insider := domain.Member{ID: "insider", Kind: domain.MemberHuman, Handle: "insider"}
+	channel := domain.Channel{ID: "secret", Name: "secret", Kind: domain.ChannelTeam, Visibility: domain.VisibilityPrivate, MemberIDs: []string{insider.ID}}
+	run := domain.Run{ID: "run", ChannelID: channel.ID, State: domain.RunDone}
+	for _, draft := range []events.Draft{
+		{Type: events.MemberUpdated, Actor: events.System, Payload: outsider},
+		{Type: events.MemberUpdated, Actor: events.System, Payload: insider},
+		{Type: events.ChannelCreated, Actor: events.System, ChannelID: channel.ID, Payload: channel},
+		{Type: events.RunCreated, Actor: events.System, ChannelID: channel.ID, Payload: run},
+		{Type: events.RunPrompt, Actor: events.System, ChannelID: channel.ID, Payload: events.RunPromptPayload{RunID: run.ID, Prompt: "private transcript"}},
+	} {
+		if _, err := s.Append(ctx, draft); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func(member, path string) *httptest.ResponseRecorder {
+		h := newTestAPI(s, member, "test")
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Host = "127.0.0.1"
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, path := range []string{"/api/v1/runs/run", "/api/v1/runs/run/prompt", "/api/v1/runs/run/output", "/api/v1/runs/run/diff"} {
+		if rec := get(outsider.ID, path); rec.Code != 404 {
+			t.Fatalf("outsider %s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := get(insider.ID, "/api/v1/runs/run/prompt"); rec.Code != 200 {
+		t.Fatalf("insider prompt: %d %s", rec.Code, rec.Body.String())
+	}
+	var listed []domain.Run
+	if err := json.Unmarshal(get(outsider.ID, "/api/v1/runs").Body.Bytes(), &listed); err != nil || len(listed) != 0 {
+		t.Fatalf("outsider list: %+v %v", listed, err)
+	}
+	if err := json.Unmarshal(get(insider.ID, "/api/v1/runs").Body.Bytes(), &listed); err != nil || len(listed) != 1 {
+		t.Fatalf("insider list: %+v %v", listed, err)
+	}
+}
