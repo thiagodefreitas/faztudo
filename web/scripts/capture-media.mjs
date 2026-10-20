@@ -36,6 +36,21 @@ async function openChannel(p, name) {
   await p.waitForTimeout(1800)
 }
 
+// Opens the Context tab of a finished run, with its first section unfolded.
+async function openRunContext(p) {
+  const runs = await (await p.request.get(base + "/api/v1/runs")).json()
+  for (const run of runs.filter((item) => item.state === "done")) {
+    const prompt = await p.request.get(base + "/api/v1/runs/" + run.id + "/prompt")
+    if (!prompt.ok()) continue
+    await p.goto(base + "/c/" + run.channel_id + "?run=" + run.id + "&view=context")
+    await p.waitForTimeout(1800)
+    await p.getByText(/^Working now,|^Transcript,/).first().click().catch(() => {})
+    await p.waitForTimeout(600)
+    return
+  }
+  throw new Error("no demo run has a stored prompt")
+}
+
 async function shot(p, name) {
   await p.screenshot({ path: join(images, name) })
   console.log("wrote", name)
@@ -51,6 +66,10 @@ async function shot(p, name) {
   await p.goto(base + "/tasks")
   await p.waitForTimeout(1800)
   await shot(p, "tasks-board.png")
+  await p.getByRole("button", { name: "All work" }).click()
+  await p.waitForTimeout(1200)
+  await shot(p, "all-work.png")
+  await p.getByRole("button", { name: "Tasks", exact: true }).click()
   await p.goto(base + "/approvals")
   await p.waitForTimeout(1500)
   const row = p.locator("main button, main [role=button]").filter({ hasText: /approval|Approve|Push|Architect/i }).first()
@@ -65,6 +84,8 @@ async function shot(p, name) {
   if (await compare.count()) await compare.scrollIntoViewIfNeeded().catch(() => {})
   await p.waitForTimeout(800)
   await shot(p, "compare.png")
+  await openRunContext(p)
+  await shot(p, "run-context.png")
   await p.goto(base + "/office")
   await p.waitForTimeout(2500)
   await shot(p, "office-2d.png")
@@ -95,7 +116,12 @@ if (videoDir) {
   await p.getByRole("button", { name: "All" }).click().catch(() => {})
   await p.waitForTimeout(800)
   await p.goto(base + "/tasks")
+  await p.waitForTimeout(2000)
+  await p.getByRole("button", { name: "All work" }).click().catch(() => {})
   await p.waitForTimeout(2500)
+  await p.getByRole("button", { name: "Tasks", exact: true }).click().catch(() => {})
+  await openRunContext(p)
+  await p.waitForTimeout(2000)
   await p.goto(base + "/approvals")
   await p.waitForTimeout(2500)
   await p.goto(base + "/p/faztudo")

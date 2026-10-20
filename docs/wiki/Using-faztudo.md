@@ -139,10 +139,27 @@ links to each run's timeline and to its approval. A task is in Review while
 a run waits for your decision, and when it failed; deciding the approval
 finishes it. A project home lists its open tasks.
 
+Most work never becomes a task: it starts from a mention or from one agent
+delegating to another. Switch the Tasks page to **All work** to see every run
+of the last day in Queued, Running, Needs you, Done and Failed. A card shows
+the agent, the lane, the channel, the start of the request and, for a
+delegation, which agent handed it out. Click a card to open the run.
+
+![All work](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/all-work.png)
+
 ## Runs and approvals
 
 Each run shows as a card with its state and streamed output. You can cancel a
 running one, and retry a failed one on the same or another lane.
+
+Open a run and choose **Context** to see exactly what the agent was given,
+one folded section at a time with its size: the channel summary, the other
+work in progress (Working now), the pinned messages, the recent transcript,
+your request and the instructions. When an agent misreads a request, this is
+where you check whether it had what it needed. Runs from before 0.1.7 have no
+stored context.
+
+![A run's Context tab](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/run-context.png)
 
 When a write run finishes, faztudo shows the diff and the verification
 result, then asks what to do with the branch:

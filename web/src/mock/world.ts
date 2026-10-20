@@ -660,8 +660,19 @@ export class MockWorld {
     const run = this.runs.find((item) => item.id === id)
     if (!run) return err(404, "not_found", "run not found")
     const trigger = this.messages.find((item) => item.id === run.trigger_message_id)
+    const handle = (id: ID) => this.members.find((member) => member.id === id)?.handle ?? "someone"
+    const others = this.runs.filter((item) => item.id !== run.id && item.channel_id === run.channel_id && ["queued", "running", "verifying", "waiting_approval"].includes(item.state))
+    const before = this.messages.filter((item) => item.channel_id === run.channel_id && !item.thread_id && (!trigger || item.created_at <= trigger.created_at)).slice(-8)
     const parts = [
-      { name: "transcript", text: "Recent channel messages (oldest first):\n" },
+      {
+        name: "summary",
+        text: "Channel summary through the last hour (lane claude/sonnet). It is older context: when it disagrees with the recent messages or the repository, they win.\nThe run card shows verification results inline. Decided: failing output is folded after six lines. Open: the timeline view needs keyboard focus.\n\n",
+      },
+      ...(others.length
+        ? [{ name: "working", text: `Working now:\n${others.map((item) => `- run ${item.id}: @${handle(item.agent_id)}, lane ${item.lane_id}, ${item.mode}, ${item.state}`).join("\n")}\n\n` }]
+        : []),
+      { name: "pinned", text: "Pinned in this channel:\n- @ada: Small diffs. Run the checks and give their exit codes.\n\n" },
+      { name: "transcript", text: `Recent channel messages (oldest first):\n${before.map((item) => `@${handle(item.author_id)}: ${item.body}`).join("\n")}\n` },
       { name: "request", text: `\nRequest:\n${trigger?.body ?? "Mock request"}` },
       { name: "instructions", text: "\n\nStart your answer with a summary of one or two plain sentences (no heading), then give the detail." },
     ]

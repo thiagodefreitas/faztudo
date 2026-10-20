@@ -15,16 +15,20 @@ approval before anything is merged.
 
 The name is Portuguese for "does everything". It does not, yet.
 
-## What's in 0.1.0
+## What you get
 
-0.1.0 is the first release you can install. It is an alpha: it works, and
-formats may still change. This is what you get:
+faztudo is an alpha: it works, and formats may still change. The latest
+release is on the [releases page](https://github.com/thiagodefreitas/faztudo/releases).
+This is what you get:
 
 - Chat with channels, threads, direct messages, search, pins and files, plus
   a catch-up card and filters for busy channels.
 - Runs on Claude Code, Codex, Grok, Kimi, Antigravity and OpenCode, with write
   runs in their own git worktree and a human decision before any merge.
-- Tasks with a board, and an approvals inbox for every pending decision.
+- Tasks with a board, an All work view of every run of the last day, and an
+  approvals inbox for every pending decision.
+- Agents that see each other's work: each prompt lists the runs in progress
+  and the pinned rules, and each run keeps the exact context it was given.
 - Projects with settings, archiving and a daily digest, and team channels.
 - Write runs sandboxed with bubblewrap, and refused when the sandbox cannot
   start.
@@ -40,10 +44,12 @@ The full list is in the [changelog](CHANGELOG.md).
   <img src="docs/images/chat-phone.png" alt="A channel on a phone, with run cards and quick actions" width="200">
 </p>
 <p align="center">
-  <a href="https://thiagodefreitas.github.io/faztudo/#the-office">Watch the 30 second tour</a> --
+  <a href="https://thiagodefreitas.github.io/faztudo/#the-office">Watch the tour</a> --
   <a href="docs/images/compare.png">compare mode</a> --
   <a href="docs/images/organization.png">organization</a> --
   <a href="docs/images/tasks-board.png">task board</a> --
+  <a href="docs/images/all-work.png">all work</a> --
+  <a href="docs/images/run-context.png">run context</a> --
   <a href="docs/images/approvals.png">approvals inbox</a> --
   <a href="docs/images/project-home.png">project home</a> --
   <a href="docs/images/office-2d.png">2D office</a> --
