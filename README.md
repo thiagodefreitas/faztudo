@@ -80,6 +80,18 @@ The full list is in the [changelog](CHANGELOG.md).
   service, no telemetry. Optional LAN mode serves the web app over HTTPS to
   your phone, with a password and QR code pairing.
 
+## Built with faztudo
+
+faztudo is developed with faztudo. The maintainer posts a short brief in a
+project channel, mentioning a persona and a lane; write runs work in their
+own git worktrees and stream output into the channel; a reviewer persona on
+another model reads the diff; the human approves and writes the commit --
+agents never commit. The dogfood instance logged 118 agent runs across 10
+lanes since 2026-10-17, with every failure left visible on the run
+card. See
+[Built with faztudo](https://github.com/thiagodefreitas/faztudo/wiki/Built-with-faztudo)
+for the numbers, the workflow and what dogfooding found.
+
 ## Features
 
 - **Catch-up and filters.** Opening a busy channel shows what happened since

@@ -6,6 +6,47 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The Tasks page has an All work view: every run of the last day in Queued,
+  Running, Needs you, Done and Failed, with the request, the channel and who
+  delegated it.
+- A run's Context tab shows exactly what the agent was given, section by
+  section with sizes: the channel summary, Working now, pins, the
+  transcript, the request and the instructions.
+- In the 2D office, a working desk shows the start of its request and the
+  elapsed time under the name.
+- The README, the site and a new wiki page describe how faztudo is built
+  with faztudo.
+- The Playwright browser tests run in CI.
+
+### Changed
+
+- A lane whose last run finished cleanly shows as available for an hour,
+  with the age in its reason, instead of unknown.
+- The 2D office lays its rooms out to fill the window, so a wide screen gets
+  more columns. Agents out of quota keep their avatar, dimmed, with one
+  "out of quota" tag instead of two. Lane names on the office wall are
+  readable.
+- The channel summary is labeled as older context in agent prompts, and
+  summaries keep only the current state of facts that changed.
+- Lane cards hide a runs-today count left from a previous day.
+
+### Fixed
+
+- Channel summaries never worked: the prompt went over the 128 KiB a single
+  command-line argument can hold. Summaries now clip long messages and work
+  in passes, run transcripts keep the same budget, and a failing summary
+  waits 30 minutes before the next try instead of retrying every minute.
+- A lane marked exhausted came back only when a run tried it, so a lane
+  nobody tried stayed exhausted on every screen. It now comes back at its
+  reset time.
+- Grok answers no longer run sentences together ("can appear.The prompt").
+- Answers drop the closing lines some CLIs repeat when late test output
+  arrives.
+- The members button in the channel header no longer overlaps the channel
+  name.
+
 ## [0.1.6] - 2026-10-20
 
 ### Fixed

@@ -30,5 +30,7 @@ See the office in motion: [20 second tour](https://thiagodefreitas.github.io/faz
 ## Working on faztudo
 
 - [Development setup](Development-setup)
+- [Built with faztudo](Built-with-faztudo): how the project is developed
+  inside itself, with real numbers from the dogfood instance
 - [Roadmap at a glance](Roadmap-at-a-glance)
 - [CONTRIBUTING.md](https://github.com/thiagodefreitas/faztudo/blob/main/CONTRIBUTING.md)
