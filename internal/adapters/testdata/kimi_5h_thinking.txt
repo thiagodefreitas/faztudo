@@ -1,0 +1,67 @@
+ts/office/ and sidebar agent rows"). Hmm. But agent-avatar.tsx — modifying it may be considered out of scope. The allowed scope says "in the office (web/src/components/office/) and the sidebar agent rows (web/src/components/sidebar.tsx)". Safer to not touch agent-avatar.tsx.
+
+  So in desk.tsx, draw the quiet ring ourselves in SVG: e.g., a dashed or thin ring in hue at lower opacity around the avatar's foreignObject, plus title "busy for @coder" and maybe a small persona badge/label. For the sidebar, wrap the AgentAvatar in a span with a light ring style (CSS border/box-shadow) and a tooltip/title "busy for @coder".
+
+  For hover name in office: the `<title>` element — set to "Codex - busy for @coder". Also update aria-label and maybe stateLabel. Maybe show a small tag under the name like "for @coder"? The issue says "the persona's name on hover". So hover title suffices, plus the ring.
+
+  Tests: vitest for office scene (desk shows busy state, title) and sidebar (row shows busy ring + title).
+
+  **Sidebar:**
+  - PeerRow for agents: compute busyFor. Needs runs. Add `useRuns()` in WorkspaceNav and pass runs to PeerRow, or call useRuns inside PeerRow (hooks per row — many subscriptions but react-query caches). Simpler: compute in WorkspaceNav once, pass a map or the runs array.
+
+  Helper function: put it in office/state.ts? Sidebar importing from office/state... Alternatively define the helper in sidebar.tsx directly and office has its own. Duplication is small but two tests... Better: export from office/state.ts a pure function `findLaneBorrower(member, runs, members)` and use in both. The task says sidebar rows; importing a helper from office/state into sidebar is fine technically.
+
+  Hmm, but sidebar also must not import office? There's no such rule. Fine.
+
+  Let me now define:
+
+  ```ts
+  export interface BusyForInfo {
+    member: Member   // the agent using the lane
+    run: Run
+  }
+
+  const BUSY_STATES = new Set<RunState>(["queued", "running", "verifying", "waiting_approval"])
+
+  export function laneBorrower(member: Member, runs: Run[], members: Member[]): Member | null {
+    if (member.kind !== "agent") return null
+    if (identityOf(member).role !== null) return null // only raw CLIs
+    const laneIds = new Set(member.agent?.lanes ?? [])
+    if (laneIds.size === 0) return null
+    const borrowers = runs.filter((run) => laneIds.has(run.lane_id) && run.agent_id !== member.id && BUSY_STATES.has(run.state))
+    if (borrowers.length === 0) return null
+    const run = pickLatestRun(borrowers)
+    return members.find((m) => m.id === run.agent_id) ?? null
+  }
+  ```
+
+  pickLatestRun is private in state.ts; reuse it there. For sidebar import, we export laneBorrower from office/state.ts.
+
+  Wait — should waiting_approval count? The persona is waiting for approval — the lane might be idle at that point. "in use by a persona run" — a waiting_approval run has the run suspended; the lane isn't executing. Queued means it's about to use it. I'll include queued, running, verifying — those mean lane busy/incoming. Waiting approval: the lane isn't running the process... probably freed. Hmm, actually does faztudo free the lane while waiting for approval? Lane `running` count — decrement on completion only? Unclear. I'll include queued/running/verifying (the ones where work is happening or imminent). Actually including waiting_approval also seems reasonable for "this lane is tied up". Let me check mock world: line 1093 lane.running += 1 on run start, 1101 decrement... let me check when decrement happens. Not critical. I'll use queued, running, verifying — matching ACTIVE_STATES minus waiting_approval. Hmm, but ACTIVE_STATES in state.ts includes waiting_approval. The issue: "when its lane is in use by any persona". A run waiting for approval is not using the lane's capacity... but visually the persona desk shows waiting. For the CLI desk showing "busy for @coder" while the coder waits for approval is arguably helpful but the lane may be free. Keep it simple: queued, running, verifying.
+
+  Desk state: should busyFor create a new DeskState? Tests in scene.test check data-state values. Adding a new state "busy" would ripple (DESK_STATE_LABELS, BADGE_CLASS, DeskStateIcon switch...). The issue says quieter — a distinct sub-state while desk.state remains "idle" seems better: keep state "idle", add busyFor field, render a subtle ring and title. 
+
+  desk.tsx rendering when desk.busyFor && state === "idle":
+  - quiet ring: `<rect ... className="stroke-..." opacity>` around the avatar (the foreignObject is at x=42 y=2 w=36 h=36 with 36px avatar = viewBox 32 scaled). A rounded rect ring around it: x=41 y=1 w=38 h=38 rx=10, stroke hue.accent, opacity 0.45, strokeWidth 1.5, maybe dashed to differ. "lighter tone" — lower opacity.
+  - title: `${member.display_name} - busy for @${busyFor.handle}`.
+  - aria-label: include "busy for X".
+  - Maybe a small label under name? Not required; hover only. But for a11y, the aria-label covers it.
+
+  Also maybe show the persona's mini avatar next to the desk? Scope says name on hover. Keep minimal.
+
+  Sidebar: in PeerRow, for agents compute `busy = laneBorrower(member, runs, members)`. Need members list in PeerRow — currently not passed. WorkspaceNav has members.data. Pass `members` and `runs` into PeerRow. Only for agent rows.
+
+  Rendering: wrap AgentAvatar in a span with relative positioning and add a light ring: e.g. `className="rounded-[5px] ring-1 ring-inset ring-.../40"` — Tailwind arbitrary: the ring color should be hue-ish but lighter. Since ring color per avatar hue is dynamic (agent-N tokens), simple approach: `box-shadow` via style with color-mix? Keep it simple: use a neutral "text-faint/40" ring? "the working ring in a lighter tone" — tone of the hue. We can use inline style: `style={{ boxShadow: "0 0 0 1.5px color-mix(in srgb, currentColor 35%, transparent)" }}` — currentColor inside the AgentAvatar svg won't propagate to the wrapper span. The wrapper doesn't know the hue... We could compute the hue slot via identityOf in sidebar (import from lib/avatar — allowed? sidebar already imports lib stuff; lib/avatar isn't in the forbidden list). But "do not touch other areas" means don't edit other files; importing is fine.
+
+  Simpler: use CSS var: `style={{ ["--fz-hue" as string]: `var(--color-agent-${slot + 1})` }}` and className "ring-1 ring-inset" with arbitrary ring color: `ring-[color-mix(in_srgb,var(--fz-hue)_40%,transparent)]`. Tailwind arbitrary values with underscores — that works: `ring-[color-mix(in_srgb,var(--fz-hue)_40%,transparent)]`. Hmm, Tailwind v4? Let me check the setup — the office uses `stroke-accent/30` etc. (opacity modifiers). For dynamic per-hue colors, arbitrary value is the way. Or simpler: `box-shadow: 0 0 0 1.5px var(--fz-hue)` with opacity via color-mix.
+
+  Also a tooltip/title: "busy for @coder" — use title attribute on the wrapper span, plus maybe aria-label. The row already has the name; keep decorative avatar but add `title={`Busy for @${busy.handle}`}`.
+
+  Also should the busy state apply only when presence isn't busy? If presence is "busy" (member.presence busy → AGENT_STATE working), the CLI itself has a run — the persona run would be... wait, presence busy for a CLI member means the CLI itself is running something. When a persona runs on the CLI's lane, does the CLI member's presence become busy? Probably presence busy is set for the running agent member only. So a CLI whose lane is borrowed would have presence online/idle, not busy. If state working (own run) takes precedence anyway since busyFor only applies when idle.
+
+  Now tests. Let me look at existing tests: scene.test.tsx and sidebar.test.tsx to match style. Also state.test.ts for derive tests.
+
+  Let me read the relevant test files and mock world to understand member shapes.
+
+error: failed to run prompt: provider.auth_error: 403 You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota
+See log: ~/.kimi-code/logs/kimi-code.log

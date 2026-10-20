@@ -43,6 +43,61 @@ func (Grok) Command(r Request) (Cmd, error) {
 	return Cmd{Path: "grok", Args: args, Dir: r.Workdir}, nil
 }
 
+// CleanAnswer puts back the space grok drops between the text it writes
+// before and after each tool call ("can appear.The prompt builders").
+func (Grok) CleanAnswer(out string) string {
+	return strings.TrimSpace(SpaceGluedSentences(out))
+}
+
+// gluedSentence matches a lowercase word of four or more letters ending a
+// sentence, directly followed by a capitalized word. Go identifiers match
+// that shape too (context.Context, store.Rebuild), so a match only splits
+// when the second word usually opens a sentence; see sentenceOpener.
+var gluedSentence = regexp.MustCompile(`(^|\s)([a-z][a-z'-]{2,}[a-z][.!?])([A-Z][a-z']*)(\s|,|$)`)
+
+// sentenceOpeners are the words grok's narration segments start with.
+var sentenceOpeners = map[string]bool{
+	"A": true, "All": true, "An": true, "And": true, "Also": true, "Both": true,
+	"But": true, "Done": true, "Everything": true, "Found": true, "Here": true,
+	"I": true, "I'll": true, "I'm": true, "I've": true, "It": true, "It's": true,
+	"Its": true, "Let": true, "Let's": true, "Next": true, "No": true,
+	"Nothing": true, "Now": true, "OK": true, "So": true, "That": true,
+	"The": true, "Then": true, "There": true, "These": true, "This": true,
+	"Those": true, "We": true, "With": true, "Yes": true,
+}
+
+func sentenceOpener(word string) bool {
+	return sentenceOpeners[word] || (len(word) > 4 && strings.HasSuffix(word, "ing"))
+}
+
+// SpaceGluedSentences adds the missing space between run-together sentences
+// in prose, leaving fenced code and inline code untouched.
+func SpaceGluedSentences(text string) string {
+	lines := strings.Split(text, "\n")
+	fenced := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			fenced = !fenced
+			continue
+		}
+		if fenced || !strings.ContainsAny(line, ".!?") {
+			continue
+		}
+		parts := strings.Split(line, "`")
+		for j := 0; j < len(parts); j += 2 {
+			parts[j] = gluedSentence.ReplaceAllStringFunc(parts[j], func(m string) string {
+				g := gluedSentence.FindStringSubmatch(m)
+				if !sentenceOpener(g[3]) {
+					return m
+				}
+				return g[1] + g[2] + " " + g[3] + g[4]
+			})
+		}
+		lines[i] = strings.Join(parts, "`")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (Grok) Classify(code int, tail string) (domain.FailureClass, LaneSignal, string) {
 	return classify(code, tail)
 }

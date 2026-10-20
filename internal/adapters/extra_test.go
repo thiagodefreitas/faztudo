@@ -131,3 +131,22 @@ func TestAgyQuotaOnlyFromErrorLines(t *testing.T) {
 		t.Fatalf("real agy error not classified: %v %v %q", class, sig, reason)
 	}
 }
+
+func TestGrokCleanAnswerSpacesGluedSentences(t *testing.T) {
+	cases := map[string]string{
+		"whether it can appear.The prompt builders take a channel id.":       "whether it can appear. The prompt builders take a channel id.",
+		"I'll search other trees next.This checkout has no tests!Then stop.": "I'll search other trees next. This checkout has no tests! Then stop.",
+		"the budget (org.Ledger) lives in memory":                            "the budget (org.Ledger) lives in memory",
+		"see e.g.The docs and fmt.Println and https://x.io/a.B":              "see e.g.The docs and fmt.Println and https://x.io/a.B",
+		"call `done.Next` here":                                              "call `done.Next` here",
+		"```\nworked.Then x\n```\nit worked.Then left":                       "```\nworked.Then x\n```\nit worked. Then left",
+		"Run the tests.Done":                                                 "Run the tests. Done",
+		"first.Reviewing the diff":                                           "first. Reviewing the diff",
+		"takes a context.Context and store.Rebuild runs":                     "takes a context.Context and store.Rebuild runs",
+	}
+	for in, want := range cases {
+		if got := (Grok{}).CleanAnswer(in); got != want {
+			t.Errorf("CleanAnswer(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
