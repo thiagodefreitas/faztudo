@@ -26,11 +26,13 @@ type PersonaConfig struct {
 }
 type Skipped struct{ ID, Reason string }
 type Registry struct {
-	mu            sync.Mutex
-	lanes         map[string]*domain.Lane
-	personas      map[string]PersonaConfig
-	app           events.Appender
-	until         map[string]time.Time
+	mu       sync.Mutex
+	lanes    map[string]*domain.Lane
+	personas map[string]PersonaConfig
+	app      events.Appender
+	until    map[string]time.Time
+	// cleanAt is when a run on the lane last finished cleanly.
+	cleanAt       map[string]time.Time
 	thresholds    map[string]int
 	alerted       map[string]bool
 	alertChannels func(context.Context, string) ([]string, error)
@@ -40,7 +42,7 @@ type Registry struct {
 }
 
 func New(lanes []LaneConfig, personas []PersonaConfig, app events.Appender) (*Registry, error) {
-	r := &Registry{lanes: map[string]*domain.Lane{}, personas: map[string]PersonaConfig{}, app: app, until: map[string]time.Time{}, thresholds: map[string]int{}, alerted: map[string]bool{}, changed: make(chan struct{}), now: time.Now}
+	r := &Registry{lanes: map[string]*domain.Lane{}, personas: map[string]PersonaConfig{}, app: app, until: map[string]time.Time{}, cleanAt: map[string]time.Time{}, thresholds: map[string]int{}, alerted: map[string]bool{}, changed: make(chan struct{}), now: time.Now}
 	for _, c := range lanes {
 		if c.ID == "" || c.Capacity < 1 || c.ConserveAt < 0 || c.ConserveAt > 100 || r.lanes[c.ID] != nil {
 			return nil, fmt.Errorf("invalid or duplicate lane %q", c.ID)
@@ -297,14 +299,59 @@ func (r *Registry) expireLocked(id string, l *domain.Lane, now time.Time) bool {
 	return true
 }
 
-// ExpireResets publishes lanes whose reset time passed. Without it a lane
-// nobody tries stays exhausted on every screen, and so nobody tries it.
+// cleanRunFresh is how long a clean run counts as evidence that a lane works
+// when no usage reading says otherwise.
+const cleanRunFresh = time.Hour
+
+// healthLocked is the usage health, or available when the readings say
+// nothing and a run finished cleanly within cleanRunFresh. r.mu must be held.
+func (r *Registry) healthLocked(id string, l *domain.Lane, now time.Time) (domain.LaneHealth, string) {
+	health, reason := usageHealth(l.CLI, l.Windows, r.thresholds[id], now)
+	if at := r.cleanAt[id]; health == domain.LaneUnknown && !at.IsZero() && now.Sub(at) < cleanRunFresh {
+		return domain.LaneAvailable, fmt.Sprintf("last run finished cleanly %s ago", now.Sub(at).Round(time.Minute))
+	}
+	return health, reason
+}
+
+// RecordClean notes a run that finished without a lane signal. A lane with
+// no usage reading shows as available for the next hour instead of unknown.
+func (r *Registry) RecordClean(id string, now time.Time) {
+	r.mu.Lock()
+	l := r.lanes[id]
+	if l == nil || l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable {
+		r.mu.Unlock()
+		return
+	}
+	r.cleanAt[id] = now
+	health, reason := r.healthLocked(id, l, now)
+	if health == l.Health && reason == l.HealthReason {
+		r.mu.Unlock()
+		return
+	}
+	l.Health, l.HealthReason = health, reason
+	copyLane := *l
+	r.mu.Unlock()
+	r.emit(copyLane)
+}
+
+// ExpireResets publishes lanes whose reset time passed, and lanes whose
+// last clean run is too old to count. Without it a lane nobody tries stays
+// exhausted on every screen, and so nobody tries it.
 func (r *Registry) ExpireResets(now time.Time) {
 	r.mu.Lock()
 	var changed []domain.Lane
 	for id, l := range r.lanes {
 		if r.expireLocked(id, l, now) {
 			changed = append(changed, *l)
+			continue
+		}
+		// A clean run stops counting after cleanRunFresh.
+		if l.Health == domain.LaneAvailable && !r.cleanAt[id].IsZero() && now.Sub(r.cleanAt[id]) >= cleanRunFresh {
+			delete(r.cleanAt, id)
+			if health, reason := r.healthLocked(id, l, now); health != l.Health {
+				l.Health, l.HealthReason = health, reason
+				changed = append(changed, *l)
+			}
 		}
 	}
 	r.mu.Unlock()
@@ -471,7 +518,7 @@ func (r *Registry) UpdateUsageAsked(ctx context.Context, id string, windows []do
 		}
 	}
 	if !cleared && r.canUpdateFromUsage(id, l, now) {
-		l.Health, l.HealthReason = usageHealth(l.CLI, windows, r.thresholds[id], now)
+		l.Health, l.HealthReason = r.healthLocked(id, l, now)
 	}
 	alert := r.alertTransition(id, l.Health)
 	copyLane := *l

@@ -293,3 +293,28 @@ func TestExpireResetsShowsAnUntriedLaneAgain(t *testing.T) {
 		t.Fatalf("b expired early: %+v", b)
 	}
 }
+
+func TestCleanRunShowsALaneAvailableForAnHour(t *testing.T) {
+	r, _ := New([]LaneConfig{{ID: "a", Capacity: 1}, {ID: "b", Capacity: 1}}, nil, nil)
+	start := time.Now()
+	r.RecordClean("a", start)
+	if a, _ := r.Snapshot("a"); a.Health != domain.LaneAvailable || !strings.Contains(a.HealthReason, "finished cleanly") {
+		t.Fatalf("after a clean run: %+v", a)
+	}
+	if b, _ := r.Snapshot("b"); b.Health != domain.LaneUnknown {
+		t.Fatalf("untouched lane: %+v", b)
+	}
+	r.ExpireResets(start.Add(cleanRunFresh + time.Minute))
+	if a, _ := r.Snapshot("a"); a.Health != domain.LaneUnknown {
+		t.Fatalf("an old clean run still counts: %+v", a)
+	}
+}
+
+func TestCleanRunDoesNotClearAnExhaustedLane(t *testing.T) {
+	r, _ := New([]LaneConfig{{ID: "a", Capacity: 1}}, nil, nil)
+	r.Restore(domain.Lane{ID: "a", Health: domain.LaneExhausted, LastError: &domain.LaneError{Class: string(adapters.SignalExhausted), At: time.Now()}})
+	r.RecordClean("a", time.Now())
+	if a, _ := r.Snapshot("a"); a.Health != domain.LaneExhausted {
+		t.Fatalf("%+v", a)
+	}
+}

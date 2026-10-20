@@ -457,6 +457,9 @@ func (r *Runner) execute(ctx context.Context, run *domain.Run, adapter adapters.
 		// A zero exit succeeds unless the adapter reads a lane signal out
 		// of the output (agy reports an exhausted quota with exit 0).
 		if execErr == nil && code == 0 && signal.Kind == adapters.SignalNone && !oom {
+			if r.Lanes != nil {
+				r.Lanes.RecordClean(run.LaneID, time.Now())
+			}
 			if verify != nil {
 				run.State = domain.RunVerifying
 				if err := r.emitRun(ctx, run, events.RunUpdated, *run); err != nil {
