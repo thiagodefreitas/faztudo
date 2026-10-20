@@ -94,12 +94,7 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 	busyOther := false
 	for _, id := range chain {
 		l := r.lanes[id]
-		if l.Health == domain.LaneExhausted && !r.until[id].IsZero() && time.Now().After(r.until[id]) {
-			l.Health = domain.LaneUnknown
-			l.HealthReason = "reset time passed"
-			delete(r.alerted, id)
-			l.Alerted = false
-		}
+		r.expireLocked(id, l, time.Now())
 		reason := ""
 		if l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable {
 			reason = l.HealthReason
@@ -287,6 +282,35 @@ func (r *Registry) SetTokensLastHour(ctx context.Context, id string, tokens *int
 	}
 	_, err := r.app.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: copyLane})
 	return err
+}
+
+// expireLocked turns an exhausted lane whose reset time passed back to
+// unknown. It reports whether the lane changed. r.mu must be held.
+func (r *Registry) expireLocked(id string, l *domain.Lane, now time.Time) bool {
+	if l.Health != domain.LaneExhausted || r.until[id].IsZero() || !now.After(r.until[id]) {
+		return false
+	}
+	l.Health = domain.LaneUnknown
+	l.HealthReason = "reset time passed"
+	delete(r.alerted, id)
+	l.Alerted = false
+	return true
+}
+
+// ExpireResets publishes lanes whose reset time passed. Without it a lane
+// nobody tries stays exhausted on every screen, and so nobody tries it.
+func (r *Registry) ExpireResets(now time.Time) {
+	r.mu.Lock()
+	var changed []domain.Lane
+	for id, l := range r.lanes {
+		if r.expireLocked(id, l, now) {
+			changed = append(changed, *l)
+		}
+	}
+	r.mu.Unlock()
+	for _, l := range changed {
+		r.emit(l)
+	}
 }
 
 // Restore keeps persisted health when the daemon starts again.

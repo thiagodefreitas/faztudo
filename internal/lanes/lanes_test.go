@@ -280,3 +280,16 @@ func TestRestoredExhaustionWithoutResetExpires(t *testing.T) {
 		t.Fatalf("pick after the retry time: %+v %v", lane, err)
 	}
 }
+
+func TestExpireResetsShowsAnUntriedLaneAgain(t *testing.T) {
+	r, _ := New([]LaneConfig{{ID: "a", Capacity: 1}, {ID: "b", Capacity: 1}}, nil, nil)
+	r.Restore(domain.Lane{ID: "a", Health: domain.LaneExhausted, LastError: &domain.LaneError{Class: string(adapters.SignalExhausted), At: time.Now().Add(-2 * unknownResetRetry)}})
+	r.Restore(domain.Lane{ID: "b", Health: domain.LaneExhausted, LastError: &domain.LaneError{Class: string(adapters.SignalExhausted), At: time.Now()}})
+	r.ExpireResets(time.Now())
+	if a, _ := r.Snapshot("a"); a.Health != domain.LaneUnknown || a.HealthReason != "reset time passed" {
+		t.Fatalf("a: %+v", a)
+	}
+	if b, _ := r.Snapshot("b"); b.Health != domain.LaneExhausted {
+		t.Fatalf("b expired early: %+v", b)
+	}
+}
