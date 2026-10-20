@@ -44,3 +44,21 @@ test("posts a mention, streams a run, and answers the approval", async ({ page }
   await page.getByTestId("inbox-list").getByRole("link", { name: /general/ }).click()
   await expect(page.getByRole("heading", { name: "# general" })).toBeVisible()
 })
+
+test("switching channels keeps one transcript and one composer", async ({ page }) => {
+  await page.context().addCookies([{
+    name: "fz_local", value: "synthetic-mock-cookie", url: "http://127.0.0.1:5173",
+    httpOnly: true, sameSite: "Strict",
+  }])
+  await page.goto("/")
+  await page.getByTestId("inbox-list").getByRole("link", { name: /faztudo-dev/ }).click()
+  await expect(page.getByRole("heading", { name: "# faztudo-dev" })).toBeVisible()
+  const links = page.locator('aside a[href^="/c/"]')
+  const count = await links.count()
+  expect(count).toBeGreaterThanOrEqual(2)
+  for (let i = 0; i < 6; i++) {
+    await links.nth(i % count).click()
+    await expect(page.getByTestId("transcript")).toHaveCount(1)
+    await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(1)
+  }
+})

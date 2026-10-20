@@ -323,14 +323,16 @@ export function ChannelPage() {
           <MembersPanel channel={channel} open={membersOpen} onOpenChange={setMembersOpen} />
         </header>
         <FilterChips value={filter} onChange={(value) => setFilterState({ id: channelId, value })} />
+        {/* Sibling keys must differ: React leaves duplicate-keyed siblings
+            behind on a channel switch, stacking old transcripts. */}
         <ActivityStrip
-          key={channelId}
+          key={`strip-${channelId}`}
           channel={channel}
           catchUp={false}
           onOpenRun={(runId) => void navigate({ to: "/c/$channelId", params: { channelId }, search: { run: runId } })}
         />
         <MessageList
-          key={channelId}
+          key={`list-${channelId}`}
           channelId={channelId}
           {...(search.m ? { focusId: search.m } : {})}
           onRetry={(item) => send(item.body, item.attachments, item.key)}
@@ -340,7 +342,7 @@ export function ChannelPage() {
           onMarkRead={markRead}
         />
         <Composer
-          key={channelId}
+          key={`composer-${channelId}`}
           members={members.data ?? []}
           channelName={channel.name}
           attach

@@ -6,6 +6,12 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Switching channels no longer stacks the previous channels' messages and
+  notices under the new one: the channel page gave three of its parts the
+  same key, so old ones stayed on screen.
+
 ## [0.1.5] - 2026-10-20
 
 ### Added
