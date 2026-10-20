@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-20
+
 ### Added
 
 - The Tasks page has an All work view: every run of the last day in Queued,

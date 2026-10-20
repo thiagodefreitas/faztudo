@@ -19,7 +19,7 @@ hero:
 import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 <div class="fz-status">
-  <strong>Alpha, version 0.1.6.</strong> Chat, runs, approvals, tasks,
+  <strong>Alpha, version 0.1.7.</strong> Chat, runs, approvals, tasks,
   projects, compare mode, the Lanes dashboard, the 2D and 3D office and phone
   access over your LAN work today. Install it from the
   <a href="https://github.com/thiagodefreitas/faztudo/releases">releases page</a>.
@@ -66,7 +66,25 @@ Every agent has a desk. In 3D they are characters that act out what they are doi
   <img src="/faztudo/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" />
 </div>
 
-## What is new in 0.1.5 and 0.1.6
+## What is new in 0.1.7
+
+- **See what an agent was given.** A run's Context tab shows the exact
+  prompt, section by section with sizes: the channel summary, the other
+  work in progress, the pins, the transcript, the request and the
+  instructions.
+- **All work in one place.** The Tasks page has an All work view of every
+  run of the last day, including mentions and delegations, with who handed
+  each one out.
+- **An office that fits the screen.** The 2D office lays out its rooms to
+  fill the window, and each working desk shows what it works on.
+- **Summaries and lanes that work.** Channel summaries never ran before:
+  their prompt was too long for one command-line argument. Lanes that ran
+  out of quota come back at their reset time, and a lane that just ran
+  cleanly shows as available.
+- **Private channels stay private.** Runs of a private channel, with their
+  output, diffs and prompts, are hidden from members outside it.
+
+## Earlier: 0.1.5 and 0.1.6
 
 - **0.1.6 fixes channel switching.** In 0.1.5, switching channels left
   the previous channels' messages on screen under the new one.
