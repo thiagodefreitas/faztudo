@@ -3,8 +3,19 @@ import { useState } from "react"
 import { channelsOfProject } from "../../lib/projects"
 import { tasksIn } from "../../lib/tasks"
 import { useChannels, useMembers, useOrg, useTasks } from "../../state/queries"
+import { AllWork } from "./all-work"
 import { TaskBoard } from "./task-board"
 import { TaskBuilder } from "./task-builder"
+
+const VIEW_KEY = "faztudo.tasks.view"
+
+function readView(): "tasks" | "all" {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "all" ? "all" : "tasks"
+  } catch {
+    return "tasks"
+  }
+}
 
 const projectApi = getRouteApi("/p/$handle/tasks")
 
@@ -24,6 +35,16 @@ export function TasksView({ handle }: { handle?: string }) {
   const channels = useChannels()
   const org = useOrg()
   const [building, setBuilding] = useState(false)
+  const [view, setViewState] = useState<"tasks" | "all">(readView)
+
+  function setView(next: "tasks" | "all") {
+    setViewState(next)
+    try {
+      localStorage.setItem(VIEW_KEY, next)
+    } catch {
+      // The choice still holds for this page.
+    }
+  }
 
   const project = handle ? org.data?.projects.find((item) => item.handle.toLowerCase() === handle.toLowerCase()) : undefined
   if (handle && org.isPending) return <p className="p-4 text-[13px] text-muted">Loading project</p>
@@ -54,7 +75,22 @@ export function TasksView({ handle }: { handle?: string }) {
           New task
         </button>
       </header>
-      {tasks.isPending ? (
+      <div role="group" aria-label="View" className="flex gap-1 border-b border-line px-3 py-1.5">
+        {(["tasks", "all"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={view === key}
+            onClick={() => setView(key)}
+            className={`min-h-10 rounded-md px-3 text-[13px] md:min-h-8 ${view === key ? "bg-sidebar font-medium text-ink" : "text-muted hover:text-ink"}`}
+          >
+            {key === "tasks" ? "Tasks" : "All work"}
+          </button>
+        ))}
+      </div>
+      {view === "all" ? (
+        <AllWork channels={channels.data ?? []} channelIds={project ? new Set(scope.map((channel) => channel.id)) : undefined} />
+      ) : tasks.isPending ? (
         <p className="p-4 text-[13px] text-muted">Loading tasks</p>
       ) : (
         <TaskBoard tasks={visible} members={members.data ?? []} channels={channels.data ?? []} showChannel={scope.length > 1} />
