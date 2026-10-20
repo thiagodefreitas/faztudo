@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -205,8 +206,15 @@ func validate(r Request) error {
 	if r.Prompt == "" {
 		return errors.New("prompt required")
 	}
+	if len(r.Prompt) > MaxPromptBytes {
+		return fmt.Errorf("prompt is %d KiB, over the %d KiB a CLI argument can hold", len(r.Prompt)/1024, MaxPromptBytes/1024)
+	}
 	return nil
 }
+
+// MaxPromptBytes keeps a prompt under Linux's 128 KiB limit for one argv
+// string (MAX_ARG_STRLEN), with room for the CLI's own flags.
+const MaxPromptBytes = 120 << 10
 
 var resetPattern = regexp.MustCompile(`(?i)(?:retry|try again|reset|resets)\s+(?:in\s+)?(\d+)\s*(seconds?|minutes?|hours?|days?)`)
 var resetClockPattern = regexp.MustCompile(`(?i)(?:try again|reset|resets)\s+at\s+(\d{1,2}:\d{2})\s*(am|pm)?\b`)

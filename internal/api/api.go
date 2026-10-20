@@ -334,6 +334,8 @@ func failErr(w http.ResponseWriter, err error) {
 	} else if errors.Is(err, store.ErrConflict) {
 		fail(w, 409, "conflict", "resource conflict")
 	} else {
+		// The client sees a generic error; the cause goes to the log.
+		slog.Error("request failed", "err", err)
 		fail(w, 500, "internal", "internal error")
 	}
 }

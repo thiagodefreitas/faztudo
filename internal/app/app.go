@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,6 +83,8 @@ type App struct {
 	extraMu      sync.Mutex
 	extra        map[string]string
 	summaryLocks sync.Map
+	// summaryFailedAt holds the time of each channel's last failed summary.
+	summaryFailedAt sync.Map
 	// taskMu serializes changes to tasks. taskDispatch runs a task's message
 	// for its agent; nil means a.run, tests replace it.
 	taskMu          sync.Mutex
@@ -325,6 +329,7 @@ func (a *App) Start(ctx context.Context) error {
 			a.syncTask(ctx, task.MessageID, true)
 		}
 	}
+	a.Registry.ExpireResets(time.Now())
 	if err := a.RefreshUsage(ctx); err != nil {
 		return err
 	}
@@ -336,7 +341,8 @@ func (a *App) Start(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case now := <-ticker.C:
+				a.Registry.ExpireResets(now)
 				_ = a.RefreshUsage(ctx)
 			}
 		}
@@ -356,6 +362,10 @@ func (a *App) Start(ctx context.Context) error {
 	return nil
 }
 
+// summaryRetryAfter is how long the background refresh leaves a channel
+// alone after its summary failed.
+const summaryRetryAfter = 30 * time.Minute
+
 // RefreshSummaries also covers quiet channels whose messages mention no agent.
 func (a *App) RefreshSummaries(ctx context.Context) error {
 	channels, err := a.Store.Channels(ctx)
@@ -364,14 +374,24 @@ func (a *App) RefreshSummaries(ctx context.Context) error {
 	}
 	// One failing channel must not stop the summaries of the others.
 	var errs []error
+	now := time.Now()
 	for _, channel := range channels {
+		// A failing summary is retried after a pause, not every minute:
+		// each attempt can start a CLI and spend quota.
+		if at, ok := a.summaryFailedAt.Load(channel.ID); ok && now.Sub(at.(time.Time)) < summaryRetryAfter {
+			continue
+		}
 		lock := a.summaryLock(channel.ID)
 		lock.Lock()
 		previous, _ := a.Store.ChannelSummary(ctx, channel.ID)
 		_, err = a.refreshSummary(ctx, domain.Message{ChannelID: channel.ID}, previous, false)
 		lock.Unlock()
 		if err != nil {
+			a.summaryFailedAt.Store(channel.ID, now)
+			slog.Warn("channel summary failed", "channel", channel.ID, "err", err)
 			errs = append(errs, fmt.Errorf("channel %s: %w", channel.ID, err))
+		} else {
+			a.summaryFailedAt.Delete(channel.ID)
 		}
 	}
 	return errors.Join(errs...)
@@ -1426,7 +1446,16 @@ func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, 
 	lock := a.summaryLock(m.ChannelID)
 	lock.Lock()
 	summary, _ := a.Store.ChannelSummary(ctx, m.ChannelID)
-	summary, _ = a.refreshSummary(ctx, m, summary, false)
+	if at, ok := a.summaryFailedAt.Load(m.ChannelID); !ok || time.Since(at.(time.Time)) >= summaryRetryAfter {
+		refreshed, err := a.refreshSummary(ctx, m, summary, false)
+		if err != nil {
+			a.summaryFailedAt.Store(m.ChannelID, time.Now())
+			slog.Warn("channel summary failed", "channel", m.ChannelID, "err", err)
+		} else {
+			a.summaryFailedAt.Delete(m.ChannelID)
+		}
+		summary = refreshed
+	}
 	lock.Unlock()
 	messages, err := a.Store.Messages(ctx, m.ChannelID, "", n)
 	if err != nil {
@@ -1497,17 +1526,29 @@ func (a *App) summaryLock(channelID string) *sync.Mutex {
 // configured model context. The conservative four-bytes-per-token estimate
 // is only a guardrail, not a tokenizer or a provider measurement.
 func rolloverMessages(messages []domain.Message, summary string, limit int) []domain.Message {
-	if limit < 1 {
-		return messages
-	}
 	budget := int(float64(limit) * 0.65)
+	if limit < 1 {
+		budget = math.MaxInt
+	}
 	used := estimatedContextTokens(messages, summary)
-	for len(messages) > 1 && used > budget {
+	bytes := len(summary)
+	for _, m := range messages {
+		bytes += len(m.Body) + transcriptLineOverhead
+	}
+	for len(messages) > 1 && (used > budget || bytes > transcriptBytes) {
 		used -= (len(messages[0].Body)+3)/4 + 16
+		bytes -= len(messages[0].Body) + transcriptLineOverhead
 		messages = messages[1:]
 	}
 	return messages
 }
+
+// transcriptBytes caps the transcript part of a run prompt so the whole
+// prompt stays under adapters.MaxPromptBytes, whatever the context limit.
+const (
+	transcriptBytes        = 80 << 10
+	transcriptLineOverhead = 24
+)
 
 func estimatedContextTokens(messages []domain.Message, summary string) int {
 	used := (len(summary) + 3) / 4
@@ -1554,9 +1595,20 @@ func (a *App) refreshSummary(ctx context.Context, current domain.Message, previo
 		input.WriteString("Previous summary:\n" + previous.Text + "\n\n")
 	}
 	input.WriteString("New messages:\n")
+	// The prompt goes to the CLI as one argument, so it has a byte budget.
+	// Messages that do not fit wait for the next pass, which starts after
+	// the last one summarized here.
+	included := 0
 	for _, msg := range messages {
-		fmt.Fprintf(&input, "%s: %s\n", msg.AuthorID, msg.Body)
+		line := fmt.Sprintf("%s: %s\n", msg.AuthorID, clipText(msg.Body, summaryMessageRunes))
+		if included > 0 && input.Len()+len(line) > summaryInputBytes {
+			break
+		}
+		input.WriteString(line)
+		included++
 	}
+	rest := len(messages) > included || len(messages) == 80
+	messages = messages[:included]
 	answer, err := a.generateSummary(ctx, lane, input.String(), current.ChannelID)
 	if err != nil {
 		return previous, err
@@ -1573,11 +1625,18 @@ func (a *App) refreshSummary(ctx context.Context, current domain.Message, previo
 	if err != nil {
 		return previous, err
 	}
-	if len(messages) == 80 {
+	if rest {
 		return a.refreshSummary(ctx, current, updated, force)
 	}
 	return updated, nil
 }
+
+// summaryMessageRunes and summaryInputBytes keep a summary prompt well under
+// adapters.MaxPromptBytes; a long agent answer adds little past its opening.
+const (
+	summaryMessageRunes = 2000
+	summaryInputBytes   = 64 << 10
+)
 
 func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
 	all, err := a.Store.Lanes(ctx)

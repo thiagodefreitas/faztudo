@@ -125,3 +125,11 @@ func TestFakeCLI(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 }
+
+func TestOversizedPromptIsAReadableError(t *testing.T) {
+	r := Request{Prompt: strings.Repeat("x", MaxPromptBytes+1), Mode: domain.RunRead, Workdir: t.TempDir()}
+	_, err := Claude{}.Command(r)
+	if err == nil || !strings.Contains(err.Error(), "KiB") {
+		t.Fatalf("err = %v", err)
+	}
+}

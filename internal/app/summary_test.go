@@ -198,3 +198,85 @@ func TestResolveLaneName(t *testing.T) {
 		t.Fatalf("ambiguous: %v", err)
 	}
 }
+
+// promptsAdapter records every prompt it is given.
+type promptsAdapter struct {
+	summaryAdapter
+	prompts *[]string
+}
+
+func (a promptsAdapter) Command(req adapters.Request) (adapters.Cmd, error) {
+	// summaryLane probes each adapter with a one-word prompt.
+	if req.Prompt != "summary" {
+		*a.prompts = append(*a.prompts, req.Prompt)
+	}
+	return a.summaryAdapter.Command(req)
+}
+
+func TestSummaryOfLongMessagesFitsOneArgument(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	lane := domain.Lane{ID: "cheap", CLI: "cheap", CostClass: domain.CostCheap, Capacity: 1, Health: domain.LaneAvailable, Windows: []domain.LaneWindow{}}
+	if _, err := s.Append(ctx, events.Draft{Type: events.LaneUpdated, Actor: events.System, Payload: lane}); err != nil {
+		t.Fatal(err)
+	}
+	ch := domain.Channel{ID: "ch", Name: "work"}
+	if _, err := s.Append(ctx, events.Draft{Type: events.ChannelCreated, Actor: events.System, ChannelID: ch.ID, Payload: ch}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().UTC()
+	// Forty agent answers of 40 KB each: 1.6 MB, far over one argv string.
+	for i := 1; i <= 40; i++ {
+		msg := domain.Message{ID: fmt.Sprintf("msg-%03d", i), ChannelID: ch.ID, AuthorID: "agent", Body: fmt.Sprintf("answer %d ", i) + strings.Repeat("word ", 8000), CreatedAt: start.Add(time.Duration(i) * time.Second)}
+		if _, err := s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: ch.ID, Payload: msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg, err := lanes.New([]lanes.LaneConfig{{ID: "cheap", CLI: "cheap", CostClass: domain.CostCheap, Capacity: 1}}, nil, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last string
+	var prompts []string
+	a := App{Store: s, Config: config.Defaults(), Paths: config.Paths{DataDir: t.TempDir()}, Registry: reg, Adapters: map[string]adapters.Adapter{"cheap": promptsAdapter{summaryAdapter{name: "cheap", prompt: &last}, &prompts}}}
+	got, err := a.RegenerateSummary(ctx, ch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ThroughMessageID != "msg-040" {
+		t.Fatalf("summary stopped at %q", got.ThroughMessageID)
+	}
+	if len(prompts) < 2 {
+		t.Fatalf("one pass for 1.6 MB of messages: %d", len(prompts))
+	}
+	for i, p := range prompts {
+		if len(p) > adapters.MaxPromptBytes {
+			t.Fatalf("prompt %d is %d bytes", i, len(p))
+		}
+	}
+	if !strings.Contains(prompts[0], "answer 1 ") || !strings.Contains(prompts[len(prompts)-1], "answer 40 ") {
+		t.Fatal("a pass skipped messages")
+	}
+}
+
+func TestRolloverKeepsTranscriptUnderArgumentLimit(t *testing.T) {
+	var messages []domain.Message
+	for i := 0; i < 10; i++ {
+		messages = append(messages, domain.Message{Body: strings.Repeat("x", 30<<10)})
+	}
+	messages = append(messages, domain.Message{Body: "latest"})
+	for _, limit := range []int{0, 1_000_000} {
+		got := rolloverMessages(messages, "summary", limit)
+		size := 0
+		for _, m := range got {
+			size += len(m.Body)
+		}
+		if size > transcriptBytes || got[len(got)-1].Body != "latest" {
+			t.Fatalf("limit %d kept %d bytes in %d messages", limit, size, len(got))
+		}
+	}
+}
