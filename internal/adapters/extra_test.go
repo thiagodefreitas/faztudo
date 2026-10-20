@@ -142,6 +142,9 @@ func TestGrokCleanAnswerSpacesGluedSentences(t *testing.T) {
 		"```\nworked.Then x\n```\nit worked.Then left":                       "```\nworked.Then x\n```\nit worked. Then left",
 		"Run the tests.Done":                                                 "Run the tests. Done",
 		"first.Reviewing the diff":                                           "first. Reviewing the diff",
+		"how events are looked up.A signed-in caller":                        "how events are looked up. A signed-in caller",
+		"a non-member.`runPrompt` is not here":                               "a non-member. `runPrompt` is not here",
+		"call x.`y` and go.Running":                                          "call x.`y` and go.Running",
 		"takes a context.Context and store.Rebuild runs":                     "takes a context.Context and store.Rebuild runs",
 	}
 	for in, want := range cases {

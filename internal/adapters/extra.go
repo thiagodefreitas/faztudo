@@ -53,7 +53,11 @@ func (Grok) CleanAnswer(out string) string {
 // sentence, directly followed by a capitalized word. Go identifiers match
 // that shape too (context.Context, store.Rebuild), so a match only splits
 // when the second word usually opens a sentence; see sentenceOpener.
-var gluedSentence = regexp.MustCompile(`(^|\s)([a-z][a-z'-]{2,}[a-z][.!?])([A-Z][a-z']*)(\s|,|$)`)
+var gluedSentence = regexp.MustCompile(`(^|\s)([a-z][a-z'-]*[a-z][.!?])([A-Z][a-z']*)(\s|,|$)`)
+
+// gluedBeforeCode matches prose that ends a sentence right where inline code
+// starts ("a non-member.` + "`runPrompt`" + ` is").
+var gluedBeforeCode = regexp.MustCompile(`(?:^|\s)[a-z][a-z'-]*[a-z][.!?]$`)
 
 // sentenceOpeners are the words grok's narration segments start with.
 var sentenceOpeners = map[string]bool{
@@ -66,8 +70,14 @@ var sentenceOpeners = map[string]bool{
 	"Those": true, "We": true, "With": true, "Yes": true,
 }
 
-func sentenceOpener(word string) bool {
-	return sentenceOpeners[word] || (len(word) > 4 && strings.HasSuffix(word, "ing"))
+// sentenceOpener reports whether word, after a glued sentence end of the
+// given length, starts a new sentence. A short word before an -ing word is
+// too often code to split.
+func sentenceOpener(before, word string) bool {
+	if sentenceOpeners[word] {
+		return true
+	}
+	return len(before) > 4 && len(word) > 4 && strings.HasSuffix(word, "ing")
 }
 
 // SpaceGluedSentences adds the missing space between run-together sentences
@@ -87,11 +97,16 @@ func SpaceGluedSentences(text string) string {
 		for j := 0; j < len(parts); j += 2 {
 			parts[j] = gluedSentence.ReplaceAllStringFunc(parts[j], func(m string) string {
 				g := gluedSentence.FindStringSubmatch(m)
-				if !sentenceOpener(g[3]) {
+				if !sentenceOpener(g[2], g[3]) {
 					return m
 				}
 				return g[1] + g[2] + " " + g[3] + g[4]
 			})
+		}
+		for j := 0; j+1 < len(parts); j += 2 {
+			if gluedBeforeCode.MatchString(parts[j]) {
+				parts[j] += " "
+			}
 		}
 		lines[i] = strings.Join(parts, "`")
 	}
