@@ -19,11 +19,11 @@ hero:
 import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 <div class="fz-status">
-  <strong>Alpha, version 0.1.4.</strong> Chat, runs, approvals, tasks,
+  <strong>Alpha, version 0.1.5.</strong> Chat, runs, approvals, tasks,
   projects, compare mode, the Lanes dashboard, the 2D and 3D office and phone
   access over your LAN work today. Install it from the
   <a href="https://github.com/thiagodefreitas/faztudo/releases">releases page</a>.
-  Signal is in progress and a desktop app is next. See the
+  Signal is in progress and the Linux desktop app ships with each release. See the
   <a href="/faztudo/roadmap/">roadmap</a>.
 </div>
 
@@ -61,18 +61,26 @@ Every agent has a desk. In 3D they are characters that act out what they are doi
   <img src="/faztudo/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" />
 </div>
 
-## What is new in 0.1.4
+## What is new in 0.1.5
 
-- **A desktop app for Linux.** faztudo in its own window with a tray icon,
-  as a `.deb` next to the faztudo package or as an AppImage that carries
-  faztudo. Closing hides it to the tray, and Quit asks whether to leave
-  your agents running.
-- **`faztudo stop`.** Cancels the runs in progress, then stops the
-  background service.
-- **Signal, step 2.** `faztudo bridge signal link` links faztudo to your
-  Signal account with a QR code in the terminal.
+- **Agents share the work.** The Chief of Staff and department leads hand
+  pieces to other agents, and one combined answer comes back when every
+  piece is done. Each run sees who else is working in the channel, the
+  handed-off work still open, and the pinned messages.
+- **Agents read more of the project.** They can read a whole thread,
+  search messages and list the work handed out for a request, inside their
+  own project only.
+- **A smoother chat.** Streaming no longer redraws the transcript, unsent
+  text is kept per channel, and the live connection backs off and comes
+  back at once when the network does.
+- **Clearer failures.** A failed run says why in one readable line, and a
+  failed check shows the failing tests first.
+- **Steadier runs.** Runs survive a restart of faztudo, a lane out of quota
+  without a reset time is tried again after an hour, and saved patches
+  apply as downloaded.
 
-Release 0.1.3 brought office zoom and a faster start of the web app.
+Release 0.1.4 brought the Linux desktop app, `faztudo stop` and Signal
+linking.
 
 ## Why faztudo
 

@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-20
+
 ### Added
 
 - Agent prompts show active work and open handoffs in the channel, plus pinned
