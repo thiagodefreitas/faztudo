@@ -280,3 +280,18 @@ func TestRolloverKeepsTranscriptUnderArgumentLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyAFailedSummaryCLIPausesTheChannel(t *testing.T) {
+	ctx := context.Background()
+	if summaryCostlyFailure(ctx, fmt.Errorf("%w: summary lane x unavailable", errNoSummaryLane)) {
+		t.Fatal("a busy lane paused summaries")
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if summaryCostlyFailure(cancelled, context.Canceled) {
+		t.Fatal("a cancelled request paused summaries")
+	}
+	if !summaryCostlyFailure(ctx, fmt.Errorf("exit status 1")) || summaryCostlyFailure(ctx, nil) {
+		t.Fatal("a failed CLI must pause summaries, success must not")
+	}
+}

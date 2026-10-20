@@ -654,6 +654,8 @@ func (r *Registry) ApplySignalForChannel(ctx context.Context, runID, channelID, 
 		r.mu.Unlock()
 		return fmt.Errorf("unknown lane %s", laneID)
 	}
+	// A clean run from before this failure says nothing about the lane now.
+	delete(r.cleanAt, laneID)
 	if signal.Kind == adapters.SignalExhausted {
 		if signal.Until.IsZero() {
 			// No reset in the error. Try the lane again later rather than

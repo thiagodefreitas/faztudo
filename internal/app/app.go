@@ -366,6 +366,17 @@ func (a *App) Start(ctx context.Context) error {
 // alone after its summary failed.
 const summaryRetryAfter = 30 * time.Minute
 
+// errNoSummaryLane means no summary lane was free. Nothing ran, so it costs
+// nothing to try again on the next message or tick.
+var errNoSummaryLane = errors.New("no summary lane available")
+
+// summaryCostlyFailure reports whether a failed summary started a CLI that
+// failed. Only those pause the channel's summaries; a busy lane or a
+// cancelled request does not.
+func summaryCostlyFailure(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() == nil && !errors.Is(err, errNoSummaryLane)
+}
+
 // RefreshSummaries also covers quiet channels whose messages mention no agent.
 func (a *App) RefreshSummaries(ctx context.Context) error {
 	channels, err := a.Store.Channels(ctx)
@@ -387,8 +398,10 @@ func (a *App) RefreshSummaries(ctx context.Context) error {
 		_, err = a.refreshSummary(ctx, domain.Message{ChannelID: channel.ID}, previous, false)
 		lock.Unlock()
 		if err != nil {
-			a.summaryFailedAt.Store(channel.ID, now)
-			slog.Warn("channel summary failed", "channel", channel.ID, "err", err)
+			if summaryCostlyFailure(ctx, err) {
+				a.summaryFailedAt.Store(channel.ID, now)
+				slog.Warn("channel summary failed", "channel", channel.ID, "err", err)
+			}
 			errs = append(errs, fmt.Errorf("channel %s: %w", channel.ID, err))
 		} else {
 			a.summaryFailedAt.Delete(channel.ID)
@@ -1502,10 +1515,10 @@ func (a *App) promptPartsForRun(ctx context.Context, m domain.Message, runID str
 	summary, _ := a.Store.ChannelSummary(ctx, m.ChannelID)
 	if at, ok := a.summaryFailedAt.Load(m.ChannelID); !ok || time.Since(at.(time.Time)) >= summaryRetryAfter {
 		refreshed, err := a.refreshSummary(ctx, m, summary, false)
-		if err != nil {
+		if summaryCostlyFailure(ctx, err) {
 			a.summaryFailedAt.Store(m.ChannelID, time.Now())
 			slog.Warn("channel summary failed", "channel", m.ChannelID, "err", err)
-		} else {
+		} else if err == nil {
 			a.summaryFailedAt.Delete(m.ChannelID)
 		}
 		summary = refreshed
@@ -1622,7 +1635,15 @@ func estimatedContextTokens(messages []domain.Message, summary string) int {
 	return used
 }
 
+// summaryPasses bounds the passes of one refresh. A long backlog is caught up
+// by the background refresh, not inside one run's prompt build.
+const summaryPasses = 4
+
 func (a *App) refreshSummary(ctx context.Context, current domain.Message, previous store.ChannelSummary, force bool) (store.ChannelSummary, error) {
+	return a.refreshSummaryPasses(ctx, current, previous, force, summaryPasses)
+}
+
+func (a *App) refreshSummaryPasses(ctx context.Context, current domain.Message, previous store.ChannelSummary, force bool, passes int) (store.ChannelSummary, error) {
 	messages, err := a.Store.RootMessagesAfter(ctx, current.ChannelID, previous.ThroughMessageID)
 	if err != nil {
 		return previous, err
@@ -1682,7 +1703,7 @@ func (a *App) refreshSummary(ctx context.Context, current domain.Message, previo
 		return previous, errors.New("summary lane returned no text")
 	}
 	if len(answer) > 4000 {
-		answer = answer[:4000]
+		answer = strings.ToValidUTF8(answer[:4000], "")
 	}
 	updated := store.ChannelSummary{ChannelID: current.ChannelID, LaneID: lane.ID, Text: answer, ThroughMessageID: messages[len(messages)-1].ID, UpdatedAt: time.Now().UTC()}
 	_, err = a.Store.Append(ctx, events.Draft{Type: events.ChannelSummarized, Actor: events.System, ChannelID: current.ChannelID, Payload: updated})
@@ -1690,7 +1711,9 @@ func (a *App) refreshSummary(ctx context.Context, current domain.Message, previo
 		return previous, err
 	}
 	if rest {
-		return a.refreshSummary(ctx, current, updated, force)
+		if passes > 1 {
+			return a.refreshSummaryPasses(ctx, current, updated, force, passes-1)
+		}
 	}
 	return updated, nil
 }
@@ -1714,7 +1737,7 @@ func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
 				return l, nil
 			}
 		}
-		return domain.Lane{}, fmt.Errorf("summary lane %s unavailable", preferred)
+		return domain.Lane{}, fmt.Errorf("%w: summary lane %s unavailable", errNoSummaryLane, preferred)
 	}
 	rank := func(c domain.CostClass) int {
 		switch c {
@@ -1739,7 +1762,7 @@ func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
 			return l, nil
 		}
 	}
-	return domain.Lane{}, errors.New("no summary lane available")
+	return domain.Lane{}, errNoSummaryLane
 }
 
 // readOnlyCapable reports whether the adapter can build a read-only command.
@@ -2023,6 +2046,8 @@ func fitSubject(line string) string {
 // out of an answer and returns it as the proposed message. Some CLIs repeat
 // their closing lines when late background output arrives; the reply ends at
 // the first COMMIT: line with the final subject, so the repeats are dropped.
+// The proposal is still the last block: text between repeats is the CLI's
+// chatter, not a commit body.
 func splitCommit(answer string) (reply, proposal string) {
 	locs := commitLine.FindAllStringIndex(answer, -1)
 	if len(locs) == 0 {

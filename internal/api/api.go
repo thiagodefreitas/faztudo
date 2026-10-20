@@ -1483,6 +1483,11 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 		if evt.ChannelID != "" && !a.canSee(streamCtx, me, evt.ChannelID) {
 			continue
 		}
+		// A stored prompt can be 120 KB and no client renders it from the
+		// stream; the Context tab fetches it when opened.
+		if evt.Type == events.RunPrompt {
+			continue
+		}
 		b, _ := json.Marshal(evt)
 		if err = conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			return

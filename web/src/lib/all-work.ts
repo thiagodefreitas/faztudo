@@ -79,13 +79,13 @@ export function fromHandle(run: Run, trigger: Message | undefined, members: Memb
   return author?.kind === "agent" ? author.handle : undefined
 }
 
-/** Runs of the last 24 hours grouped into columns, newest first. */
+/** Runs of the last 24 hours grouped into columns, newest first. Unfinished runs stay whatever their age: an old queued run is the one to look at. */
 export function groupWork(runs: Run[], messages: Message[], members: Member[], now: number): Record<WorkColumn, WorkCard[]> {
   const byId = new Map(messages.map((message) => [message.id, message]))
   const out: Record<WorkColumn, WorkCard[]> = { queued: [], running: [], needs_you: [], done: [], failed: [] }
   const recent = runs
     .map((run) => ({ run, time: runTime(run) }))
-    .filter(({ run, time }) => time === undefined || now - time <= DAY || workColumn(run) === "running" || workColumn(run) === "needs_you")
+    .filter(({ run, time }) => time === undefined || now - time <= DAY || workColumn(run) !== "done" && workColumn(run) !== "failed")
     .sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
   for (const { run } of recent) {
     const trigger = byId.get(run.trigger_message_id)

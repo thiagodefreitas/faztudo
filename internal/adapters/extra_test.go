@@ -140,12 +140,15 @@ func TestGrokCleanAnswerSpacesGluedSentences(t *testing.T) {
 		"see e.g.The docs and fmt.Println and https://x.io/a.B":              "see e.g.The docs and fmt.Println and https://x.io/a.B",
 		"call `done.Next` here":                                              "call `done.Next` here",
 		"```\nworked.Then x\n```\nit worked.Then left":                       "```\nworked.Then x\n```\nit worked. Then left",
-		"Run the tests.Done":                                                 "Run the tests. Done",
+		"Run the tests.Then stop":                                            "Run the tests. Then stop",
 		"first.Reviewing the diff":                                           "first. Reviewing the diff",
 		"how events are looked up.A signed-in caller":                        "how events are looked up. A signed-in caller",
 		"a non-member.`runPrompt` is not here":                               "a non-member. `runPrompt` is not here",
 		"call x.`y` and go.Running":                                          "call x.`y` and go.Running",
 		"takes a context.Context and store.Rebuild runs":                     "takes a context.Context and store.Rebuild runs",
+		"The clock is time.Now, replaced in tests":                           "The clock is time.Now, replaced in tests",
+		"waits on group.Done or ctx":                                         "waits on group.Done or ctx",
+		"see store.Pending here and lanes.This":                              "see store.Pending here and lanes.This",
 	}
 	for in, want := range cases {
 		if got := (Grok{}).CleanAnswer(in); got != want {

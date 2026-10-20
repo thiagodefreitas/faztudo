@@ -60,24 +60,35 @@ var gluedSentence = regexp.MustCompile(`(^|\s)([a-z][a-z'-]*[a-z][.!?])([A-Z][a-
 var gluedBeforeCode = regexp.MustCompile(`(?:^|\s)[a-z][a-z'-]*[a-z][.!?]$`)
 
 // sentenceOpeners are the words grok's narration segments start with.
+// Words that are also common Go identifiers (Now, Done, Next, Running) are
+// left out: "time.Now" must stay whole.
 var sentenceOpeners = map[string]bool{
 	"A": true, "All": true, "An": true, "And": true, "Also": true, "Both": true,
-	"But": true, "Done": true, "Everything": true, "Found": true, "Here": true,
-	"I": true, "I'll": true, "I'm": true, "I've": true, "It": true, "It's": true,
-	"Its": true, "Let": true, "Let's": true, "Next": true, "No": true,
-	"Nothing": true, "Now": true, "OK": true, "So": true, "That": true,
+	"But": true, "Everything": true, "Here": true, "I": true, "I'll": true,
+	"I'm": true, "I've": true, "It": true, "It's": true, "Its": true,
+	"Let": true, "Let's": true, "Nothing": true, "So": true, "That": true,
 	"The": true, "Then": true, "There": true, "These": true, "This": true,
-	"Those": true, "We": true, "With": true, "Yes": true,
+	"Those": true, "We": true, "Yes": true,
+	// Narration verbs: "the diff first.Reviewing the tests".
+	"Checking": true, "Comparing": true, "Inspecting": true, "Looking": true,
+	"Reading": true, "Reviewing": true, "Searching": true, "Verifying": true,
 }
 
-// sentenceOpener reports whether word, after a glued sentence end of the
-// given length, starts a new sentence. A short word before an -ing word is
-// too often code to split.
+// identifierPrefixes are package and receiver names that precede a
+// capitalized word in Go code quoted as prose (store.Pending, group.Done).
+var identifierPrefixes = map[string]bool{
+	"api": true, "app": true, "bytes": true, "context": true, "ctx": true,
+	"domain": true, "errors": true, "events": true, "exec": true, "filepath": true,
+	"fmt": true, "group": true, "http": true, "io": true, "json": true,
+	"lanes": true, "os": true, "regexp": true, "runner": true, "slog": true,
+	"sort": true, "store": true, "strconv": true, "strings": true, "sync": true,
+	"testing": true, "time": true, "wg": true,
+}
+
+// sentenceOpener reports whether word starts a new sentence after the glued
+// sentence end before ("first." in "first.Reviewing").
 func sentenceOpener(before, word string) bool {
-	if sentenceOpeners[word] {
-		return true
-	}
-	return len(before) > 4 && len(word) > 4 && strings.HasSuffix(word, "ing")
+	return sentenceOpeners[word] && !identifierPrefixes[strings.TrimRight(before, ".!?")]
 }
 
 // SpaceGluedSentences adds the missing space between run-together sentences

@@ -70,3 +70,11 @@ describe("requestLine", () => {
     expect(requestLine("@chief")).toBe("@chief")
   })
 })
+
+describe("old unfinished runs", () => {
+  it("keeps a queued run older than a day", () => {
+    const old = run("q1", "queued", { started_at: hours(72) })
+    const columns = groupWork([old], [], [], NOW)
+    expect(columns.queued.map((card) => card.run.id)).toEqual(["q1"])
+  })
+})
