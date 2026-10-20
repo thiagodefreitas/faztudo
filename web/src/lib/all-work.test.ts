@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Member, Message, Run } from "../types"
-import { fromHandle, groupWork, workColumn } from "./all-work"
+import { fromHandle, groupWork, requestLine, workColumn } from "./all-work"
 
 const NOW = Date.parse("2026-10-20T20:00:00Z")
 const hours = (h: number) => new Date(NOW - h * 3600_000).toISOString()
@@ -60,5 +60,13 @@ describe("fromHandle", () => {
     expect(fromHandle(run("1", "done"), message("m", "h1", "x"), members)).toBeUndefined()
     expect(fromHandle(run("1", "done"), message("m", "a1", "x"), members)).toBeUndefined()
     expect(fromHandle(run("1", "done"), undefined, members)).toBeUndefined()
+  })
+})
+
+describe("requestLine", () => {
+  it("skips the mention and lane override of a brief", () => {
+    expect(requestLine("@coder /lane codex/default\n\nTask: add the context tab\nmore")).toBe("Task: add the context tab")
+    expect(requestLine("@chief what runs now?")).toBe("what runs now?")
+    expect(requestLine("@chief")).toBe("@chief")
   })
 })

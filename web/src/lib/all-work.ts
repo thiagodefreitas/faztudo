@@ -65,6 +65,13 @@ export function firstLine(body: string): string {
   return body.split("\n").find((line) => line.trim() !== "")?.trim() ?? ""
 }
 
+const LEADING_ROUTING = /^\s*(?:@[\w-]+[\s,:]+|\/lane\s+\S+\s+)+/i
+
+/** First line of a request after its leading mentions and /lane override. */
+export function requestLine(body: string): string {
+  return firstLine(body.replace(LEADING_ROUTING, "")) || firstLine(body)
+}
+
 /** Handle of the agent that wrote the trigger message, unless it is the run's own agent. */
 export function fromHandle(run: Run, trigger: Message | undefined, members: Member[]): string | undefined {
   if (!trigger || trigger.author_id === run.agent_id) return undefined
@@ -83,7 +90,9 @@ export function groupWork(runs: Run[], messages: Message[], members: Member[], n
   for (const { run } of recent) {
     const trigger = byId.get(run.trigger_message_id)
     const column = workColumn(run)
-    out[column].push({ run, column, request: trigger ? firstLine(trigger.body) : "", from: fromHandle(run, trigger, members) })
+    // The request without its leading mention or /lane override, which
+    // carry no information on a card that already names agent and lane.
+    out[column].push({ run, column, request: trigger ? requestLine(trigger.body) : "", from: fromHandle(run, trigger, members) })
   }
   return out
 }
