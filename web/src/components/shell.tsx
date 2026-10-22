@@ -7,6 +7,7 @@ import { CommandPalette } from "./palette"
 import { SearchDialog } from "./search-dialog"
 import { Sidebar } from "./sidebar"
 import { PwaStatus } from "./pwa-status"
+import { ProfileSheet } from "./profile/profile-sheet"
 
 function LiveStreamBridge() {
   useLiveStream()
@@ -24,6 +25,7 @@ export function Shell() {
       <LiveStreamBridge />
       <Sidebar />
       <CommandPalette />
+      <ProfileSheet />
       <SearchDialog />
       <Notifier />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">

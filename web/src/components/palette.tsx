@@ -17,6 +17,7 @@ import { Kbd } from "./page-header"
 import { OPEN_SEARCH_EVENT } from "./search-dialog"
 import { TaskBuilder } from "./tasks/task-builder"
 import { OPEN_TODAY_EVENT } from "./today-brief"
+import { useProfileNavigation } from "./profile/navigation"
 
 // The channel page listens for this to open its settings dialog.
 export const OPEN_SETTINGS_EVENT = "faztudo:open-settings"
@@ -120,6 +121,7 @@ const ICON = {
 }
 
 export function CommandPalette() {
+  const { openProfile } = useProfileNavigation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [creating, setCreating] = useState(false)
@@ -238,6 +240,14 @@ export function CommandPalette() {
         run: () => void openDirect(member),
       }),
     ),
+    ...others.filter((member) => member.kind === "agent").map((member): Entry => ({
+      id: `profile:${member.id}`,
+      group: "Agents",
+      value: `profile @${member.handle} ${member.display_name}`,
+      icon: <AgentAvatar member={member} size={20} decorative />,
+      label: `Profile: @${member.handle}`,
+      run: () => openProfile(member.handle),
+    })),
     ...(lanes.data ?? []).map((lane): Entry => {
       const gauge = laneGauge(lane, now)
       return {

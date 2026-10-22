@@ -18,6 +18,7 @@ export interface RouterContext {
 }
 
 export interface ChannelSearch {
+  profile?: string;
   run?: string;
   thread?: string;
   /** A message to scroll to, set by search results. */
@@ -27,6 +28,7 @@ export interface ChannelSearch {
 
 function validateSearch(search: Record<string, unknown>): ChannelSearch {
   const result: ChannelSearch = {};
+  if (typeof search.profile === "string" && search.profile) result.profile = search.profile;
   if (typeof search.run === "string" && search.run) result.run = search.run;
   if (typeof search.thread === "string" && search.thread)
     result.thread = search.thread;
@@ -49,6 +51,8 @@ async function withAuthRedirect<T>(work: () => Promise<T>): Promise<T> {
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: Shell,
+  validateSearch: (search: Record<string, unknown>): { profile?: string } =>
+    typeof search.profile === "string" && search.profile ? { profile: search.profile } : {},
 });
 
 const loginRoute = createRoute({

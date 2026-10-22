@@ -28,6 +28,7 @@ import { buildRows, unreadIds } from "./chat/rows"
 import { CompareCard } from "./compare/compare-card"
 import { Markdown } from "./markdown"
 import { RunCard } from "./run-card"
+import { useProfileNavigation } from "./profile/navigation"
 
 const EMPTY_MESSAGES: Message[] = []
 const EMPTY_MEMBERS: Member[] = []
@@ -447,6 +448,7 @@ const MessageRow = memo(function MessageRow({
   delegation: string | undefined
   onOpenThread: ((message: Message) => void) | undefined
 }) {
+  const { openProfile } = useProfileNavigation()
   const [fresh] = useState(() => Date.now() - Date.parse(message.created_at) < 8000)
   const replies = message.reply_count ?? 0
   const authorName = author?.display_name ?? "Member"
@@ -475,14 +477,14 @@ const MessageRow = memo(function MessageRow({
             {time}
           </time>
         ) : (
-          author?.kind === "human" ? <HumanAvatar member={author} className="mt-0.5 max-sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="mt-0.5 max-sm:hidden" />
+          <button type="button" onClick={() => author && openProfile(author.handle)} disabled={!author} aria-label={author ? `Profile: @${author.handle}` : undefined} className="mt-0.5 flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent max-sm:hidden">{author?.kind === "human" ? <HumanAvatar member={author} className="max-sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="max-sm:hidden" />}</button>
         )}
-        {lastInGroup && (author?.kind === "human" ? <HumanAvatar member={author} className="sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="sm:hidden" />)}
+        {lastInGroup && <button type="button" onClick={() => author && openProfile(author.handle)} disabled={!author} aria-label={author ? `Profile: @${author.handle}` : undefined} className="flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent sm:hidden">{author?.kind === "human" ? <HumanAvatar member={author} /> : <AgentAvatar member={author} size={28} decorative />}</button>}
       </div>
       <div className={cx("min-w-0 flex-1", mine && "max-sm:flex max-sm:flex-col max-sm:items-end")}>
         {!grouped && (
           <header className={cx("flex items-baseline gap-2 md:pr-40", mine && "max-sm:hidden")}>
-            <p className="text-[13px] font-semibold">{authorName}</p>
+            {author ? <button type="button" onClick={() => openProfile(author.handle)} className="rounded text-[13px] font-semibold hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{authorName}</button> : <p className="text-[13px] font-semibold">{authorName}</p>}
             <time className="font-mono text-[11px] text-faint" dateTime={message.created_at} title={new Date(message.created_at).toLocaleString()}>
               {time}
             </time>

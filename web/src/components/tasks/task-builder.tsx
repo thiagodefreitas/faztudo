@@ -36,6 +36,7 @@ export function TaskBuilder({
   channels,
   channelId,
   initialTitle = "",
+  initialAssignee,
   onCreated,
 }: {
   open: boolean
@@ -44,6 +45,7 @@ export function TaskBuilder({
   channels: Channel[]
   channelId?: string | undefined
   initialTitle?: string
+  initialAssignee?: string
   onCreated?: (task: Task) => void
 }) {
   return (
@@ -55,7 +57,7 @@ export function TaskBuilder({
           <Dialog.Description className="mt-1 text-[12px] text-muted">
             A clear directive for one agent. Starting it posts the directive in the channel and runs the agent.
           </Dialog.Description>
-          <BuilderForm channels={channels} channelId={channelId} initialTitle={initialTitle} onDone={(task) => { onOpenChange(false); onCreated?.(task) }} onCancel={() => onOpenChange(false)} />
+          <BuilderForm channels={channels} channelId={channelId} initialTitle={initialTitle} initialAssignee={initialAssignee} onDone={(task) => { onOpenChange(false); onCreated?.(task) }} onCancel={() => onOpenChange(false)} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -73,12 +75,14 @@ function BuilderForm({
   channels,
   channelId,
   initialTitle,
+  initialAssignee,
   onDone,
   onCancel,
 }: {
   channels: Channel[]
   channelId: string | undefined
   initialTitle: string
+  initialAssignee?: string
   onDone: (task: Task) => void
   onCancel: () => void
 }) {
@@ -96,7 +100,8 @@ function BuilderForm({
   const [acceptance, setAcceptance] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const selected = assignee ?? defaultAssignee(channels.find((item) => item.id === channel), agents)
+  const preset = agents.some((item) => item.handle === initialAssignee) ? initialAssignee : undefined
+  const selected = assignee ?? preset ?? defaultAssignee(channels.find((item) => item.id === channel), agents)
   const agent = agents.find((item) => item.handle === selected)
   const laneChoices = agent?.agent?.lanes ?? []
 

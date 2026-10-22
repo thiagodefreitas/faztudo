@@ -22,6 +22,7 @@ import { healthDotClass } from "./lane-chip"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
 import { laneBorrower } from "./office/state"
 import { useLanesShortcut } from "./lanes"
+import { useProfileNavigation } from "./profile/navigation"
 
 const PRESENCE: Record<Presence, string> = {
   online: "bg-ok",
@@ -594,6 +595,7 @@ function PeerRow({
   onNavigate: (() => void) | undefined
   onOpen: (member: Member) => void
 }) {
+  const { openProfile } = useProfileNavigation()
   const lane = lanes.find((item) => item.id === member.agent?.lanes[0])
   // A quiet "busy for @persona" only when the CLI is not busy itself.
   const busyFor = member.presence === "busy" ? null : laneBorrower(member, runs, members)
@@ -650,6 +652,7 @@ function PeerRow({
         </button>
       )}
       {member.kind === "agent" && <LaneDot lane={lane} now={now} />}
+      <button type="button" onClick={() => openProfile(member.handle)} aria-label={`Profile: @${member.handle}`} title={`Profile: @${member.handle}`} className="shrink-0 rounded px-1 text-[11px] text-faint transition-opacity hover:bg-canvas hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent pointer-fine:opacity-0 pointer-fine:group-focus-within:opacity-100 pointer-fine:group-hover:opacity-100">Profile</button>
     </li>
   )
 }

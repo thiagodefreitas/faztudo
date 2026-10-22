@@ -200,7 +200,7 @@ export class MockWorld {
         handle: "coder",
         display_name: "Coder",
         presence: "online",
-        agent: { lanes: ["codex/default", "claude/opus"], role: "Implements changes in a worktree" },
+        agent: { lanes: ["codex/default", "claude/opus"], role: "Implements changes in a worktree", description: "Makes focused code changes and checks the result before reporting." },
       },
       {
         id: IDS.reviewer,
@@ -414,7 +414,7 @@ export class MockWorld {
       handle,
       display_name: name,
       presence,
-      agent: { lanes, role },
+      agent: { lanes, role, description: `Works with the ${lanes.join(" then ")} lane chain and reports progress in the channel.` },
     })
     const added = [
       agent("architect", "Architect", ["claude/opus"], "Plans changes before anyone writes code", "busy"),
@@ -447,8 +447,25 @@ export class MockWorld {
       mode: "write",
       state: "running",
       started_at: iso(now - 3 * minute),
+      tokens: { input: 1800, output: 600, cache_read: 200, cache_write: 0 },
+      cost_usd: 0.012,
     }
     this.insertRun(working)
+    // An earlier run today, so the writer's profile shows a finished outcome and its cost.
+    this.insertRun({
+      id: ulid(now - 2 * 60 * minute),
+      trigger_message_id: IDS.msgHello,
+      channel_id: IDS.dev,
+      agent_id: writer!.id,
+      lane_id: "agy/default",
+      mode: "write",
+      state: "done",
+      started_at: iso(now - 2 * 60 * minute),
+      ended_at: iso(now - 2 * 60 * minute + 4 * minute),
+      exit_code: 0,
+      tokens: { input: 5200, output: 1400, cache_read: 900, cache_write: 0 },
+      cost_usd: 0.048,
+    })
     const asking: Run = {
       id: ulid(now),
       trigger_message_id: IDS.msgHello,

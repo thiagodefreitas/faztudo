@@ -12,6 +12,7 @@ import { LessonsButton } from "./lessons/lessons-dialog"
 import { avatarState } from "./office/avatar"
 import { deriveMemberDesk, type DeskInfo, type DeskState } from "./office/state"
 import { CreateProjectDialog } from "./project-dialogs"
+import { useProfileNavigation } from "./profile/navigation"
 import { CARD as CARD_BASE, EmptyState, PageHeader, PRIMARY_BUTTON, SECONDARY_BUTTON, SECTION_LABEL } from "./page-header"
 
 const CARD = `${CARD_BASE} min-w-0 p-4`
@@ -49,18 +50,19 @@ function AgentRow({
   badge?: string
   action?: ReactNode
 }) {
+  const { openProfile } = useProfileNavigation()
   // Lessons are the Director's to read and teach.
   const human = useMe().data?.kind === "human"
   return (
     <li className="flex min-h-10 flex-wrap items-center gap-2 py-1" data-agent={handle}>
       {member ? (
-        <AgentAvatar member={member} size={28} state={desk ? avatarState(desk.state) : undefined} decorative />
+        <button type="button" onClick={() => openProfile(handle)} aria-label={`Profile: @${handle}`} className="flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"><AgentAvatar member={member} size={28} state={desk ? avatarState(desk.state) : undefined} decorative /></button>
       ) : (
         <span className="inline-block h-7 w-7 rounded-md bg-sidebar" aria-hidden="true" />
       )}
       <div className="min-w-0 flex-1 basis-40">
         <p className="flex items-center gap-2 text-[13px]">
-          <span className="truncate font-medium">{member?.display_name ?? handle}</span>
+          <button type="button" onClick={() => openProfile(handle)} className="truncate rounded font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{member?.display_name ?? handle}</button>
           <span className="font-mono text-[11px] text-faint">@{handle}</span>
           {badge && <span className="rounded bg-accent-soft px-1.5 text-[11px] text-accent">{badge}</span>}
         </p>

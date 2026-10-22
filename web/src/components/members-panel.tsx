@@ -17,6 +17,7 @@ import { deriveMemberDesk, type DeskState } from "./office/state"
 import { LessonsButton } from "./lessons/lessons-dialog"
 import { TeamIcon } from "./team-icon"
 import { HumanAvatar } from "./chat/human-avatar"
+import { useProfileNavigation } from "./profile/navigation"
 
 const STATE_CLASS: Record<DeskState, string> = {
   idle: "bg-sidebar text-muted",
@@ -42,6 +43,7 @@ export function MembersPanel({ channel, open, onOpenChange }: { channel: Channel
 }
 
 function Panel({ channel }: { channel: Channel }) {
+  const { openProfile } = useProfileNavigation()
   const qc = useQueryClient()
   const me = useMe()
   const members = useMembers()
@@ -148,10 +150,10 @@ function Panel({ channel }: { channel: Channel }) {
               const director = member.id === org.data?.director_id
               return (
                 <li key={member.id} className="flex items-start gap-2.5 px-3 py-2" data-member={member.id} data-assigned={assigned}>
-                  {member.kind === "human" ? <HumanAvatar member={member} size={36} className="mt-0.5" /> : <AgentAvatar member={member} size={36} state={desk ? avatarState(desk.state) : undefined} decorative className="mt-0.5" />}
+                  <button type="button" onClick={() => openProfile(member.handle)} aria-label={`Profile: @${member.handle}`} className="mt-0.5 flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{member.kind === "human" ? <HumanAvatar member={member} size={36} /> : <AgentAvatar member={member} size={36} state={desk ? avatarState(desk.state) : undefined} decorative />}</button>
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
-                      <span className="font-medium">{member.display_name}</span>
+                      <button type="button" onClick={() => openProfile(member.handle)} className="rounded font-medium hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">{member.display_name}</button>
                       <span className="font-mono text-[11px] text-faint">@{member.handle}</span>
                       {you && <span className="text-[11px] text-faint">(you)</span>}
                       {isDefault && <span className="rounded bg-accent-soft px-1.5 text-[11px] text-accent">Default</span>}
