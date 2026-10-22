@@ -47,12 +47,32 @@ const RUN_STATE_CLASS: Record<RunState, string> = {
 
 const ACTIVE_RUN_STATES = new Set<RunState>(["queued", "running", "waiting_approval", "verifying"])
 
-const LEGEND = [
-  { key: "working", label: "Working", dot: "bg-accent" },
-  { key: "waiting", label: "Waiting", dot: "bg-warn" },
-  { key: "failed", label: "Failed", dot: "bg-danger" },
-  { key: "quota", label: "Out of quota", dot: "bg-faint opacity-50" },
+export type LegendKey = "working" | "waiting" | "failed" | "quota"
+
+const LEGEND: { key: LegendKey; label: string; dot: string; pressed: string }[] = [
+  { key: "working", label: "Working", dot: "bg-accent", pressed: "border-accent bg-accent-soft text-accent" },
+  { key: "waiting", label: "Waiting", dot: "bg-warn", pressed: "border-warn bg-warn-soft text-warn" },
+  { key: "failed", label: "Failed", dot: "bg-danger", pressed: "border-danger bg-danger-soft text-danger" },
+  { key: "quota", label: "Out of quota", dot: "bg-faint", pressed: "border-line bg-sidebar text-ink" },
 ]
+
+export function deskLegendKey(desk: DeskInfo): LegendKey | null {
+  if (desk.outOfQuota || desk.state === "out_of_quota") return "quota"
+  if (desk.state === "failed") return "failed"
+  if (desk.state === "waiting_approval") return "waiting"
+  if (desk.state === "working") return "working"
+  return null
+}
+
+export function toggleLegendKey(current: readonly LegendKey[], key: LegendKey): LegendKey[] {
+  return current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+}
+
+export function deskMatchesLegend(desk: DeskInfo, active: ReadonlySet<LegendKey>): boolean {
+  if (active.size === 0) return true
+  const key = deskLegendKey(desk)
+  return key !== null && active.has(key)
+}
 
 export function useCompactRoom(): boolean {
   return useSyncExternalStore(
@@ -67,19 +87,47 @@ export function useCompactRoom(): boolean {
   )
 }
 
-export function Legend() {
+export function Legend({
+  active,
+  onToggle,
+  className,
+}: {
+  active: ReadonlySet<LegendKey>
+  onToggle: (key: LegendKey) => void
+  className?: string
+}) {
   return (
-    <ul
+    <div
+      role="group"
       aria-label="Legend"
-      className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface/90 px-2 py-1 text-[10px] text-muted"
+      className={cx(
+        "absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-8.75rem)] flex-wrap gap-1",
+        className,
+      )}
     >
-      {LEGEND.map((item) => (
-        <li key={item.key} className="flex items-center gap-1">
-          <span className={cx("inline-block h-2 w-2 rounded-full", item.dot)} aria-hidden="true" />
-          {item.label}
-        </li>
-      ))}
-    </ul>
+      {LEGEND.map((item) => {
+        const pressed = active.has(item.key)
+        return (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={pressed}
+            onClick={() => onToggle(item.key)}
+            className={cx(
+              "inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2 text-[12px] font-medium transition-colors duration-150",
+              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent motion-reduce:transition-none",
+              pressed ? item.pressed : "border-line bg-surface text-muted hover:bg-sidebar",
+            )}
+          >
+            <span
+              className={cx("h-1.5 w-1.5 shrink-0 rounded-full", item.dot, item.key === "quota" && !pressed && "opacity-50")}
+              aria-hidden="true"
+            />
+            {item.label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -117,6 +165,8 @@ export function OfficeScene({
   const compactMedia = useCompactRoom()
   const compact = compactProp ?? compactMedia
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
+  const [legendOn, setLegendOn] = useState<LegendKey[]>([])
+  const legendActive = useMemo(() => new Set(legendOn), [legendOn])
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
 
   const lastMessageAtByAuthor = useMemo(() => {
@@ -241,29 +291,34 @@ export function OfficeScene({
           <div className="flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
             <span className="font-medium text-ink">Studio floor</span>
-            <span className="font-mono text-faint">{desks.length} desks</span>
+            <span className="tabular-nums text-faint">{desks.length} desks</span>
           </div>
-          <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] tabular-nums">
-            <span className="rounded bg-accent-soft px-1.5 py-0.5 text-accent">
+          <div className="flex flex-wrap items-center gap-1.5 text-[12px] tabular-nums">
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-accent-soft px-2 py-0.5 text-accent">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
               {counts.working} working
             </span>
             {counts.waiting > 0 && (
-              <span className="rounded bg-warn-soft px-1.5 py-0.5 text-warn">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-warn-soft px-2 py-0.5 text-warn">
+                <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
                 {counts.waiting} waiting approval
               </span>
             )}
             {counts.queued > 0 && (
-              <span className="rounded bg-sidebar px-1.5 py-0.5 text-muted">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-sidebar px-2 py-0.5 text-muted">
+                <span className="h-1.5 w-1.5 rounded-full bg-faint" aria-hidden="true" />
                 {counts.queued} queued
               </span>
             )}
             {counts.failed > 0 && (
-              <span className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-danger-soft px-2 py-0.5 text-danger">
+                <span className="h-1.5 w-1.5 rounded-full bg-danger" aria-hidden="true" />
                 {counts.failed} failed
               </span>
             )}
             {counts.outOfQuota > 0 && (
-              <span className="rounded bg-danger-soft px-1.5 py-0.5 text-danger">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-danger-soft px-2 py-0.5 text-danger">
+                <span className="h-1.5 w-1.5 rounded-full bg-danger opacity-50" aria-hidden="true" />
                 {counts.outOfQuota} out of quota
               </span>
             )}
@@ -273,7 +328,7 @@ export function OfficeScene({
         {desks.length === 0 ? (
           <p className="py-12 text-center text-[13px] text-muted">No workspace members yet.</p>
         ) : (
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-xs">
             {/* The back wall sits flush at the top (`xMidYMin meet`). On phones, pods reflow vertically inside this box.
                 Zooming moves the viewBox instead of scaling a picture, so text stays sharp. At fit-all the box is
                 drawn exactly as before. */}
@@ -292,7 +347,7 @@ export function OfficeScene({
               }}
               style={{ touchAction: compact && !view.active ? "pan-y" : "none" }}
               className={cx(
-                "h-full overflow-x-hidden focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+                "min-h-0 flex-1 overflow-x-hidden focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
                 view.active ? "overflow-y-hidden" : "overflow-y-auto",
               )}
             >
@@ -316,7 +371,7 @@ export function OfficeScene({
                   laneBars={laneBars}
                   onAreaClick={view.focusRect}
                 />
-                {room.seats.map((seat) => (
+                {room.seats.filter((seat) => deskMatchesLegend(seat.desk, legendActive)).map((seat) => (
                   <RoomDesk
                     key={seat.desk.member.id}
                     desk={seat.desk}
@@ -335,16 +390,23 @@ export function OfficeScene({
                 <AreaLabelTargets zones={room.zones} rug={room.rug} onSelect={view.focusRect} />
               </svg>
             </div>
-            <ZoomControls
-              areas={areas}
-              onFit={view.fit}
-              onJump={view.focusRect}
-              onZoomIn={() => view.zoomBy(ZOOM_STEP)}
-              onZoomOut={() => view.zoomBy(1 / ZOOM_STEP)}
-              canZoomIn={view.canZoomIn}
-              canZoomOut={view.canZoomOut}
-            />
-            <Legend />
+            <div className="max-sm:flex max-sm:flex-col max-sm:gap-1.5 max-sm:border-t max-sm:border-line max-sm:bg-surface max-sm:p-2 sm:contents">
+              <Legend
+                active={legendActive}
+                onToggle={(key) => setLegendOn((current) => toggleLegendKey(current, key))}
+                className="max-sm:static max-sm:max-w-none"
+              />
+              <ZoomControls
+                areas={areas}
+                onFit={view.fit}
+                onJump={view.focusRect}
+                onZoomIn={() => view.zoomBy(ZOOM_STEP)}
+                onZoomOut={() => view.zoomBy(1 / ZOOM_STEP)}
+                canZoomIn={view.canZoomIn}
+                canZoomOut={view.canZoomOut}
+                className="max-sm:static max-sm:max-w-none max-sm:self-end"
+              />
+            </div>
           </div>
         )}
       </div>
@@ -695,7 +757,7 @@ export function OfficePage() {
           </Dialog.Portal>
         </Dialog.Root>
         <h1 className="text-[15px] font-semibold">Office</h1>
-        <p className="font-mono text-[12px] text-muted">{desks.length} desks</p>
+        <p className="text-[12px] tabular-nums text-muted">{desks.length} desks</p>
         <OfficeViewToggle mode="2d" />
       </header>
       {isPending ? (

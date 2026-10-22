@@ -1,9 +1,10 @@
 import { Billboard, Edges, Html } from "@react-three/drei"
 import { useFrame } from "@react-three/fiber"
 import { useContext, useLayoutEffect, useMemo, useRef, type RefObject } from "react"
-import { type Group, type InstancedMesh, type Mesh, type MeshBasicMaterial, type MeshStandardMaterial, Object3D } from "three"
+import { Color, type Group, type InstancedMesh, type Mesh, type MeshBasicMaterial, type MeshStandardMaterial, Object3D } from "three"
+import { cx } from "../../../lib/cx"
 import type { Seat } from "../layout"
-import type { DeskInfo } from "../state"
+import type { DeskInfo, DeskState } from "../state"
 import {
   type HandoffAnimation,
   type MergeAnimation,
@@ -12,7 +13,6 @@ import {
 } from "./animations"
 import { CodeScreenContext } from "./code-screen"
 import { monitorScreenYaw, seatWorldCoords } from "./coords"
-import { approvalCardOffsetY } from "./life"
 import type { NameLabelPlacement } from "./labels"
 import {
   type CharacterIdentity,
@@ -25,6 +25,7 @@ import {
   type TaskBoardNote,
 } from "./poses"
 import type { ScenePalette } from "./scene3d"
+import { LabelPlacement } from "./view-rig"
 
 export { seatWorldCoords } from "./coords"
 
@@ -34,6 +35,14 @@ function seedFromId(id: string): number {
     hash = (hash * 31 + id.charCodeAt(i)) >>> 0
   }
   return hash
+}
+
+function statusDotClass(state: DeskState, outOfQuota: boolean): string {
+  if (outOfQuota || state === "out_of_quota") return "bg-faint"
+  if (state === "failed") return "bg-danger"
+  if (state === "waiting_approval") return "bg-warn"
+  if (state === "working") return "bg-accent"
+  return "bg-line"
 }
 
 // Instanced static geometry for all desks, monitors, and office chairs so 15+
@@ -59,6 +68,16 @@ export function InstancedDeskFurniture({
   const chairStemRef = useRef<InstancedMesh>(null)
 
   const dummy = useMemo(() => new Object3D(), [])
+  const colors = useMemo(
+    () => ({
+      top: new Color(palette.deskTop),
+      body: new Color(palette.deskBody),
+      chair: new Color(palette.chair),
+      director: new Color(palette.directorTop),
+      line: new Color(palette.line),
+    }),
+    [palette],
+  )
 
   useLayoutEffect(() => {
     if (count === 0) return
@@ -76,6 +95,7 @@ export function InstancedDeskFurniture({
         dummy.scale.set(deskW * 0.92, baseH, deskD * 0.88)
         dummy.updateMatrix()
         deskBaseRef.current.setMatrixAt(i, dummy.matrix)
+        deskBaseRef.current.setColorAt(i, colors.body)
       }
 
       if (deskTopRef.current) {
@@ -84,6 +104,7 @@ export function InstancedDeskFurniture({
         dummy.scale.set(deskW, topH, deskD)
         dummy.updateMatrix()
         deskTopRef.current.setMatrixAt(i, dummy.matrix)
+        deskTopRef.current.setColorAt(i, seat.desk.isDirector ? colors.director : colors.top)
       }
 
       if (standRef.current) {
@@ -108,6 +129,7 @@ export function InstancedDeskFurniture({
         dummy.scale.set(0.18 * scale, 0.28 * scale, 0.18 * scale)
         dummy.updateMatrix()
         chairStemRef.current.setMatrixAt(i, dummy.matrix)
+        chairStemRef.current.setColorAt(i, colors.line)
       }
 
       if (chairSeatRef.current) {
@@ -116,6 +138,7 @@ export function InstancedDeskFurniture({
         dummy.scale.set(0.46 * scale, 0.06 * scale, 0.44 * scale)
         dummy.updateMatrix()
         chairSeatRef.current.setMatrixAt(i, dummy.matrix)
+        chairSeatRef.current.setColorAt(i, colors.chair)
       }
 
       if (chairBackRef.current) {
@@ -124,15 +147,17 @@ export function InstancedDeskFurniture({
         dummy.scale.set(0.44 * scale, 0.42 * scale, 0.06 * scale)
         dummy.updateMatrix()
         chairBackRef.current.setMatrixAt(i, dummy.matrix)
+        chairBackRef.current.setColorAt(i, seat.desk.isDirector ? colors.director : colors.chair)
       }
     })
 
     for (const ref of [deskBaseRef, deskTopRef, standRef, bezelRef, chairStemRef, chairSeatRef, chairBackRef]) {
       if (ref.current) {
         ref.current.instanceMatrix.needsUpdate = true
+        if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true
       }
     }
-  }, [seats, count, roomWidth, roomHeight, dummy])
+  }, [seats, count, roomWidth, roomHeight, dummy, colors])
 
   if (count === 0) return null
 
@@ -140,31 +165,31 @@ export function InstancedDeskFurniture({
     <group>
       <instancedMesh ref={deskBaseRef} args={[undefined, undefined, count]} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={palette.line} roughness={0.82} />
+        <meshStandardMaterial color="#ffffff" roughness={0.84} />
       </instancedMesh>
       <instancedMesh ref={deskTopRef} args={[undefined, undefined, count]} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={palette.surface} roughness={0.55} />
+        <meshStandardMaterial color="#ffffff" roughness={0.72} />
       </instancedMesh>
       <instancedMesh ref={standRef} args={[undefined, undefined, count]} castShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={palette.line} roughness={0.75} />
+        <meshStandardMaterial color={palette.deskBody} roughness={0.75} />
       </instancedMesh>
       <instancedMesh ref={bezelRef} args={[undefined, undefined, count]} castShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.6} />
+        <meshStandardMaterial color={palette.deskBody} roughness={0.62} />
       </instancedMesh>
       <instancedMesh ref={chairStemRef} args={[undefined, undefined, count]} castShadow>
         <cylinderGeometry args={[0.45, 0.7, 1, 8]} />
-        <meshStandardMaterial color={palette.faint} roughness={0.7} />
+        <meshStandardMaterial color="#ffffff" roughness={0.7} />
       </instancedMesh>
       <instancedMesh ref={chairSeatRef} args={[undefined, undefined, count]} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.72} />
+        <meshStandardMaterial color="#ffffff" roughness={0.78} />
       </instancedMesh>
       <instancedMesh ref={chairBackRef} args={[undefined, undefined, count]} castShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={palette.sidebar} roughness={0.72} />
+        <meshStandardMaterial color="#ffffff" roughness={0.78} />
       </instancedMesh>
     </group>
   )
@@ -604,27 +629,16 @@ export function CharacterSeatGroup({
   const deskW = 1.68 * scale
   const deskD = 0.9 * scale
   const deskH = 0.42 * scale
-  const cardBaseY = deskH + 0.72 * scale
+  const dimmed = desk.outOfQuota || desk.state === "out_of_quota"
 
   const torsoGroupRef = useRef<Group>(null)
   const headGroupRef = useRef<Group>(null)
   const leftArmRef = useRef<Group>(null)
   const rightArmRef = useRef<Group>(null)
   const screenMatRef = useRef<MeshStandardMaterial>(null)
-  const cardRef = useRef<Group>(null)
-  const labelRef = useRef<HTMLButtonElement>(null)
+  const stackRef = useRef<HTMLDivElement>(null)
 
   useFrame(({ clock }) => {
-    const labelEl = labelRef.current
-    const place = placementsRef.current?.get(member.id)
-    if (labelEl && place) {
-      labelEl.style.opacity = place.opacity.toFixed(3)
-      labelEl.style.transform =
-        place.offsetX === 0 && place.offsetY === 0 ? "" : `translate(${place.offsetX}px, ${place.offsetY}px)`
-    }
-    if (cardRef.current) {
-      cardRef.current.position.y = cardBaseY + approvalCardOffsetY(clock.elapsedTime, reducedMotion, seed)
-    }
     if (!pose.animated || reducedMotion || !pose.seated || walkingOut) {
       if (torsoGroupRef.current) torsoGroupRef.current.scale.y = 1
       return
@@ -792,40 +806,6 @@ export function CharacterSeatGroup({
         </group>
       )}
 
-      {/* Waiting for approval: floating clickable card above the desk */}
-      {pose.showApprovalCard && (
-        <Billboard ref={cardRef} position={[0.42 * scale, cardBaseY, deskOffsetZ]}>
-          <Html center transform={false} zIndexRange={[15, 0]}>
-            <button
-              type="button"
-              data-testid={`approval-card3d-${member.id}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                onSelect(desk)
-                onOpenApproval?.(desk)
-              }}
-              className="flex items-center gap-1 rounded-md border border-warn bg-warn-soft px-2 py-0.5 font-sans text-[10px] font-semibold text-warn shadow-xs hover:bg-surface"
-            >
-              <span>Approval waiting</span>
-            </button>
-          </Html>
-        </Billboard>
-      )}
-
-      {/* Out of quota: empty chair + small note "back at <reset time>" */}
-      {!pose.seated && pose.quotaNote && (
-        <Billboard position={[0, 0.68 * scale, chairOffsetZ]}>
-          <Html center transform={false} zIndexRange={[12, 0]}>
-            <span
-              data-testid={`quota-note3d-${member.id}`}
-              className="pointer-events-none select-none whitespace-nowrap rounded border border-danger/50 bg-surface/95 px-2 py-0.5 font-mono text-[10px] font-medium text-danger shadow-xs"
-            >
-              {pose.quotaNote}
-            </span>
-          </Html>
-        </Billboard>
-      )}
-
       {/* Merge check mark pop over the desk */}
       {mergeSample && (
         <Billboard position={[0, deskH + (0.85 + mergeSample.offsetY) * scale, deskOffsetZ]}>
@@ -902,31 +882,68 @@ export function CharacterSeatGroup({
         </group>
       )}
 
-      {/* Desk name label button */}
+      {/* One label per desk: name, status badge, approval, and quota note move and hide together. */}
+      <LabelPlacement id={member.id} placementsRef={placementsRef} targetRef={stackRef} />
       <Billboard position={[0, 1.38 * scale, chairOffsetZ]}>
-        <Html center transform={false} zIndexRange={[10, 0]}>
-          <button
-            ref={labelRef}
-            type="button"
-            data-testid={`desk3d-${member.id}`}
-            data-pose={pose.pose}
-            data-cli={identity.cli}
-            data-role-pin={identity.rolePin ?? undefined}
-            data-focused={focused ? "true" : "false"}
-            aria-label={`${label}, ${desk.stateLabel}`}
-            onClick={(event) => {
-              event.stopPropagation()
-              onSelect(desk)
-            }}
-            className="group flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg px-1.5 py-0.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          >
-            <span
-              data-testid={`desk3d-label-${member.id}`}
-              className="max-w-28 truncate rounded border border-line bg-surface/95 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-ink shadow-xs"
-            >
-              {label}
-            </span>
-          </button>
+        <Html center transform={false} zIndexRange={[12, 0]}>
+            <div ref={stackRef} className="flex flex-col items-center gap-1">
+              <button
+                type="button"
+                data-testid={`desk3d-${member.id}`}
+                data-pose={pose.pose}
+                data-cli={identity.cli}
+                data-role-pin={identity.rolePin ?? undefined}
+                data-focused={focused ? "true" : "false"}
+                aria-label={`${label}, ${desk.stateLabel}`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSelect(desk)
+                }}
+                className="rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                <span
+                  data-testid={`desk3d-label-${member.id}`}
+                  className={cx(
+                    "inline-flex max-w-36 items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-0.5 font-sans text-[12px] font-semibold text-ink shadow-xs",
+                    dimmed && "opacity-60",
+                  )}
+                >
+                  <span
+                    data-status={desk.state}
+                    className={cx(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      statusDotClass(desk.state, dimmed),
+                      desk.state === "working" && !reducedMotion && "animate-pulse motion-reduce:animate-none",
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{label}</span>
+                </span>
+              </button>
+              {pose.showApprovalCard && (
+                <button
+                  type="button"
+                  data-testid={`approval-card3d-${member.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onSelect(desk)
+                    onOpenApproval?.(desk)
+                  }}
+                  className="inline-flex min-h-6 items-center gap-1 rounded-md border border-warn bg-warn-soft px-1.5 py-0.5 font-sans text-[11px] font-medium text-warn shadow-xs hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
+                  Waiting
+                </button>
+              )}
+              {!pose.seated && pose.quotaNote && (
+                <span
+                  data-testid={`quota-note3d-${member.id}`}
+                  className="pointer-events-none select-none whitespace-nowrap rounded-md border border-line bg-surface px-1.5 py-0.5 font-sans text-[11px] tabular-nums text-danger"
+                >
+                  {pose.quotaNote}
+                </span>
+              )}
+            </div>
         </Html>
       </Billboard>
     </group>

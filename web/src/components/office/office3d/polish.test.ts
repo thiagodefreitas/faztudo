@@ -164,7 +164,7 @@ describe("office name labels", () => {
       { id: "far", x: 0, y: 0, halfW: 30, halfH: 40, depth: 6 },
     ])
     expect(blocked.find((item) => item.id === "near")?.opacity).toBe(1)
-    expect(blocked.find((item) => item.id === "far")?.opacity).toBeLessThan(1)
+    expect(blocked.find((item) => item.id === "far")?.opacity).toBe(0)
   })
 
   it("lifts pod and department anchors above the desks", () => {

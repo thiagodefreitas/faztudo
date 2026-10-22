@@ -11,6 +11,8 @@ import {
 import { DESK_H, DESK_W } from "./layout"
 import type { DeskInfo, DeskState } from "./state"
 
+const SANS = "Inter, ui-sans-serif, system-ui, sans-serif"
+
 export interface OfficeDeskProps {
   desk: DeskInfo
   selected: boolean
@@ -353,29 +355,11 @@ function DeskChair2D({
   return (
     <g data-testid={empty ? `empty-chair-${memberId}` : `chair-${memberId}`}>
       {/* Chair stem & base */}
-      <rect x="57" y={faceUp ? "68" : "26"} width="6" height="6" rx="1.5" fill="var(--color-line)" />
+      <rect x="57" y={faceUp ? "68" : "26"} width="6" height="6" rx="2" fill="var(--color-agent-2-soft)" />
       {/* Chair backrest */}
-      <rect
-        x="42"
-        y={backY}
-        width="36"
-        height="18"
-        rx="6"
-        fill="var(--color-sidebar)"
-        stroke="var(--color-line)"
-        strokeWidth="1.3"
-      />
+      <rect x="42" y={backY} width="36" height="18" rx="7" fill="var(--color-agent-2-soft)" />
       {/* Chair seat cushion & armrests */}
-      <rect
-        x="39"
-        y={seatY}
-        width="42"
-        height="9"
-        rx="4"
-        fill="var(--color-surface)"
-        stroke="var(--color-line)"
-        strokeWidth="1.2"
-      />
+      <rect x="39" y={seatY} width="42" height="9" rx="4" fill="var(--color-agent-2)" fillOpacity="0.55" />
     </g>
   )
 }
@@ -634,6 +618,19 @@ export function RoomDesk({
   const hoverTitle = request ? `${baseHover}: ${request}` : baseHover
   const activeRun = state === "working" || state === "queued" || state === "waiting_approval"
   const runLine = activeRun && desk.currentRun ? runLineOf(request, elapsedText) : undefined
+  const ring =
+    state === "working"
+      ? hue.accent
+      : state === "waiting_approval"
+        ? "var(--color-warn)"
+        : state === "failed"
+          ? "var(--color-danger)"
+          : dimmed
+            ? "var(--color-faint)"
+            : "var(--color-line)"
+  const sentence = request || stateLabel
+  const laneLabel = desk.lane?.id ?? desk.laneId ?? "No lane"
+  const hoverMeta = elapsedText ? `${laneLabel} - ${elapsedText}` : laneLabel
 
   // An exhausted agent keeps its face so the team stays recognizable; it is dimmed and greyed.
   const character = (
@@ -665,11 +662,20 @@ export function RoomDesk({
 
   const deskElement = (
     <g opacity={dimmed ? 0.65 : 1}>
-      {/* A front lip gives the slight 3/4 view; when facing up (Director), the desk sits near the top and faces into the room. */}
-      <rect x="10" y={faceUp ? "14" : "36"} width="104" height="36" rx="8" fill="var(--color-ink)" fillOpacity="0.07" />
-      <rect x="8" y={faceUp ? "16" : "38"} width="104" height="34" rx="8" fill="var(--color-sidebar)" stroke="var(--color-line)" />
-      <rect x="8" y={faceUp ? "10" : "32"} width="104" height="34" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
-      <path d={faceUp ? "M22 41.5H98" : "M22 34.5H98"} stroke={hue.accent} strokeWidth="2.5" strokeLinecap="round" />
+      {/* A soft top and a warm body. The Director's top uses the accent wash so the lead desk reads apart from the pods. */}
+      <ellipse cx="60" cy={faceUp ? "48" : "70"} rx="48" ry="6" fill="var(--color-ink)" fillOpacity="0.06" />
+      <rect x="10" y={faceUp ? "18" : "40"} width="100" height="26" rx="8" fill="var(--color-agent-2-soft)" />
+      <rect
+        x="8"
+        y={faceUp ? "10" : "32"}
+        width="104"
+        height="28"
+        rx="9"
+        fill={desk.isDirector ? "var(--color-accent-soft)" : "var(--color-surface)"}
+        stroke="var(--color-line)"
+        strokeWidth="1"
+      />
+      <rect x="14" y={faceUp ? "10" : "32"} width="92" height="4" rx="2" fill={hue.accent} />
       <rect x="16" y={faceUp ? "18" : "42"} width="14" height="16" rx="2.5" fill="var(--color-canvas)" stroke="var(--color-line)" />
       {isHuman ? (
         <g data-testid={`nameplate-${member.id}`}>
@@ -835,6 +841,11 @@ export function RoomDesk({
         className="group cursor-pointer outline-none"
       >
         <title>{hoverTitle}</title>
+        <defs>
+          <clipPath id={`desk-copy-${member.id}`}>
+            <rect x="4" y="86" width="112" height="16" />
+          </clipPath>
+        </defs>
         <rect width={DESK_W} height={DESK_H} fill="transparent" />
         <rect
           x="1"
@@ -917,8 +928,8 @@ export function RoomDesk({
 
           {state === "working" && elapsedText && (
             <g data-testid={`elapsed-${member.id}`}>
-              <rect x="80" y="3" width="38" height="14" rx="7" fill={hue.soft} stroke={hue.accent} strokeOpacity="0.5" />
-              <text x="99" y="13" textAnchor="middle" fontSize="8.5" fontFamily="monospace" fill={hue.accent}>
+              <rect x="68" y="2" width="50" height="16" rx="8" fill={hue.soft} />
+              <text x="93" y="13.5" textAnchor="middle" fontSize="11" fontFamily={SANS} fontWeight="600" fill={hue.accent}>
                 {elapsedText}
               </text>
             </g>
@@ -940,30 +951,14 @@ export function RoomDesk({
               className="cursor-pointer"
             >
               <g data-testid={`raised-hand-badge-${member.id}`}>
-                <rect
-                  x="76"
-                  y="2"
-                  width="42"
-                  height="16"
-                  rx="5"
-                  fill="var(--color-warn-soft)"
-                  stroke="var(--color-warn)"
-                  strokeWidth="1.3"
-                />
+                <rect x="72" y="1" width="46" height="18" rx="9" fill="var(--color-warn-soft)" />
                 <path
                   d="M82 12V8.5M83.5 12V7.8M85 12V8.2M86.5 12V9"
                   stroke="var(--color-warn)"
                   strokeWidth="1.1"
                   strokeLinecap="round"
                 />
-                <text
-                  x="101"
-                  y="12.5"
-                  textAnchor="middle"
-                  fontSize="7.5"
-                  fontWeight="600"
-                  fill="var(--color-warn)"
-                >
+                <text x="104" y="13" textAnchor="middle" fontSize="11" fontFamily={SANS} fontWeight="600" fill="var(--color-warn)">
                   Approve
                 </text>
               </g>
@@ -979,25 +974,56 @@ export function RoomDesk({
 
         </g>
 
-        <text x="60" y="86" textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--color-ink)">
-          {clip(member.display_name, 16)}
+        <g
+          data-testid={`status-ring-${member.id}`}
+          data-status={state}
+          transform={`translate(${view.headCenter.x} ${view.headCenter.y})`}
+        >
+          <motion.circle
+            r="18"
+            fill="none"
+            stroke={ring}
+            strokeWidth={state === "idle" || state === "queued" ? 1.4 : 2.4}
+            strokeOpacity={dimmed ? 0.35 : 0.9}
+            animate={state === "working" && animate ? { strokeOpacity: [0.35, 1, 0.35] } : undefined}
+            transition={
+              state === "working" && animate ? { duration: 1.8, repeat: Infinity, ease: "easeInOut" } : undefined
+            }
+          />
+        </g>
+        <g
+          data-testid={`desk-hover-${member.id}`}
+          className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
+        >
+          <rect x="-4" y="-50" width="128" height="40" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
+          <text x="8" y="-32" fontSize="12" fontFamily={SANS} fontWeight="600" fill="var(--color-ink)">
+            {clip(sentence, 18)}
+          </text>
+          <text x="8" y="-18" fontSize="11" fontFamily={SANS} fill="var(--color-muted)">
+            {clip(hoverMeta, 22)}
+          </text>
+        </g>
+        <text x="60" y="84" textAnchor="middle" fontSize="16" fontFamily={SANS} fontWeight="600" fill="var(--color-ink)">
+          {clip(member.display_name, 12)}
         </text>
         {runLine && !dimmed && (
           <text
             data-testid={`run-line-${member.id}`}
-            x="60"
-            y="99"
-            textAnchor="middle"
-            fontSize="8"
+            x="8"
+            y="100"
+            textAnchor="start"
+            fontSize="12"
+            fontFamily={SANS}
             fill="var(--color-muted)"
+            clipPath={`url(#desk-copy-${member.id})`}
           >
             {runLine}
           </text>
         )}
         {dimmed && (
           <g data-testid={`quota-tag-${member.id}`}>
-            <rect x="24" y="91" width="72" height="13" rx="6.5" fill="var(--color-danger-soft)" stroke="var(--color-danger)" strokeOpacity="0.5" />
-            <text x="60" y="100.5" textAnchor="middle" fontSize="8" fontWeight="600" fill="var(--color-danger)">
+            <rect x="10" y="88" width="100" height="16" rx="8" fill="var(--color-danger-soft)" />
+            <text x="60" y="99.5" textAnchor="middle" fontSize="11" fontFamily={SANS} fontWeight="600" fill="var(--color-danger)">
               {pose.quotaNote ?? "out of quota"}
             </text>
           </g>

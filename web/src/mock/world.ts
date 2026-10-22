@@ -478,6 +478,24 @@ export class MockWorld {
     }
     this.insertRun(asking)
     this.requestApproval(asking.id)
+    // A recent failure so the office can show the red desk without a live run.
+    const kimi = added.find((member) => member.handle === "kimi")
+    if (kimi) {
+      this.insertRun({
+        id: ulid(now),
+        trigger_message_id: IDS.msgHello,
+        channel_id: IDS.dev,
+        agent_id: kimi.id,
+        lane_id: "kimi/default",
+        mode: "write",
+        state: "failed",
+        started_at: iso(now - 4 * minute),
+        ended_at: iso(now - 2 * minute),
+        exit_code: 1,
+        failure_class: "semantic",
+        failure_reason: "verification failed",
+      })
+    }
     // A fuller organization for screenshots: Quality and Product next to
     // Engineering, all on the faztudo project.
     this.departments.push(

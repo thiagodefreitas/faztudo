@@ -214,6 +214,12 @@ describe("OfficeScene", () => {
     expect(screen.getByTestId("monitor-glow-m-claude")).toBeInTheDocument()
     expect(screen.getByTestId("progress-pulse-m-claude")).toBeInTheDocument()
     expect(screen.getByTestId("run-line-m-claude")).toHaveTextContent("1m - Redesign the 2D floor p...")
+    expect(screen.getByTestId("status-ring-m-claude")).toHaveAttribute("data-status", "working")
+    expect(screen.getByTestId("status-ring-m-codex")).toHaveAttribute("data-status", "waiting_approval")
+    expect(screen.getByTestId("status-ring-m-grok")).toHaveAttribute("data-status", "out_of_quota")
+    const hover = within(claudeBtn).getByTestId("desk-hover-m-claude")
+    expect(hover).toHaveTextContent("Redesign the 2D...")
+    expect(hover).toHaveTextContent("claude/opus - 1m 35s")
     expect(claudeBtn.querySelector("title")).toHaveTextContent(
       "Redesign the 2D floor plan and add department pods",
     )
@@ -288,10 +294,36 @@ describe("OfficeScene", () => {
     expect(screen.getAllByRole("group", { name: "Office floor plan" })).toHaveLength(1)
     expect(within(screen.getByTestId("zone-personas")).getByText("Personas")).toBeInTheDocument()
     expect(within(screen.getByTestId("zone-agents")).getByText("Agents")).toBeInTheDocument()
-    expect(within(screen.getByRole("list", { name: "Legend" })).getAllByRole("listitem")).toHaveLength(4)
+    const legend = screen.getByRole("group", { name: "Legend" })
+    expect(within(legend).getAllByRole("button")).toHaveLength(4)
+    for (const name of ["Working", "Waiting", "Failed", "Out of quota"]) {
+      expect(within(legend).getByRole("button", { name })).toHaveAttribute("aria-pressed", "false")
+    }
 
     const order = screen.getAllByRole("button").map((button) => button.getAttribute("data-testid"))
     expect(order.slice(0, 5)).toEqual(["desk-m-coder", "desk-m-claude", "desk-m-codex", "desk-m-grok", "desk-m-director"])
+  })
+
+  it("filters desks from the legend toggles and shows everyone again when the filter is cleared", async () => {
+    await renderScene()
+    const working = screen.getByRole("button", { name: "Working" })
+    fireEvent.click(working)
+    expect(working).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("desk-m-claude")).toBeInTheDocument()
+    expect(screen.queryByTestId("desk-m-codex")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("desk-m-grok")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("desk-m-coder")).not.toBeInTheDocument()
+    expect(screen.getByTestId("office-task-board")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Waiting" }))
+    expect(screen.getByTestId("desk-m-claude")).toBeInTheDocument()
+    expect(screen.getByTestId("desk-m-codex")).toBeInTheDocument()
+    expect(screen.queryByTestId("desk-m-grok")).not.toBeInTheDocument()
+
+    fireEvent.click(working)
+    fireEvent.click(screen.getByRole("button", { name: "Waiting" }))
+    expect(screen.getByTestId("desk-m-grok")).toBeInTheDocument()
+    expect(screen.getByTestId("desk-m-coder")).toBeInTheDocument()
   })
 
   it("groups desks by department when departments are provided and respects reducedMotion for subtle life", async () => {

@@ -132,24 +132,43 @@ describe("OfficeScene zoom", () => {
     expect(zoom()).toBe(1)
   })
 
+  function jumpTo(label: string) {
+    const menu = screen.getByRole("combobox", { name: "Jump to area" })
+    fireEvent.focus(menu)
+    fireEvent.mouseDown(within(screen.getByRole("listbox", { name: "Areas" })).getByRole("option", { name: label }))
+    return menu
+  }
+
   it("lists the zones and the Director in the jump menu and zooms to the chosen one", async () => {
     await renderScene()
     const menu = screen.getByRole("combobox", { name: "Jump to area" })
-    const options = within(menu).getAllByRole("option").map((o) => o.textContent)
-    expect(options).toEqual(["Jump to...", "Engineering", "Docs", "Director"])
+    fireEvent.focus(menu)
+    const options = within(screen.getByRole("listbox", { name: "Areas" })).getAllByRole("option").map((o) => o.textContent)
+    expect(options).toEqual(["Engineering", "Docs", "Director"])
 
-    fireEvent.change(menu, { target: { value: "dept-docs" } })
+    fireEvent.mouseDown(screen.getByRole("option", { name: "Docs" }))
     expect(zoom()).toBeGreaterThan(1)
     expect(menu).toHaveValue("")
 
     fireEvent.click(screen.getByRole("button", { name: "Fit all" }))
-    fireEvent.change(menu, { target: { value: "director" } })
+    jumpTo("Director")
     expect(zoom()).toBeGreaterThan(1)
+  })
+
+  it("filters the jump list as the query is typed", async () => {
+    await renderScene()
+    const menu = screen.getByRole("combobox", { name: "Jump to area" })
+    fireEvent.change(menu, { target: { value: "doc" } })
+    const options = within(screen.getByRole("listbox", { name: "Areas" })).getAllByRole("option").map((o) => o.textContent)
+    expect(options).toEqual(["Docs"])
+    fireEvent.change(menu, { target: { value: "zzz" } })
+    expect(screen.getByText("No matches")).toBeInTheDocument()
+    expect(screen.queryByRole("option")).not.toBeInTheDocument()
   })
 
   it("frames the chosen zone with a margin", async () => {
     await renderScene()
-    fireEvent.change(screen.getByRole("combobox", { name: "Jump to area" }), { target: { value: "dept-docs" } })
+    jumpTo("Docs")
     const [x, y, w, h] = viewBox()
     const zone = screen.getByTestId("zone-dept-docs").querySelector("rect")
     const zx = Number(zone?.getAttribute("x"))
@@ -194,7 +213,7 @@ describe("OfficeScene zoom", () => {
 
   it("remembers the view for the session and restores it on the next mount", async () => {
     const first = await renderScene()
-    fireEvent.change(screen.getByRole("combobox", { name: "Jump to area" }), { target: { value: "dept-docs" } })
+    jumpTo("Docs")
     const remembered = zoom()
     const box = viewBox()
     first.unmount()

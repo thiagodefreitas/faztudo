@@ -7,23 +7,23 @@ import type { DeskInfo } from "./state"
 // scales with the viewport and the layout stays plain arithmetic.
 export const ROOM_W = 1200
 export const COMPACT_ROOM_W = 390
-export const WALL_H = 64
+export const WALL_H = 58
 export const DESK_W = 120
 export const DESK_H = 108
 export const DIRECTOR_SCALE = 1.2
 
-const MARGIN = 40
-const COMPACT_MARGIN = 18
-const ZONE_PAD = 20
-const ZONE_HEAD = 30
-const ZONE_GAP = 24
-const POD_PAD = 14
-const POD_GAP = 16
-const DESK_GAP_X = 14
-const DESK_GAP_Y = 10
+const MARGIN = 20
+const COMPACT_MARGIN = 12
+const ZONE_PAD = 12
+const ZONE_HEAD = 22
+const ZONE_GAP = 12
+const POD_PAD = 8
+const POD_GAP = 10
+const DESK_GAP_X = 10
+const DESK_GAP_Y = 6
 const POD_COLS = 2
 const POD_SIZE = 4
-const BOTTOM = 24
+const BOTTOM = 12
 
 export const POD_W = POD_COLS * DESK_W + DESK_GAP_X + 2 * POD_PAD
 
@@ -229,7 +229,7 @@ function layoutRoomAt(desks: DeskInfo[], options: LayoutRoomOptions | undefined,
 
   const zones: PlacedZone[] = []
   const seats: Seat[] = []
-  let y = WALL_H + 20
+  let y = WALL_H + 8
   for (const row of rows) {
     const total = row.reduce((sum, box) => sum + box.w, 0) + (row.length - 1) * ZONE_GAP
     let x = Math.max(margin, (roomWidth - total) / 2)
@@ -252,14 +252,39 @@ function layoutRoomAt(desks: DeskInfo[], options: LayoutRoomOptions | undefined,
     const step = Math.min(w + 48, (roomWidth - 2 * margin - 40) / directors.length)
     const span = step * (directors.length - 1) + w
     const left = (roomWidth - span) / 2
-    rug = { x: Math.max(margin, left - 32), y, w: Math.min(roomWidth - 2 * margin, span + 64), h: h + 28 }
+    rug = { x: Math.max(margin, left - 24), y, w: Math.min(roomWidth - 2 * margin, span + 48), h: h + 16 }
     directors.forEach((desk, i) => {
-      seats.push({ desk, x: left + i * step, y: y + 14, scale, facing: "up" })
+      seats.push({ desk, x: left + i * step, y: y + 6, scale, facing: "up" })
     })
     y += rug.h
   }
 
-  return { width: roomWidth, height: y + BOTTOM, zones, seats, rug }
+  return cropToContent({ width: roomWidth, height: y + BOTTOM, zones, seats, rug }, compact)
+}
+
+// Drops the empty side margins of a wide room so the desks fill the viewBox.
+// Compact rooms keep their fixed phone width.
+function cropToContent(layout: RoomLayout, compact: boolean): RoomLayout {
+  if (compact) return layout
+  const boxes: Rect[] = [...layout.zones]
+  if (layout.rug) boxes.push(layout.rug)
+  if (boxes.length === 0) return layout
+  const pad = 16
+  const minX = Math.min(...boxes.map((box) => box.x))
+  const maxX = Math.max(...boxes.map((box) => box.x + box.w))
+  const left = Math.max(0, minX - pad)
+  const right = Math.min(layout.width, maxX + pad)
+  const width = right - left
+  if (width >= layout.width - 0.5) return layout
+  const shift = -left
+  const move = <T extends Rect>(rect: T): T => ({ ...rect, x: rect.x + shift })
+  return {
+    width,
+    height: layout.height,
+    zones: layout.zones.map((zone) => ({ ...move(zone), pods: zone.pods.map(move) })),
+    seats: layout.seats.map((seat) => ({ ...seat, x: seat.x + shift })),
+    rug: layout.rug ? move(layout.rug) : null,
+  }
 }
 
 export interface PlacedTaskNote extends Rect {
@@ -286,17 +311,17 @@ export interface WallFixtures {
   shelves: number[]
 }
 
-const BOARD_Y = 9
-const BOARD_H = 44
-const BOARD_LABEL_W = 44
+const BOARD_Y = 6
+const BOARD_H = 48
+const BOARD_LABEL_W = 46
 const BOARD_PAD = 8
-const NOTE_W = 84
-const NOTE_H = 32
+const NOTE_W = 100
+const NOTE_H = 36
 const NOTE_GAP = 6
-const BAR_W = 52
-const BAR_H = 26
+const BAR_W = 64
+const BAR_H = 32
 const BAR_GAP = 6
-const BOARD_GAP = 14
+const BOARD_GAP = 10
 
 function boardWidthForNotes(count: number): number {
   if (count <= 0) return 0
@@ -324,8 +349,9 @@ export function layoutWallFixtures(
   const baseWindows = compact ? [64, 240] : [70, 210, 390, 740, 900]
   const baseShelves = compact ? [154] : [560, 1040]
 
-  const minWallX = compact ? 52 : 200
-  const maxWallX = width - (compact ? 16 : 48)
+  // Side insets stay small so a cropped room still fits a note and its lanes.
+  const minWallX = compact ? 52 : 12
+  const maxWallX = width - (compact ? 16 : 12)
   const availW = maxWallX - minWallX
 
   const minOneNote = boardWidthForNotes(1)

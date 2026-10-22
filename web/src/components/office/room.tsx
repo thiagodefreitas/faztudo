@@ -2,6 +2,16 @@ import type { LaneMeterBar, TaskBoardNote } from "./avatar"
 import type { PlacedLaneStrip, PlacedTaskBoard, PlacedZone, Rect } from "./layout"
 import { layoutWallFixtures, ROOM_W, WALL_H } from "./layout"
 
+const SANS = "Inter, ui-sans-serif, system-ui, sans-serif"
+const ZONE_TINTS = [
+  "var(--color-accent-soft)",
+  "var(--color-agent-2-soft)",
+  "var(--color-agent-5-soft)",
+  "var(--color-agent-4-soft)",
+  "var(--color-agent-1-soft)",
+  "var(--color-ok-soft)",
+]
+
 // The room around the desks: floor, wall, task board, lane meter strip, rug
 // and a few plants. Everything uses the brand CSS variables, so light and dark
 // both work.
@@ -57,13 +67,13 @@ function WallTaskBoard({ board }: { board: PlacedTaskBoard }) {
       />
       <text
         x={board.x + 10}
-        y={board.y + 25}
-        fontSize="8.5"
+        y={board.y + 28}
+        fontSize="12"
+        fontFamily={SANS}
         fontWeight="600"
-        letterSpacing="0.8"
         fill="var(--color-faint)"
       >
-        TASKS
+        Tasks
       </text>
       {board.notes.map(({ note, x, y, w, h }) => (
         <g
@@ -84,17 +94,17 @@ function WallTaskBoard({ board }: { board: PlacedTaskBoard }) {
           />
           <rect x={x} y={y} width={w} height="5" rx="2" fill={note.accent} />
           <text
-            x={x + 5}
-            y={y + 15}
-            fontSize="8"
-            fontFamily="monospace"
+            x={x + 6}
+            y={y + 16}
+            fontSize="12"
+            fontFamily={SANS}
             fontWeight="600"
             fill="var(--color-ink)"
           >
-            {clipText(`@${note.handle}`, 12)}
+            {clipText(`@${note.handle}`, 14)}
           </text>
-          <text x={x + 5} y={y + 26} fontSize="7.5" fill="var(--color-muted)">
-            {clipText(note.title, 14)}
+          <text x={x + 6} y={y + 30} fontSize="11" fontFamily={SANS} fill="var(--color-muted)">
+            {clipText(note.title, 16)}
           </text>
         </g>
       ))}
@@ -116,16 +126,19 @@ function WallLaneStrip({ strip }: { strip: PlacedLaneStrip }) {
       />
       <text
         x={strip.x + 10}
-        y={strip.y + 25}
-        fontSize="8.5"
+        y={strip.y + 28}
+        fontSize="12"
+        fontFamily={SANS}
         fontWeight="600"
-        letterSpacing="0.8"
         fill="var(--color-faint)"
       >
-        LANES
+        Lanes
       </text>
       {strip.bars.map(({ bar, x, y, w, h, fillH }) => {
         const shortLabel = bar.id.split("/")[0] ?? bar.id
+        const meterW = Math.max(8, w - 12)
+        const meterH = 4
+        const filled = Math.max(3, Math.min(meterW, Math.round(meterW * (fillH / Math.max(h, 1)))))
         return (
           <g
             key={bar.id}
@@ -133,33 +146,12 @@ function WallLaneStrip({ strip }: { strip: PlacedLaneStrip }) {
             data-health={bar.health}
           >
             <title>{`${bar.id} (${bar.health})`}</title>
-            <rect
-              x={x + 10}
-              y={y}
-              width={w - 20}
-              height={h - 6}
-              rx="3"
-              fill="var(--color-sidebar)"
-              stroke="var(--color-line)"
-            />
-            <rect
-              x={x + 11}
-              y={y + (h - 6) - Math.min(h - 8, fillH) - 1}
-              width={w - 22}
-              height={Math.min(h - 8, fillH)}
-              rx="2"
-              fill={bar.color}
-            />
-            <text
-              x={x + w / 2}
-              y={y + h + 4}
-              textAnchor="middle"
-              fontSize="11"
-              fontFamily="monospace"
-              fill="var(--color-muted)"
-            >
-              {clipText(shortLabel, 6)}
+            <circle cx={x + 8} cy={y + 10} r="3.5" fill={bar.color} />
+            <text x={x + 16} y={y + 14} fontSize="12" fontFamily={SANS} fill="var(--color-ink)">
+              {clipText(shortLabel, 8)}
             </text>
+            <rect x={x + 6} y={y + h - 8} width={meterW} height={meterH} rx="2" fill="var(--color-sidebar)" />
+            <rect x={x + 6} y={y + h - 8} width={filled} height={meterH} rx="2" fill={bar.color} />
           </g>
         )
       })}
@@ -244,8 +236,8 @@ export function RoomBackdrop({
   return (
     <g>
       <defs>
-        <pattern id="office-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-          <path d="M40 0H0V40" fill="none" stroke="var(--color-line)" strokeWidth="1" strokeOpacity="0.45" />
+        <pattern id="office-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+          <path d="M48 0H0V48" fill="none" stroke="var(--color-line)" strokeWidth="1" strokeOpacity="0.22" />
         </pattern>
       </defs>
       <rect width={width} height={height} fill="var(--color-canvas)" />
@@ -263,27 +255,35 @@ export function RoomBackdrop({
       {fixtures.laneStrip && <WallLaneStrip strip={fixtures.laneStrip} />}
       <Plant x={compact ? 26 : 36} y={WALL_H - 6} size={1.1} />
 
-      {zones.map((zone) => (
+      {zones.map((zone, index) => (
         <g key={zone.id} data-testid={`zone-${zone.id}`}>
           <rect
             x={zone.x}
             y={zone.y}
             width={zone.w}
             height={zone.h}
-            rx="18"
-            fill="var(--color-surface)"
-            fillOpacity="0.55"
+            rx="16"
+            fill={ZONE_TINTS[index % ZONE_TINTS.length]}
+            fillOpacity="0.85"
             stroke="var(--color-line)"
-            strokeDasharray="5 5"
             {...areaProps(zone)}
           />
-          <text x={zone.x + 20} y={zone.y + 21} fontSize="11" fontWeight="600" letterSpacing="1.2" fill="var(--color-faint)">
+          <text x={zone.x + 14} y={zone.y + 16} fontSize="13" fontFamily={SANS} fontWeight="600" fill="var(--color-muted)">
             {zone.label}
           </text>
           {zone.pods.map((pod) => (
             <g key={`${pod.x}-${pod.y}`} aria-hidden="true">
-              <rect x={pod.x} y={pod.y} width={pod.w} height={pod.h} rx="14" fill="var(--color-sidebar)" fillOpacity="0.7" {...areaProps(pod)} />
-              <circle cx={pod.x + pod.w / 2} cy={pod.y + pod.h / 2} r="7" fill="var(--color-accent-soft)" stroke="var(--color-accent)" strokeOpacity="0.5" />
+              <rect
+                x={pod.x}
+                y={pod.y}
+                width={pod.w}
+                height={pod.h}
+                rx="12"
+                fill="var(--color-surface)"
+                fillOpacity="0.92"
+                stroke="var(--color-line)"
+                {...areaProps(pod)}
+              />
             </g>
           ))}
         </g>
@@ -291,9 +291,8 @@ export function RoomBackdrop({
 
       {rug && (
         <g aria-hidden="true">
-          <rect x={rug.x} y={rug.y} width={rug.w} height={rug.h} rx="22" fill="var(--color-accent-soft)" stroke="var(--color-accent)" strokeOpacity="0.45" {...areaProps(rug)} />
-          <rect x={rug.x + 8} y={rug.y + 8} width={rug.w - 16} height={rug.h - 16} rx="16" fill="none" stroke="var(--color-accent)" strokeOpacity="0.3" strokeDasharray="3 5" />
-          <text x={rug.x + 22} y={rug.y + 20} fontSize="10" fontWeight="600" letterSpacing="1.2" fill="var(--color-accent)">
+          <rect x={rug.x} y={rug.y} width={rug.w} height={rug.h} rx="18" fill="var(--color-accent-soft)" stroke="var(--color-accent)" strokeOpacity="0.55" {...areaProps(rug)} />
+          <text x={rug.x + 16} y={rug.y + 16} fontSize="13" fontFamily={SANS} fontWeight="600" fill="var(--color-accent)">
             Director
           </text>
         </g>

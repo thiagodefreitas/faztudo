@@ -127,11 +127,23 @@ export function CameraRig({
   )
 }
 
+export interface LabelAnchor {
+  id: string
+  x: number
+  y: number
+  z: number
+  // Zone names yield to desk labels, so a far desk name is hidden before a zone title covers it.
+  yield?: boolean
+  // Screen-space half size. A name is one line; approval and quota stacks are taller.
+  halfW?: number
+  halfH?: number
+}
+
 export function NameLabelDriver({
   anchors,
   placementsRef,
 }: {
-  anchors: readonly { id: string; x: number; y: number; z: number }[]
+  anchors: readonly LabelAnchor[]
   placementsRef: RefObject<Map<string, NameLabelPlacement>>
 }) {
   const scratch = useMemo(() => ({ world: new Vector3(), ndc: new Vector3() }), [])
@@ -141,14 +153,14 @@ export function NameLabelDriver({
     if (!map) return
     const boxes: NameLabelBox[] = anchors.map((anchor) => {
       scratch.world.set(anchor.x, anchor.y, anchor.z)
-      const depth = camera.position.distanceTo(scratch.world)
+      const depth = camera.position.distanceTo(scratch.world) + (anchor.yield ? 800 : 0)
       scratch.ndc.copy(scratch.world).project(camera)
       return {
         id: anchor.id,
         x: (scratch.ndc.x * 0.5 + 0.5) * size.width,
         y: (-scratch.ndc.y * 0.5 + 0.5) * size.height,
-        halfW: 60,
-        halfH: 14,
+        halfW: anchor.halfW ?? (anchor.yield ? 40 : 52),
+        halfH: anchor.halfH ?? (anchor.yield ? 11 : 14),
         depth,
       }
     })
@@ -156,5 +168,30 @@ export function NameLabelDriver({
     for (const item of layoutNameLabels(boxes)) map.set(item.id, item)
   })
 
+  return null
+}
+
+// Applies the collision shift from inside the canvas. The label DOM is portaled by Html,
+// so this hook must run on a canvas child, not inside that portal.
+export function LabelPlacement<T extends HTMLElement>({
+  id,
+  placementsRef,
+  targetRef,
+}: {
+  id: string
+  placementsRef: RefObject<Map<string, NameLabelPlacement>>
+  targetRef: RefObject<T | null>
+}) {
+  useFrame(() => {
+    const el = targetRef.current
+    const place = placementsRef.current?.get(id)
+    if (!el || !place) return
+    const hidden = place.opacity < 0.5
+    el.style.opacity = hidden ? "0" : "1"
+    el.style.visibility = hidden ? "hidden" : "visible"
+    el.style.pointerEvents = hidden ? "none" : "auto"
+    el.style.transform =
+      place.offsetX === 0 && place.offsetY === 0 ? "" : `translate(${place.offsetX}px, ${place.offsetY}px)`
+  })
   return null
 }

@@ -16,6 +16,7 @@ import {
   enqueueOfficeEvent,
   HANDOFF_DURATION_MS,
   MERGE_POP_DURATION_MS,
+  OFFICE_MAX_DPR,
   Office3DScene,
   type Office3DSceneProps,
   pruneAnimationQueue,
@@ -149,7 +150,7 @@ describe("Office3DScene", () => {
     const pose = defaultCameraPose(room.width, room.height)
 
     expect(pose.position[0]).toBe(0)
-    expect(pose.position[1]).toBeGreaterThan(8)
+    expect(pose.position[1]).toBeGreaterThanOrEqual(8)
     expect(pose.position[2]).toBeGreaterThan(10)
     expect(pose.target).toEqual([0, 0.2, 0.3])
 
@@ -562,13 +563,41 @@ describe("Office3DScene", () => {
     expect(screen.getByRole("complementary")).toBeVisible()
   })
 
+  it("renders on demand while idle and keeps drawing while someone is working", async () => {
+    expect(OFFICE_MAX_DPR).toBe(1.5)
+    await renderScene3D({ webglAvailable: true, reducedMotion: false })
+    expect(screen.getByTestId("office3d-canvas")).toHaveAttribute("data-render", "demand")
+  })
+
+  it("keeps the 3D view rendering while an agent is working", async () => {
+    const runs: Run[] = [
+      {
+        id: "run-work",
+        channel_id: "ch-general",
+        trigger_message_id: "msg-w",
+        agent_id: "m-claude",
+        lane_id: "claude/opus",
+        mode: "write",
+        state: "running",
+        started_at: new Date(now - 30_000).toISOString(),
+      },
+    ]
+    const desks = deriveOfficeDesks({ members, runs, approvals: [], lanes: [], now })
+    await renderScene3D({ desks, runs, webglAvailable: true, reducedMotion: false })
+    expect(screen.getByTestId("office3d-canvas")).toHaveAttribute("data-render", "always")
+  })
+
   it("offers the zone menu, Fit all and no zoom buttons next to the 3D canvas, and keeps the orbit keys working", async () => {
     await renderScene3D({ webglAvailable: true })
     const menu = screen.getByRole("combobox", { name: "Jump to area" })
-    expect(within(menu).getAllByRole("option").map((o) => o.textContent)).toEqual(["Jump to...", "Engineering", "Director"])
+    fireEvent.focus(menu)
+    expect(within(screen.getByRole("listbox", { name: "Areas" })).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Engineering",
+      "Director",
+    ])
     expect(screen.queryByRole("button", { name: "Zoom in" })).toBeNull()
 
-    fireEvent.change(menu, { target: { value: "dept-eng" } })
+    fireEvent.mouseDown(screen.getByRole("option", { name: "Engineering" }))
     expect(menu).toHaveValue("")
     fireEvent.click(screen.getByRole("button", { name: "Fit all" }))
     fireEvent.keyDown(screen.getByTestId("office3d-canvas"), { key: "ArrowLeft" })

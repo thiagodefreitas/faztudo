@@ -40,7 +40,7 @@ function overlaps(
   return Math.abs(ax - bx) < aw + bw && Math.abs(ay - by) < ah + bh
 }
 
-// Closer labels stay put. Labels behind them shift up or down, then fade if every shift still collides.
+// Closer labels stay put. Labels behind them shift up or down, then hide if every shift still collides.
 export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlacement[] {
   const order = labels.map((label) => label)
   order.sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id))
@@ -92,9 +92,9 @@ export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlac
         halfH: label.halfH,
         offsetX: 0,
         offsetY: 0,
-        opacity: 0.15,
+        opacity: 0,
       })
-      byId.set(label.id, { id: label.id, offsetX: 0, offsetY: 0, opacity: 0.15 })
+      byId.set(label.id, { id: label.id, offsetX: 0, offsetY: 0, opacity: 0 })
     }
   }
 
@@ -102,11 +102,11 @@ export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlac
 }
 
 // Zone and Director names lie on the floor in strips the layout keeps free of desks:
-// the zone header (layout ZONE_HEAD = 30 units) and the margin below the Director rug
-// (layout BOTTOM = 24 units). One unit is 0.02 m.
+// the zone header (layout ZONE_HEAD = 22 units) and the margin below the Director rug
+// (layout BOTTOM = 12 units). One unit is 0.02 m.
 export const ZONE_LABEL_Y = 0.06
-const ZONE_HEAD_HALF_M = 0.3
-const ROOM_BOTTOM_HALF_M = 0.24
+const ZONE_HEAD_HALF_M = 0.22
+const ROOM_BOTTOM_HALF_M = 0.12
 
 // Center of a zone's header strip, near its left edge. Always inside the zone.
 export function zoneLabelAnchor(rect: FloorRect): { x: number; y: number; z: number } {
