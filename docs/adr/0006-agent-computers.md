@@ -51,10 +51,14 @@ the next run's execution path; this revision answers it.
   file), `GOENV=off`, `NPM_CONFIG_USERCONFIG` to an empty per-run file,
   `SHELL=/bin/sh` with `ENV` and `BASH_ENV` unset (`stripEnv` passes the host
   `SHELL` through today, and a CLI's shell tool sources that shell's rc
-  files), and `PATH` to the read-only toolchain roots plus `/usr/local/bin`,
+  files), `ZDOTDIR` to an empty per-run directory, and `PATH` to the read-only toolchain roots plus `/usr/local/bin`,
   `/usr/bin` and `/bin`. No directory of the home is on `PATH`: the agent
   runs its own installs by path, and the channel test command, which runs
   through `/bin/sh -c` in the same mounts, finds nothing the home planted.
+  Login shell files in the home (`.profile`, `.bash_profile`, `.bashrc`,
+  `.zshenv`, `.zprofile`, `.zshrc`, `.zlogin`) are covered by read-only
+  empty files bound over them for every run, because a login `sh` reads
+  `~/.profile` and `zsh` always reads `.zshenv`; either could undo the pins.
 - **What persists.** The home and the caches. What does not: `/tmp` (tmpfs
   per run), CLI session state (per run, as today), the git admin and ref
   copies, the worktree. Worktrees stay outside and bind-mounted at their host
@@ -65,8 +69,10 @@ the next run's execution path; this revision answers it.
   Two writers in one home and one cache would replace files under each
   other, and reset needs a quiet computer. There is no live namespace to
   join in v1.
-- **Caches.** `GOCACHE`, `NPM_CONFIG_CACHE` and `XDG_CACHE_HOME` move from the
-  run state directory to `<computer>/caches/`. `XDG_DATA_HOME`,
+- **Caches.** `NPM_CONFIG_CACHE` and `XDG_CACHE_HOME` move from the run
+  state directory to `<computer>/caches/`. `GOCACHE` stays per run: Go
+  replaces action-cache entries, executables included, so a persistent build
+  cache would let one run hand the next a binary it then executes. `XDG_DATA_HOME`,
   `XDG_STATE_HOME` and `XDG_CONFIG_HOME` stay per run: they hold CLI
   databases and configuration. `GOMODCACHE` stays the host's, read-only
   (`goModCache`); a persistent writable module cache would be a new way to
@@ -75,10 +81,12 @@ the next run's execution path; this revision answers it.
   file (for Kimi, its `credentials/` and `oauth/` directories) writable from
   the host at run start, and unbound at run end. The computer never holds a
   login at rest. New risk: a run can copy a bound credential into its
-  persistent home for a later run to read. Mitigation in v1: at run end
-  faztudo walks `home/` and `caches/` through `os.Root`, so a symlink never
+  persistent home for a later run to read. Mitigation in v1: at run start
+  and at run end (a run killed before its end scan is caught by the next
+  start) faztudo walks `home/` and `caches/` through `os.Root`, so a symlink never
   resolves outside the computer directory, deletes only regular files that
-  hold a bound token value verbatim, and posts a channel notice. It never
+  hold a bound token value verbatim (checked with `Lstat`, not inferred from
+  `os.Root`, which follows a symlink that stays inside), and posts a channel notice. It never
   touches a path outside the computer directory; a symlink to the host
   `.claude/.credentials.json` is skipped, not followed. Honest limit: encoded
   copies and planted code are not detected; the execution-path rules above
