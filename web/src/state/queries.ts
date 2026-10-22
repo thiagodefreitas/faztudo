@@ -136,7 +136,11 @@ export function useLastMessages(channelIds: string[]): Map<string, Message> {
 // channel first. It shares the caches of useMessages.
 export function useAllMessages(channelIds: string[]): Message[] {
   const qc = useQueryClient()
-  const results = useQueries({ queries: channelIds.map((id) => messagesQuery(qc, id)) })
+  // combine keeps the same array while no channel's data changed, so callers can memoize on it.
+  return useQueries({ queries: channelIds.map((id) => messagesQuery(qc, id)), combine: combineMessages })
+}
+
+function combineMessages(results: { data?: Message[] | undefined }[]): Message[] {
   return results.flatMap((result) => result.data ?? [])
 }
 

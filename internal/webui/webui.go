@@ -29,6 +29,10 @@ func Handler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
+	return handlerFor(root)
+}
+
+func handlerFor(root fs.FS) http.Handler {
 	files := http.FileServerFS(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := fs.Stat(root, "index.html"); err != nil {
@@ -41,8 +45,15 @@ func Handler() http.Handler {
 			name = "index.html"
 		}
 		if st, err := fs.Stat(root, name); err != nil || st.IsDir() {
+			if strings.HasPrefix(name, "assets/") {
+				// A stale hashed name must not come back as index.html.
+				http.NotFound(w, r)
+				return
+			}
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
+		} else if name == "sw.js" || name == "precache-manifest.js" {
+			w.Header().Set("Cache-Control", "no-cache")
 		} else if strings.HasSuffix(name, ".woff2") {
 			// Not in Go's built-in type table; /etc/mime.types may lack it too.
 			w.Header().Set("Content-Type", "font/woff2")

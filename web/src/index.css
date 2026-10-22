@@ -24,6 +24,8 @@
   --color-faint: #576670;
   --color-accent: #0e7c74;
   --color-accent-soft: #dff3f0;
+  /* Teal text on accent-soft: --color-accent is 4.4:1 there, this is 6.2:1. */
+  --color-accent-text: #0a635c;
   --color-ok: #156839;
   --color-ok-soft: #e3f5ea;
   --color-warn: #8a4b08;
@@ -76,6 +78,7 @@ html.dark {
   --color-faint: #84949e;
   --color-accent: #5cd6c8;
   --color-accent-soft: #102a29;
+  --color-accent-text: #5cd6c8;
   --color-ok: #5dd98c;
   --color-ok-soft: #11291c;
   --color-warn: #f5b942;
@@ -400,5 +403,14 @@ textarea,
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Small text on the accent tint (tags, pills, chips) takes the darker text
+   token in the light theme. One pairing rule covers every use; in the dark
+   theme the two tokens are the same color. */
+@layer utilities {
+  .bg-accent-soft.text-accent {
+    color: var(--color-accent-text);
   }
 }

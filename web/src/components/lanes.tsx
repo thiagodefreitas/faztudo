@@ -370,11 +370,8 @@ function LaneCard({ lane, now, focused, runs, advice, view }: { lane: Lane; now:
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
   const history = useQuery({
     queryKey: ["lane-history", lane.id],
-    queryFn: async (): Promise<LaneUsageReading[]> => {
-      const response = await fetch(`/api/v1/lanes/${encodeURIComponent(lane.id)}/history`, { credentials: "same-origin" })
-      if (!response.ok) throw new Error("Lane history unavailable")
-      return response.json() as Promise<LaneUsageReading[]>
-    },
+    // Through the api client, so a 401 reaches the login redirect like every other call.
+    queryFn: (): Promise<LaneUsageReading[]> => api.laneHistory(lane.id),
     staleTime: 60_000,
     enabled: view === "cards",
   })

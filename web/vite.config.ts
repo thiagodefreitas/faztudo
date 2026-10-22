@@ -22,6 +22,11 @@ export default defineConfig({
     generateBundle(_options, bundle) {
       const entry = Object.values(bundle).find((asset) => asset.type === "chunk" && asset.isEntry)
       if (!entry || entry.type !== "chunk") return
+      // Shell only: the entry, its static imports, the CSS and the font. Every
+      // route is a dynamic import, so offline the shell opens but a route that
+      // was not visited online fails to load. Adding the route chunks would
+      // cost about 205 KB gzip (270 KB more with the 3D office), over the
+      // 150 KB budget for a precache that runs on every deploy.
       const paths = new Set<string>(["/fonts/inter-latin-wght.woff2"])
       const visit = (fileName: string) => {
         if (paths.has(`/${fileName}`)) return

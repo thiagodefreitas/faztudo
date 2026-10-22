@@ -119,6 +119,8 @@ export function Composer({
   const slash = /^\/([a-z]*)$/i.exec(text.slice(0, cursor))
   const commands = slash ? COMMANDS.filter((command) => (onTask || command.name !== "/task") && command.name.startsWith(`/${slash[1]?.toLowerCase() ?? ""}`)) : []
   const commandMenu = Boolean(slash && commands.length > 0)
+  // A command typed in full is sent by Enter; Tab still completes it.
+  const typedInFull = commandMenu && commands.some((command) => command.name === `/${slash?.[1]?.toLowerCase() ?? ""}`)
   const queryKey = query ? `${query.start}:${query.query}` : commandMenu ? `slash:${slash?.[1] ?? ""}` : null
   const menuOpen = Boolean((query && matches.length > 0 || commandMenu) && suppressed !== queryKey)
   const selected = commandMenu ? commands[Math.min(active, commands.length - 1)] : matches[Math.min(active, Math.max(0, matches.length - 1))]
@@ -243,7 +245,7 @@ export function Composer({
   }
 
   function send() {
-    if (menuOpen && selected) {
+    if (menuOpen && selected && !typedInFull) {
       pickSelected()
       return
     }
@@ -289,7 +291,7 @@ export function Composer({
         setSuppressed(queryKey)
         return
       }
-      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && !typedInFull)) {
         event.preventDefault()
         pickSelected()
         return

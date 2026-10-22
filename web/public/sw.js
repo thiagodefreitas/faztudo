@@ -83,7 +83,9 @@ self.addEventListener("fetch", (event) => {
     const cached = await cache.match(request)
     if (cached) return cached
     const response = await fetch(request)
-    if (response.ok && response.type === "basic") {
+    // The server answers an unknown path with index.html; never keep that under an asset URL.
+    const html = (response.headers?.get("content-type") || "").includes("text/html")
+    if (response.ok && response.type === "basic" && !html) {
       try {
         await cache.put(request, response.clone())
       } catch {

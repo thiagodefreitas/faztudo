@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../../api/client"
 import { groupWork, runTime, workColumn, workUsage, WORK_TITLES, type WorkColumn } from "../../lib/all-work"
 import { cx } from "../../lib/cx"
@@ -63,7 +63,8 @@ function size(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(mb >= 10240 ? 0 : 1)} GB` : `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`
 }
 
-function RunLine({ run, channelName, request, now }: { run: Run; channelName: string; request: string; now: number }) {
+function RunLine({ run, channelName, request }: { run: Run; channelName: string; request: string }) {
+  const now = useNow()
   const usage = workUsage(run)
   const column = workColumn(run)
   const meta = [`#${channelName}`, run.lane_id, run.started_at ? formatElapsed(run.started_at, run.ended_at, now) : ""].filter(Boolean)
@@ -81,8 +82,49 @@ function RunLine({ run, channelName, request, now }: { run: Run; channelName: st
   )
 }
 
+// Only these leaves follow the one-second clock; the rest of the sheet reads a
+// time that moves once a minute, so a tick does not recompute the desk.
+function Elapsed({ since }: { since: string }) {
+  return <>{formatElapsed(since, undefined, useNow())}</>
+}
+
+function Countdown({ stamp }: { stamp: string }) {
+  return <>{formatCountdown(stamp, useNow())}</>
+}
+
+function useMinute(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  return now
+}
+
+type SheetAction = { agent: Member; kind: "build" | "teach" }
+
+function ProfileTaskBuilder({ agent, onClose }: { agent: Member; onClose: () => void }) {
+  const channels = useChannels()
+  return <TaskBuilder open onOpenChange={(open) => { if (!open) onClose() }} channels={(channels.data ?? []).filter((channel) => channel.kind !== "direct")} initialAssignee={agent.handle} />
+}
+
+// A thin wrapper: while no ?profile= is set it reads one search param and
+// nothing else, so pages that never open a profile do not fetch for it.
 export function ProfileSheet() {
-  const { handle, closeProfile } = useProfileNavigation()
+  const { handle } = useProfileNavigation()
+  const [action, setAction] = useState<SheetAction | null>(null)
+  const close = () => setAction(null)
+  return (
+    <>
+      {handle && <ProfileBody handle={handle} onAction={(agent, kind) => setAction({ agent, kind })} />}
+      {action?.kind === "build" && <ProfileTaskBuilder agent={action.agent} onClose={close} />}
+      {action?.kind === "teach" && <LessonsDialog persona={action.agent.handle} open onOpenChange={(open) => { if (!open) close() }} />}
+    </>
+  )
+}
+
+function ProfileBody({ handle, onAction }: { handle: string; onAction: (agent: Member, kind: SheetAction["kind"]) => void }) {
+  const { closeProfile } = useProfileNavigation()
   const members = useMembers()
   const me = useMe()
   const channels = useChannels()
@@ -92,28 +134,31 @@ export function ProfileSheet() {
   const org = useOrg()
   const lessons = useLessons()
   const routines = useRoutines()
-  const computers = useComputers(me.data?.kind === "human" && Boolean(handle))
-  const now = useNow()
+  const computers = useComputers(me.data?.kind === "human")
+  const now = useMinute()
   const openDirect = useOpenDirect()
   const navigate = useNavigate()
   const content = useRef<HTMLDivElement>(null)
-  const [building, setBuilding] = useState(false)
-  const [teaching, setTeaching] = useState(false)
-  const [activeAgent, setActiveAgent] = useState<Member | null>(null)
   const [actionError, setActionError] = useState("")
   const member = members.data?.find((item) => item.handle.toLowerCase() === handle?.toLowerCase())
   const isAgent = member?.kind === "agent"
   const allChannels = channels.data ?? []
   const channelName = (id: string) => allChannels.find((channel) => channel.id === id)?.name ?? "a channel"
-  const messages = useAllMessages(handle && isAgent ? allChannels.map((channel) => channel.id) : [])
-  const triggerMessages = new Map(messages.map((message) => [message.id, message.body]))
-  const desk = member && isAgent ? deriveMemberDesk({ member, runs: runs.data ?? [], approvals: approvals.data ?? [], lanes: lanes.data ?? [], triggerMessages, now, members: members.data ?? [] }) : undefined
+  const messages = useAllMessages(isAgent ? allChannels.map((channel) => channel.id) : [])
+  const desk = useMemo(() => {
+    if (!member || !isAgent) return undefined
+    const triggerMessages = new Map(messages.map((item) => [item.id, item.body]))
+    return deriveMemberDesk({ member, runs: runs.data ?? [], approvals: approvals.data ?? [], lanes: lanes.data ?? [], triggerMessages, now, members: members.data ?? [] })
+  }, [member, isAgent, messages, runs.data, approvals.data, lanes.data, members.data, now])
   const team = org.data?.departments.filter((department) => department.lead === member?.handle || department.members.includes(member?.handle ?? "")) ?? []
-  const today = member && isAgent ? groupWork((runs.data ?? []).filter((run) => run.agent_id === member.id), messages, members.data ?? [], now) : undefined
-  const todayRuns = today ? Object.values(today).flat().filter(({ run }) => {
-    const time = runTime(run)
-    return time !== undefined && now - time <= DAY
-  }).sort((a, b) => (runTime(b.run) ?? 0) - (runTime(a.run) ?? 0)) : []
+  const todayRuns = useMemo(() => {
+    if (!member || !isAgent) return []
+    const today = groupWork((runs.data ?? []).filter((run) => run.agent_id === member.id), messages, members.data ?? [], now)
+    return Object.values(today).flat().filter(({ run }) => {
+      const time = runTime(run)
+      return time !== undefined && now - time <= DAY
+    }).sort((a, b) => (runTime(b.run) ?? 0) - (runTime(a.run) ?? 0))
+  }, [member, isAgent, runs.data, messages, members.data, now])
   const todayCost = todayRuns.reduce((sum, { run }) => sum + (run.cost_usd ?? 0), 0)
   const runningLane = desk?.currentRun?.lane_id
   // With nothing running, the next run takes the first lane that has room.
@@ -126,7 +171,7 @@ export function ProfileSheet() {
   const lessonCount = (lessons.data ?? []).filter((lesson) => lesson.persona === member?.handle).length
   const usedBy = (routines.data ?? []).filter((routine) => routine.persona === member?.handle)
   const computer = computers.data?.find((item) => item.id.toLowerCase() === member?.handle.toLowerCase())
-  const { data: devices } = useQuery({ queryKey: ["profile", "devices"], queryFn: () => api.devices(), enabled: Boolean(handle && member?.id === me.data?.id && member?.kind === "human") })
+  const { data: devices } = useQuery({ queryKey: ["profile", "devices"], queryFn: () => api.devices(), enabled: Boolean(member?.id === me.data?.id && member?.kind === "human") })
   const director = member?.id === org.data?.director_id
   const you = member?.id === me.data?.id
 
@@ -135,11 +180,9 @@ export function ProfileSheet() {
     void openDirect(person).catch((error: unknown) => setActionError(error instanceof Error ? error.message : "Could not open the message."))
   }
 
-  function act(agent: Member, next: "build" | "teach") {
-    setActiveAgent(agent)
+  function act(agent: Member, next: SheetAction["kind"]) {
+    onAction(agent, next)
     closeProfile()
-    if (next === "build") setBuilding(true)
-    else setTeaching(true)
   }
 
   return (
@@ -195,25 +238,25 @@ export function ProfileSheet() {
                     <p className="mt-2 flex items-center gap-2 text-[13px] font-medium" data-state={desk.state}>
                       <span className={cx("h-2 w-2 shrink-0 rounded-full", STATE_DOT[desk.state], desk.state === "working" && "motion-safe:animate-pulse")} aria-hidden="true" />
                       {sentence(desk.stateLabel)}
-                      {desk.currentRun?.started_at && <span className="ml-auto font-normal tabular-nums text-muted">{formatElapsed(desk.currentRun.started_at, undefined, now)}</span>}
+                      {desk.currentRun?.started_at && <span className="ml-auto font-normal tabular-nums text-muted"><Elapsed since={desk.currentRun.started_at} /></span>}
                     </p>
                     {desk.currentRun && <p className="mt-1 line-clamp-2 text-[13px] text-muted" title={desk.runRequest}>{desk.runTitle ?? desk.runRequest ?? "Current run"} <span className="text-faint">in #{channelName(desk.currentRun.channel_id)}</span></p>}
                     {desk.state === "waiting_approval" && <p className="mt-1 text-[12px] text-warn">Waiting for you to review</p>}
-                    {desk.state === "out_of_quota" && <p className="mt-1 text-[12px] text-muted">{chainResets[0] ? `Quota ${formatCountdown(chainResets[0], now)}` : "Every lane in the chain is out of quota"}</p>}
+                    {desk.state === "out_of_quota" && <p className="mt-1 text-[12px] text-muted">{chainResets[0] ? <>Quota <Countdown stamp={chainResets[0]} /></> : "Every lane in the chain is out of quota"}</p>}
                   </section>
                   <section className={SECTION} aria-label="Lane chain">
                     <h3 className={SECTION_LABEL}>Lane chain</h3>
                     <ol className="mt-2 space-y-1.5">{(member.agent?.lanes ?? []).map((id, index) => {
                       const lane = lanes.data?.find((item) => item.id === id)
                       const health = lane?.health ?? "unknown"
-                      const reset = health === "exhausted" && resetAt(lane) ? formatCountdown(resetAt(lane), now) : undefined
+                      const reset = health === "exhausted" ? resetAt(lane) : undefined
                       const tag = id === runningLane ? "Running" : !runningLane && id === nextLane ? "Next" : undefined
                       return (
                         <li key={id} className="flex items-center gap-2 text-[12px]" data-lane={id}>
                           <span className="w-3 shrink-0 text-right tabular-nums text-faint">{index + 1}</span>
                           <span className={cx("h-2 w-2 shrink-0 rounded-full", healthDotClass(health))} aria-hidden="true" />
                           <span className="min-w-0 flex-1 truncate font-mono">{id}</span>
-                          <span className="text-muted">{reset ? `${HEALTH_META[health].label}, ${reset}` : HEALTH_META[health].label}</span>
+                          <span className="text-muted">{HEALTH_META[health].label}{reset && <>, <Countdown stamp={reset} /></>}</span>
                           {tag && <span className={cx("rounded px-1.5", tag === "Running" ? "bg-accent-soft text-accent" : "bg-sidebar text-muted")}>{tag}</span>}
                         </li>
                       )
@@ -224,7 +267,7 @@ export function ProfileSheet() {
                       <span>Today's runs ({todayRuns.length})</span>
                       {todayCost > 0 && <span className="normal-case tracking-normal tabular-nums">{formatCostAbout(todayCost)}</span>}
                     </h3>
-                    {todayRuns.length ? <ul className="mt-2 space-y-2">{todayRuns.map(({ run, request }) => <RunLine key={run.id} run={run} request={request} channelName={channelName(run.channel_id)} now={now} />)}</ul> : <p className="mt-2 text-[12px] text-muted">No runs in the last 24 hours.</p>}
+                    {todayRuns.length ? <ul className="mt-2 space-y-2">{todayRuns.map(({ run, request }) => <RunLine key={run.id} run={run} request={request} channelName={channelName(run.channel_id)} />)}</ul> : <p className="mt-2 text-[12px] text-muted">No runs in the last 24 hours.</p>}
                   </section>
                   <section className={SECTION} aria-label="Lessons and routines">
                     <h3 className={SECTION_LABEL}>Lessons and routines</h3>
@@ -246,8 +289,6 @@ export function ProfileSheet() {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-      {activeAgent?.kind === "agent" && building && <TaskBuilder open onOpenChange={setBuilding} channels={allChannels.filter((channel) => channel.kind !== "direct")} initialAssignee={activeAgent.handle} />}
-      {activeAgent?.kind === "agent" && teaching && <LessonsDialog persona={activeAgent.handle} open onOpenChange={setTeaching} />}
     </>
   )
 }

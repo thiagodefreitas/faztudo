@@ -4,6 +4,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { api } from "../../api/client"
 import { qk } from "../../state/keys"
 import type { Channel, Member, Run } from "../../types"
 import { MembersPanel } from "../members-panel"
@@ -142,6 +143,17 @@ describe("ProfileSheet", () => {
     act(() => router.history.push("/?profile=coder"))
     await userEvent.click(await screen.findByRole("button", { name: "Teach" }))
     expect(await screen.findByRole("dialog", { name: "Lessons for @coder" })).toBeInTheDocument()
+  })
+
+  it("fetches nothing while no profile is open", async () => {
+    const spies = [vi.spyOn(api, "lessons"), vi.spyOn(api, "routines"), vi.spyOn(api, "org"), vi.spyOn(api, "runs"), vi.spyOn(api, "members")]
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const root = createRootRoute({ component: ProfileSheet })
+    const router = createRouter({ routeTree: root, history: createMemoryHistory({ initialEntries: ["/"] }) })
+    await router.load()
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled()
   })
 
   it("opens the DM and the Lanes page at the agent's lane", async () => {

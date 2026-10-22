@@ -10,6 +10,7 @@ import type {
   Channel,
   ChannelCreate,
   ChannelPatch,
+  LaneUsageReading,
   ChannelSummary,
   CompareGroup,
   Computer,
@@ -130,6 +131,7 @@ export interface Api {
   channelSummary: (channelId: ID) => Promise<ChannelSummary>
   patchLane: (id: string, body: LanePatch) => Promise<Lane>
   probeLane: (id: string) => Promise<Lane>
+  laneHistory: (id: string) => Promise<LaneUsageReading[]>
   login: (body: LoginBody) => Promise<Device>
   logout: () => Promise<ReadResult>
   devices: () => Promise<Device[]>
@@ -244,6 +246,7 @@ export function createApi(options: ApiOptions = {}): Api {
     channelSummary: (channelId) => request("GET", `/lanes/channel-summary/${encodeURIComponent(channelId)}`),
     patchLane: (id, body) => request("PATCH", `/lanes/${encodeURIComponent(id)}`, body),
     probeLane: (id) => request("POST", `/lanes/${encodeURIComponent(id)}/probe`),
+    laneHistory: (id) => request("GET", `/lanes/${encodeURIComponent(id)}/history`),
     login: (body) => request("POST", "/auth/login", body),
     logout: () => request("POST", "/auth/logout"),
     devices: () => request("GET", "/auth/devices"),

@@ -103,6 +103,14 @@ describe("MessageList", () => {
     expect(comparePollInterval([{ ...group, decision: "merge_a" }])).toBe(false)
   })
 
+  it("gives each message group one profile tab stop: the name, not the avatar", () => {
+    renderList([message("m1", coder, "2026-10-18T10:00:00.000Z", "Done")])
+    const stops = screen.getAllByRole("button", { name: /Coder|Profile: @coder/ })
+    const avatar = stops.find((button) => button.getAttribute("aria-label") === "Profile: @coder" && button.className.includes("max-sm:hidden"))
+    expect(avatar).toHaveAttribute("tabindex", "-1")
+    expect(screen.getByRole("button", { name: "Coder" })).not.toHaveAttribute("tabindex")
+  })
+
   it("shows an empty channel", () => {
     renderList()
     expect(screen.getByText("No messages yet.")).toBeInTheDocument()

@@ -40,8 +40,14 @@ describe("ApprovalCard", () => {
     const write: Approval = { ...approval, commit_message: "Fix thing", options: [{ key: "merge", label: "Merge", style: "primary" }] }
     render(<ApprovalCard approval={write} run={{ id: "run" } as Run} testCommand="" onResolve={vi.fn()} />)
     expect(screen.getByText(/No checks ran/)).toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: "Commit message" }).closest("label")).toHaveClass("max-md:order-2")
-    expect(screen.getByRole("button", { name: /Merge/ }).parentElement).toHaveClass("max-md:order-1")
+    const commit = screen.getByRole("textbox", { name: "Commit message" })
+    const merge = screen.getByRole("button", { name: /Merge/ })
+    // DOM order is tab order: the decision comes before the commit box and the checks note, as drawn on a phone.
+    expect(merge.compareDocumentPosition(commit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(merge.compareDocumentPosition(screen.getByText(/No checks ran/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Wide screens restore the old layout with md:order-*.
+    expect(commit.closest("label")).toHaveClass("md:order-1")
+    expect(merge.parentElement).toHaveClass("md:order-2")
     const settings = screen.getByRole("link", { name: /Set a test command/ })
     expect(settings).toHaveAttribute("href", `/c/${approval.channel_id}#test-command`)
     await user.click(settings)

@@ -55,6 +55,13 @@ WCAG 2.1 contrast ratios (minimum 4.5:1 for AA normal text, 7.0:1 for AAA):
 | `--fz-danger-text` on `--fz-bg-canvas` | `#b42318` on `#f7f9fa` | 6.23:1 (AA) | `#f97066` on `#0f1417` | 6.65:1 (AA) |
 | `--fz-danger-text` on `--fz-danger-subtle` | `#b42318` on `#fde8e6` | 5.59:1 (AA) | `#f97066` on `#2d1615` | 6.09:1 (AA) |
 
+In the web app the plain accent (`#0e7c74`) is 4.4:1 on the accent tint, under
+AA for 11-12 px tags. Text on the tint therefore uses `--color-accent-text`
+(`#0a635c` light, `#5cd6c8` dark, the `--fz-accent-text` row above). It is
+applied by one rule in `web/src/index.css` for every element that has both
+`bg-accent-soft` and `text-accent`, and `web/src/lib/contrast.test.ts` checks
+the ratio in both themes.
+
 ## Six agent avatar hues
 
 Six categorical hues (`--fz-agent-1` through `--fz-agent-6`, with named aliases

@@ -477,7 +477,7 @@ const MessageRow = memo(function MessageRow({
             {time}
           </time>
         ) : (
-          <button type="button" onClick={() => author && openProfile(author.handle)} disabled={!author} aria-label={author ? `Profile: @${author.handle}` : undefined} className="mt-0.5 flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent max-sm:hidden">{author?.kind === "human" ? <HumanAvatar member={author} className="max-sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="max-sm:hidden" />}</button>
+          <button type="button" tabIndex={-1} onClick={() => author && openProfile(author.handle)} disabled={!author} aria-label={author ? `Profile: @${author.handle}` : undefined} className="mt-0.5 flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent max-sm:hidden">{author?.kind === "human" ? <HumanAvatar member={author} className="max-sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="max-sm:hidden" />}</button>
         )}
         {lastInGroup && <button type="button" onClick={() => author && openProfile(author.handle)} disabled={!author} aria-label={author ? `Profile: @${author.handle}` : undefined} className="flex shrink-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent sm:hidden">{author?.kind === "human" ? <HumanAvatar member={author} /> : <AgentAvatar member={author} size={28} decorative />}</button>}
       </div>

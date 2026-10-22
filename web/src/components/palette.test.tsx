@@ -7,6 +7,13 @@ import { api } from "../api/client"
 import { qk } from "../state/keys"
 import type { Channel, Lane, Member } from "../types"
 import { CommandPalette, OPEN_SETTINGS_EVENT } from "./palette"
+import { profileOpener } from "./profile/navigation"
+
+const nowCalls = vi.hoisted(() => ({ count: 0 }))
+vi.mock("../state/now", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../state/now")>()
+  return { ...actual, useNow: () => { nowCalls.count += 1; return actual.useNow() } }
+})
 
 const ada: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA1", kind: "human", handle: "ada", display_name: "Ada", presence: "online" }
 const coder: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA2", kind: "agent", handle: "coder", display_name: "Coder", presence: "online" }
@@ -191,5 +198,29 @@ describe("CommandPalette", () => {
     await user.click(option)
     await waitFor(() => expect(new URLSearchParams(router.state.location.searchStr).get("profile")).toBe("coder"))
     expect(router.state.location.pathname).toBe("/c/chan-dev")
+  })
+
+  it("hands focus back to the element focused before the palette opened", async () => {
+    const user = userEvent.setup()
+    const before = document.createElement("button")
+    before.textContent = "before"
+    document.body.appendChild(before)
+    await setup()
+    before.focus()
+    await user.keyboard("{Control>}k{/Control}")
+    await user.click(await screen.findByRole("option", { name: "Profile: @coder" }))
+    expect(profileOpener()).toBe(before)
+    before.remove()
+  })
+
+  it("does not run the clock while closed", async () => {
+    const user = userEvent.setup()
+    await setup()
+    nowCalls.count = 0
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(nowCalls.count).toBe(0)
+    await user.keyboard("{Control>}k{/Control}")
+    await screen.findByRole("option", { name: "Create channel" })
+    expect(nowCalls.count).toBeGreaterThan(0)
   })
 })

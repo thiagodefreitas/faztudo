@@ -61,8 +61,10 @@ export function useProfileNavigation() {
     [history],
   )
   const openProfile = useCallback(
-    (next: string) => {
-      opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+    (next: string, from?: HTMLElement | null) => {
+      // `from` lets a caller that is about to unmount its own focused element
+      // (the palette input) name the element that should get focus back.
+      opener = from ?? (document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null)
       // Switching from one profile to another replaces, so Back leaves the sheet.
       go(next.replace(/^@/, ""), Boolean(profileFromSearch(currentSearch(history))))
     },

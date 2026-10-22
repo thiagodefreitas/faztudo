@@ -35,6 +35,7 @@ describe("api client", () => {
     await api.patchLane("codex/default", { capacity: 2 })
     await api.probeLane("codex/default")
     await api.markRead("ch-1", { seq: 7 })
+    await api.laneHistory("codex/default")
 
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
       "GET /api/v1/me",
@@ -50,6 +51,7 @@ describe("api client", () => {
       "PATCH /api/v1/lanes/codex%2Fdefault",
       "POST /api/v1/lanes/codex%2Fdefault/probe",
       "POST /api/v1/channels/ch-1/read",
+      "GET /api/v1/lanes/codex%2Fdefault/history",
     ])
     expect(calls[2]?.body).toEqual({ body: "hi @coder", idempotency_key: "key-1" })
     expect(calls.every((call) => call.credentials === "same-origin")).toBe(true)
@@ -65,6 +67,11 @@ describe("api client", () => {
       code: "not_found",
       message: "channel not found",
     } satisfies Partial<ApiError>)
+  })
+
+  it("surfaces a 401 from lane history as an ApiError the login redirect can see", async () => {
+    const { fetchImpl } = fakeFetch(401, { error: { code: "unauthorized", message: "sign in" } })
+    await expect(createApi({ fetch: fetchImpl }).laneHistory("codex/default")).rejects.toMatchObject({ name: "ApiError", status: 401 })
   })
 
   it("calls the auth and pairing endpoints", async () => {

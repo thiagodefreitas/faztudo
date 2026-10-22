@@ -2,6 +2,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import type { Lane, Run } from "../types"
 import { laneRunUsage, runsTodayOf } from "../lib/lanes"
 import { qk } from "../state/keys"
@@ -214,12 +215,12 @@ describe("LaneCardView", () => {
   })
 })
 
-function renderPage(lanes: Lane[]) {
+function renderPage(lanes: Lane[], prefillHistory = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.lanes, lanes)
   client.setQueryData(qk.runs, [])
   client.setQueryData(qk.members, [])
-  for (const item of lanes) client.setQueryData(["lane-history", item.id], [])
+  if (prefillHistory) for (const item of lanes) client.setQueryData(["lane-history", item.id], [])
   const rootRoute = createRootRoute({ component: LanesPage })
   const router = createRouter({ routeTree: rootRoute, history: createMemoryHistory({ initialEntries: ["/"] }) })
   return router.load().then(() =>
@@ -237,6 +238,14 @@ describe("LanesPage", () => {
     vi.restoreAllMocks()
   })
   const cheap: Lane = { ...availableLane, id: "a/cheap", cost_class: "cheap" }
+
+  it("loads lane history through the api client", async () => {
+    const history = vi.spyOn(api, "laneHistory").mockResolvedValue([])
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    await renderPage([availableLane], false)
+    await waitFor(() => expect(history).toHaveBeenCalledWith("codex/default"))
+    expect(fetchSpy).not.toHaveBeenCalledWith(expect.stringContaining("/history"), expect.anything())
+  })
 
   it("lists lanes that need attention first", async () => {
     await renderPage([cheap, availableLane, exhaustedLane])

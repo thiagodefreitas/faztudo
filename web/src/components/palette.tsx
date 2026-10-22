@@ -18,6 +18,7 @@ import { OPEN_SEARCH_EVENT } from "./search-dialog"
 import { TaskBuilder } from "./tasks/task-builder"
 import { OPEN_TODAY_EVENT } from "./today-brief"
 import { useProfileNavigation } from "./profile/navigation"
+import type { Channel } from "../types"
 
 // The channel page listens for this to open its settings dialog.
 export const OPEN_SETTINGS_EVENT = "faztudo:open-settings"
@@ -121,29 +122,32 @@ const ICON = {
 }
 
 export function CommandPalette() {
-  const { openProfile } = useProfileNavigation()
   const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState("")
   const [creating, setCreating] = useState(false)
   const [building, setBuilding] = useState(false)
   const [shortcuts, setShortcuts] = useState(false)
-  const [recent, setRecent] = useState<string[]>(readRecent)
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const channels = useChannels()
-  const members = useMembers()
-  const me = useMe()
-  const theme = useTheme()
-  const openDirect = useOpenDirect()
-  const lanes = useLanes()
-  const now = useNow()
   const inChannel = pathname.startsWith("/c/")
-  const mod = modKey()
+  // The element that had focus before the palette opened: the palette input is
+  // gone by the time a profile sheet closes, so focus goes back here.
+  const returnTo = useRef<HTMLElement | null>(null)
+  const openRef = useRef(false)
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
+
+  function remember() {
+    const active = document.activeElement
+    returnTo.current = active instanceof HTMLElement && active !== document.body ? active : null
+  }
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "k") {
         event.preventDefault()
+        if (!openRef.current) remember()
         setOpen((value) => !value)
         return
       }
@@ -153,6 +157,7 @@ export function CommandPalette() {
       }
     }
     function onOpen() {
+      if (!openRef.current) remember()
       setOpen(true)
     }
     function onShortcuts() {
@@ -168,16 +173,75 @@ export function CommandPalette() {
     }
   }, [])
 
-  function openChange(next: boolean) {
-    setOpen(next)
-    if (!next) setSearch("")
-  }
+  const rooms = (channels.data ?? []).filter((channel) => !isDirect(channel))
+
+  return (
+    <>
+      <Command.Dialog
+        open={open}
+        onOpenChange={setOpen}
+        label="Command palette"
+        overlayClassName="fixed inset-0 z-40 bg-ink/30"
+        contentClassName="fixed left-1/2 top-[12vh] z-50 w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
+      >
+        {/* Mounted only while open, so the lane clock and the entry list cost nothing when closed. */}
+        <PaletteBody
+          rooms={rooms}
+          pathname={pathname}
+          returnTo={returnTo}
+          close={() => setOpen(false)}
+          onCreate={() => setCreating(true)}
+          onBuild={() => setBuilding(true)}
+          onShortcuts={() => setShortcuts(true)}
+        />
+      </Command.Dialog>
+      <CreateChannelDialog
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={(channel) => void navigate({ to: "/c/$channelId", params: { channelId: channel.id } })}
+      />
+      {building && (
+        <TaskBuilder
+          open={building}
+          onOpenChange={setBuilding}
+          channels={rooms}
+          channelId={inChannel ? rooms.find((channel) => pathname === `/c/${channel.id}`)?.id : undefined}
+        />
+      )}
+      <ShortcutsSheet open={shortcuts} onOpenChange={setShortcuts} />
+    </>
+  )
+}
+
+interface PaletteBodyProps {
+  rooms: Channel[]
+  pathname: string
+  returnTo: { current: HTMLElement | null }
+  close: () => void
+  onCreate: () => void
+  onBuild: () => void
+  onShortcuts: () => void
+}
+
+function PaletteBody({ rooms, pathname, returnTo, close, onCreate, onBuild, onShortcuts }: PaletteBodyProps) {
+  const { openProfile } = useProfileNavigation()
+  const [search, setSearch] = useState("")
+  const [recent, setRecent] = useState<string[]>(readRecent)
+  const navigate = useNavigate()
+  const members = useMembers()
+  const me = useMe()
+  const theme = useTheme()
+  const openDirect = useOpenDirect()
+  const lanes = useLanes()
+  const now = useNow()
+  const inChannel = pathname.startsWith("/c/")
+  const mod = modKey()
 
   function choose(entry: Entry) {
     const next = [entry.id, ...recent.filter((id) => id !== entry.id)].slice(0, RECENT_MAX)
     setRecent(next)
     writeRecent(next)
-    openChange(false)
+    close()
     entry.run()
   }
 
@@ -191,7 +255,6 @@ export function CommandPalette() {
     else void navigate({ to: "/" })
   }
 
-  const rooms = (channels.data ?? []).filter((channel) => !isDirect(channel))
   const others = (members.data ?? []).filter((member) => member.id !== me.data?.id)
 
   const entries: Entry[] = [
@@ -246,7 +309,7 @@ export function CommandPalette() {
       value: `profile @${member.handle} ${member.display_name}`,
       icon: <AgentAvatar member={member} size={20} decorative />,
       label: `Profile: @${member.handle}`,
-      run: () => openProfile(member.handle),
+      run: () => openProfile(member.handle, returnTo.current),
     })),
     ...(lanes.data ?? []).map((lane): Entry => {
       const gauge = laneGauge(lane, now)
@@ -278,9 +341,9 @@ export function CommandPalette() {
       run: () => window.dispatchEvent(new Event(OPEN_SEARCH_EVENT)),
     },
     ...(rooms.length > 0
-      ? [{ id: "action:task", group: "Actions" as const, value: "new task give work", icon: <Glyph d={ICON.plus} />, label: "New task", run: () => setBuilding(true) }]
+      ? [{ id: "action:task", group: "Actions" as const, value: "new task give work", icon: <Glyph d={ICON.plus} />, label: "New task", run: onBuild }]
       : []),
-    { id: "action:channel", group: "Actions", value: "create channel new channel", icon: <Glyph d={ICON.plus} />, label: "Create channel", run: () => setCreating(true) },
+    { id: "action:channel", group: "Actions", value: "create channel new channel", icon: <Glyph d={ICON.plus} />, label: "Create channel", run: onCreate },
     {
       id: "action:theme",
       group: "Actions",
@@ -309,7 +372,7 @@ export function CommandPalette() {
       icon: <Glyph d={ICON.keyboard} />,
       label: "Keyboard shortcuts",
       hint: <Keys keys={["?"]} />,
-      run: () => setShortcuts(true),
+      run: onShortcuts,
     },
   ]
 
@@ -337,13 +400,6 @@ export function CommandPalette() {
 
   return (
     <>
-      <Command.Dialog
-        open={open}
-        onOpenChange={openChange}
-        label="Command palette"
-        overlayClassName="fixed inset-0 z-40 bg-ink/30"
-        contentClassName="fixed left-1/2 top-[12vh] z-50 w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
-      >
         <div className="flex items-center gap-2 border-b border-line px-3">
           <Glyph d={ICON.search} />
           <Command.Input
@@ -380,29 +436,14 @@ export function CommandPalette() {
           <button
             type="button"
             onClick={() => {
-              openChange(false)
-              setShortcuts(true)
+              close()
+              onShortcuts()
             }}
             className="ml-auto flex items-center gap-1 rounded hover:text-ink"
           >
             <Kbd>?</Kbd> all shortcuts
           </button>
         </div>
-      </Command.Dialog>
-      <CreateChannelDialog
-        open={creating}
-        onOpenChange={setCreating}
-        onCreated={(channel) => void navigate({ to: "/c/$channelId", params: { channelId: channel.id } })}
-      />
-      {building && (
-        <TaskBuilder
-          open={building}
-          onOpenChange={setBuilding}
-          channels={rooms}
-          channelId={inChannel ? rooms.find((channel) => pathname === `/c/${channel.id}`)?.id : undefined}
-        />
-      )}
-      <ShortcutsSheet open={shortcuts} onOpenChange={setShortcuts} />
     </>
   )
 }

@@ -79,6 +79,18 @@ describe("Composer", () => {
     expect(box).toHaveValue("/lane ")
   })
 
+  it("sends a command typed in full with one Enter and still completes it with Tab", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Composer members={members} channelName="dev" onSend={onSend} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await user.type(box, "/status{Enter}")
+    expect(onSend).toHaveBeenCalledWith("/status")
+    await user.type(box, "/status{Tab}")
+    expect(box).toHaveValue("/status ")
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+
   it("hints at x2 for write agents and warns about an agent outside the channel", async () => {
     const user = userEvent.setup()
     const onAddMember = vi.fn().mockResolvedValue(undefined)

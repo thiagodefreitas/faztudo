@@ -58,4 +58,19 @@ describe("service worker shell", () => {
     expect(fetch).toHaveBeenCalledWith(request)
     expect(cache.put).toHaveBeenCalledTimes(1)
   })
+
+  it("never caches an HTML response under an asset URL", async () => {
+    const { handlers, cache, fetch } = worker("new")
+    await dispatch(handlers.install)
+    cache.put.mockClear()
+    const html = { ok: true, type: "basic", headers: { get: () => "text/html; charset=utf-8" }, clone() { return this } }
+    fetch.mockResolvedValueOnce(html as never)
+    const request = { method: "GET", url: "https://app.test/assets/lanes-OLD.js", mode: "no-cors" }
+    expect(await dispatch(handlers.fetch, request)).toBe(html)
+    expect(cache.put).not.toHaveBeenCalled()
+    const js = { ok: true, type: "basic", headers: { get: () => "text/javascript" }, clone() { return this } }
+    fetch.mockResolvedValueOnce(js as never)
+    await dispatch(handlers.fetch, { ...request, url: "https://app.test/assets/lanes-NEW.js" })
+    expect(cache.put).toHaveBeenCalledTimes(1)
+  })
 })
