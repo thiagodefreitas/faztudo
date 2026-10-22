@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/thiagodefreitas/faztudo/internal/auth"
+	"github.com/thiagodefreitas/faztudo/internal/computers"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
 	"github.com/thiagodefreitas/faztudo/internal/org"
@@ -29,6 +30,10 @@ import (
 
 type RunTrigger interface {
 	OnMessage(context.Context, domain.Message, []domain.Member)
+}
+type ComputerControl interface {
+	ListComputers(context.Context) ([]computers.Status, error)
+	ResetComputer(context.Context, string) (computers.Status, error)
 }
 type noopTrigger struct{}
 
@@ -60,6 +65,7 @@ type API struct {
 	// Tasks lists, starts and cancels task directives. OnApproval is called
 	// after a human decided an approval, so a task can follow it.
 	Tasks             TaskControl
+	Computers         ComputerControl
 	suggestionMu      sync.Mutex // one accept or dismiss at a time
 	OnApproval        func(context.Context, domain.Approval)
 	ResolveApproval   func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
@@ -153,6 +159,8 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("PATCH /api/v1/lessons/{id}", a.patchLesson)
 	m.HandleFunc("DELETE /api/v1/lessons/{id}", a.deleteLesson)
 	m.HandleFunc("GET /api/v1/org", a.org)
+	m.HandleFunc("GET /api/v1/computers", a.listComputers)
+	m.HandleFunc("POST /api/v1/computers/{id}/reset", a.resetComputer)
 	m.HandleFunc("POST /api/v1/projects", a.createProject)
 	m.HandleFunc("PATCH /api/v1/projects/{project}", a.patchProject)
 	m.HandleFunc("POST /api/v1/projects/{project}/assignments", a.assign)

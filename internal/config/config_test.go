@@ -82,6 +82,31 @@ func TestSandboxConfig(t *testing.T) {
 	}
 }
 
+func TestComputerConfigRequiresSandboxAndValidLimits(t *testing.T) {
+	c := Defaults()
+	if c.Computers.Enabled || c.Computers.DiskSoftMax != "10G" {
+		t.Fatalf("defaults: %+v", c.Computers)
+	}
+	c.Computers.Enabled = true
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	c.Runs.Sandbox = "auto"
+	if err := c.Validate(); err == nil {
+		t.Fatal("computer accepted sandbox fallback")
+	}
+	c.Runs.Sandbox = "required"
+	c.Computers.CPUQuota = "200%\nExecStart=/bin/sh"
+	if err := c.Validate(); err == nil {
+		t.Fatal("computer accepted unit injection")
+	}
+	c.Computers.CPUQuota = "200%"
+	c.Computers.DiskSoftMax = "bad"
+	if err := c.Validate(); err == nil {
+		t.Fatal("computer accepted bad disk limit")
+	}
+}
+
 func TestLaneSandboxOverride(t *testing.T) {
 	c := Defaults()
 	c.Lanes.Lane = []Lane{{ID: "codex/default", CLI: "codex", Capacity: 1, Sandbox: "required"}}

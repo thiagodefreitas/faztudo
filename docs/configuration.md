@@ -121,6 +121,39 @@ in `/proc/meminfo` with that limit. When less is free, the run stays queued,
 the channel gets one notice ("waiting for memory: N GB free, the run needs M
 GB"), and the run starts once memory frees up.
 Read runs are unchanged. See [SECURITY.md](../SECURITY.md) for limits.
+
+### Agent computers
+
+Agent computers are off by default. Enable them only with the required write
+sandbox and a working systemd user session:
+
+```toml
+[runs]
+sandbox = "required"
+
+[computers]
+enabled = true
+disk_soft_max = "10G"
+# cpu_quota = "200%"  # optional aggregate CPU cap
+```
+
+Each persona gets its own `computers/<handle>/home` and `caches` under the
+faztudo data directory. Write runs use that home and keep the Go, npm and XDG
+caches between runs. Read runs do not use a computer. One write run per persona
+uses the computer at a time; another waits in the queue. A computer at or over
+`disk_soft_max` refuses new write runs until it is reset or the limit is raised.
+The Organization page shows its state, disk use and last reset. The Director
+can reset it there or use `POST /api/v1/computers/{handle}/reset`; the API also
+has `GET /api/v1/computers`. Both routes are human-only.
+
+Reset stops the computer's systemd slice and removes its home and caches only
+when no write run or slice process remains. It cannot undo OAuth changes made
+through the host credential bind, shared Git object writes or anything already
+sent over the network. The home cannot contain `.ssh`, `.config/gh`,
+`.git-credentials` or `.netrc`. Git hooks, Go environment settings, npm user
+config and shell startup settings are pinned outside the persistent home; tools
+installed in it must be called by path. Credential copies containing a bound
+token verbatim are removed from the home and caches after each write run.
 Use `required` when a lane's `sandbox_network = false` must be enforced;
 an `auto` fallback runs with the host network. A networkless sandboxed run
 does not receive the faztudo MCP config or prompt note.

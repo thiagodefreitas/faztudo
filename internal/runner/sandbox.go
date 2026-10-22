@@ -22,6 +22,9 @@ import (
 
 func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req adapters.Request, opts *WriteOptions) (adapters.Cmd, error) {
 	worktree := req.Workdir
+	if opts.ComputerHome != "" {
+		opts.SandboxMode = "required"
+	}
 	fallback := func(cause error) (adapters.Cmd, error) {
 		if opts.SandboxMode == "required" {
 			return command, fmt.Errorf("write run requires bubblewrap (sandbox = \"required\"): %w. Install bubblewrap and allow unprivileged user namespaces, or set sandbox = \"auto\" under [runs] or on the lane to run unsandboxed", cause)
@@ -75,10 +78,32 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		"XDG_DATA_HOME":    filepath.Join(opts.runStateDir, "xdg-data"),
 		"XDG_STATE_HOME":   filepath.Join(opts.runStateDir, "xdg-state"),
 	}
+	if opts.ComputerHome != "" {
+		if opts.ComputerCaches == "" || opts.ComputerID == "" {
+			return command, errors.New("computer paths and id required")
+		}
+		pins, err := computerPins(filepath.Dir(opts.runStateDir), opts.ComputerCaches)
+		if err != nil {
+			return command, err
+		}
+		for key, value := range pins {
+			cache[key] = value
+		}
+		readOnly = append(readOnly, pins["GIT_CONFIG_GLOBAL"], pins["NPM_CONFIG_USERCONFIG"])
+	}
 	if cli == "opencode" {
 		cache["XDG_CONFIG_HOME"] = filepath.Join(opts.runStateDir, "xdg-config")
 	}
-	for _, path := range cache {
+	if opts.ComputerHome != "" {
+		cache["XDG_CONFIG_HOME"] = filepath.Join(opts.runStateDir, "xdg-config")
+	}
+	for _, key := range []string{"GOCACHE", "NPM_CONFIG_CACHE", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
+		path := cache[key]
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return fallback(err)
+		}
+	}
+	if path := cache["XDG_CONFIG_HOME"]; path != "" {
 		if err := os.MkdirAll(path, 0700); err != nil {
 			return fallback(err)
 		}
@@ -108,6 +133,13 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		cache["PATH"] = filepath.Join(root, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
 	readOnly = append(readOnly, toolchainRoots(home, toolchainPaths, worktree, gitDir, opts.runStateDir)...)
+	if opts.ComputerHome != "" {
+		hostBin := filepath.Join(home, ".local", "bin")
+		if info, err := os.Lstat(hostBin); err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			readOnly = append(readOnly, hostBin)
+		}
+		cache["PATH"] = computerPATH(readOnly)
+	}
 	if modcache := goModCache(home); modcache != "" {
 		if coversWritable(modcache, worktree, gitDir, opts.runStateDir) {
 			return fallback(fmt.Errorf("Go module cache covers a writable run path: %s", modcache))
@@ -115,7 +147,7 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 		readOnly = append(readOnly, modcache)
 		cache["GOMODCACHE"] = modcache
 	}
-	args, err := sandbox.Build(sandbox.Options{Worktree: worktree, GitDir: filepath.Clean(gitDir), Home: home, CLI: cli, Executable: program, Network: opts.Network, StateDir: opts.runStateDir, Branch: "fz/" + filepath.Base(worktree), CodexHome: os.Getenv("CODEX_HOME"), ReadOnly: readOnly})
+	args, err := sandbox.Build(sandbox.Options{Worktree: worktree, GitDir: filepath.Clean(gitDir), Home: home, ComputerHome: opts.ComputerHome, CLI: cli, Executable: program, Network: opts.Network, StateDir: opts.runStateDir, Branch: "fz/" + filepath.Base(worktree), CodexHome: os.Getenv("CODEX_HOME"), ReadOnly: readOnly})
 	if err != nil {
 		return fallback(err)
 	}
@@ -135,11 +167,55 @@ func sandboxCommand(ctx context.Context, command adapters.Cmd, cli string, req a
 	args = append(args, "--", program)
 	args = append(args, command.Args...)
 	opts.scopeUsed = opts.MemoryMax != "" && opts.TasksMax > 0 && sandbox.ScopeAvailable(ctx, opts.MemoryMax, opts.TasksMax)
+	if opts.ComputerID != "" {
+		if !opts.scopeUsed {
+			return command, errors.New("computer write run requires a systemd user scope")
+		}
+		if err := sandbox.EnsureComputerSlice(ctx, opts.ComputerID, opts.MemoryMax, opts.TasksMax, opts.CPUQuota); err != nil {
+			return command, err
+		}
+	}
 	command.Path, command.Args, err = sandboxLaunch(args, opts)
 	if err != nil {
 		return fallback(err)
 	}
 	return command, nil
+}
+
+func computerPins(stateDir, cachesDir string) (map[string]string, error) {
+	gitConfig := filepath.Join(stateDir, "computer-gitconfig")
+	npmConfig := filepath.Join(stateDir, "computer-npmrc")
+	if err := os.WriteFile(gitConfig, []byte("[core]\n\thooksPath = /dev/null\n"), 0600); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(npmConfig, nil, 0600); err != nil {
+		return nil, err
+	}
+	zdot := filepath.Join(stateDir, "computer-zdotdir")
+	if err := os.MkdirAll(zdot, 0700); err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		// GOCACHE stays per run: Go replaces action-cache entries, executables
+		// included, so a persistent build cache would hand the next run a
+		// binary to execute (ADR 0006).
+		"NPM_CONFIG_CACHE": filepath.Join(cachesDir, "npm"), "XDG_CACHE_HOME": filepath.Join(cachesDir, "xdg"),
+		"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null", "GOENV": "off", "NPM_CONFIG_USERCONFIG": npmConfig,
+		"SHELL": "/bin/sh", "ENV": "", "BASH_ENV": "", "ZDOTDIR": zdot,
+	}, nil
+}
+
+func computerPATH(readOnly []string) string {
+	var executablePaths []string
+	for _, root := range readOnly {
+		if filepath.Base(root) == "bin" || filepath.Base(root) == "shims" {
+			executablePaths = append(executablePaths, root)
+		}
+		if info, err := os.Stat(filepath.Join(root, "bin")); err == nil && info.IsDir() {
+			executablePaths = append(executablePaths, filepath.Join(root, "bin"))
+		}
+	}
+	return strings.Join(append(executablePaths, "/usr/local/bin", "/usr/bin", "/bin"), string(os.PathListSeparator))
 }
 
 func availableGoRoot(home string, writable ...string) string {
@@ -180,6 +256,9 @@ func sandboxLaunch(args []string, opts *WriteOptions) (string, []string, error) 
 		// parent so agent-written files cannot forge an OOM result.
 		opts.scopeReport = filepath.Join(filepath.Dir(opts.runStateDir), "scope.report")
 		wrapped := append([]string{sh, "-c", scopeReportScript, "scope-report", opts.scopeReport, path}, args...)
+		if opts.ComputerID != "" {
+			return scope, sandbox.ComputerScopeArgs(opts.MemoryMax, opts.TasksMax, "faztudo-computer-"+opts.ComputerID+".slice", opts.CPUQuota, wrapped), nil
+		}
 		return scope, sandbox.ScopeArgs(opts.MemoryMax, opts.TasksMax, wrapped), nil
 	}
 	return path, args, nil

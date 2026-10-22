@@ -60,6 +60,8 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     return { status: 200, body: { channel_id: parts[2] ?? "", text: "" } }
   }
   if (method === "GET" && parts[0] === "org" && parts.length === 1) return { status: 200, body: world.getOrg() }
+  if (method === "GET" && parts[0] === "computers" && parts.length === 1) return { status: 200, body: world.getComputers() }
+  if (method === "POST" && parts[0] === "computers" && parts[2] === "reset" && parts.length === 3) return send(world.resetComputer(parts[1] ?? ""))
   if (method === "GET" && parts[0] === "routines" && parts.length === 1) return { status: 200, body: world.getRoutines() }
   if (method === "GET" && parts[0] === "tasks" && parts.length === 1) {
     return { status: 200, body: world.getTasks(url.searchParams.get("channel_id") ?? undefined, url.searchParams.get("project") ?? undefined) }

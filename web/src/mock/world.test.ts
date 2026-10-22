@@ -12,6 +12,16 @@ function world() {
 }
 
 describe("mock world", () => {
+  it("keeps computer resets in the mock API", () => {
+    const { world: mock } = world()
+    const list = new URL("http://localhost/api/v1/computers")
+    const before = handleMock(mock, "GET", list).body as Array<{ id: string; disk_bytes: number }>
+    expect(before.find((item) => item.id === "coder")?.disk_bytes).toBeGreaterThan(0)
+    expect(handleMock(mock, "POST", new URL("http://localhost/api/v1/computers/coder/reset")).status).toBe(200)
+    const after = handleMock(mock, "GET", list).body as Array<{ id: string; disk_bytes: number; last_reset?: string }>
+    expect(after.find((item) => item.id === "coder")?.disk_bytes).toBe(0)
+    expect(after.find((item) => item.id === "coder")?.last_reset).toBeTruthy()
+  })
   it("creates and removes approval rules through the mock API", () => {
     const { world: mock } = world()
     const url = new URL("http://localhost/api/v1/approval-rules")

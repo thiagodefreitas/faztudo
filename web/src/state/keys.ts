@@ -12,6 +12,7 @@ export const qk = {
   approvals: ["approvals"] as const,
   lanes: ["lanes"] as const,
   org: ["org"] as const,
+  computers: ["computers"] as const,
   routines: ["routines"] as const,
   lessons: ["lessons"] as const,
   tasks: ["tasks"] as const,

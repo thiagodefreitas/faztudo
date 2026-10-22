@@ -46,6 +46,7 @@ async function setup(members: Member[] = [ada, coder, reviewer, writer], organiz
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.members, members)
   client.setQueryData(qk.org, organization)
+  client.setQueryData(qk.computers, [{ id: "coder", state: "idle", disk_bytes: 1048576, disk_soft_max: 1073741824 }])
   client.setQueryData(qk.lanes, [])
   client.setQueryData(qk.runs, [])
   client.setQueryData(qk.approvals, [])
@@ -62,6 +63,19 @@ async function setup(members: Member[] = [ada, coder, reviewer, writer], organiz
 }
 
 describe("OrganizationPage", () => {
+  it("shows computer status and confirms reset consequences", async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
+    const reset = vi.spyOn(api, "resetComputer").mockResolvedValue({ id: "coder", state: "idle", disk_bytes: 0, disk_soft_max: 1073741824 })
+    vi.spyOn(api, "computers").mockResolvedValue([{ id: "coder", state: "idle", disk_bytes: 0, disk_soft_max: 1073741824 }])
+    await setup()
+    const section = await screen.findByRole("region", { name: "Agent computers" })
+    expect(section).toHaveTextContent("@coder")
+    expect(section).toHaveTextContent("1.0 MB used")
+    await user.click(within(section).getByRole("button", { name: "Reset @coder" }))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("cannot undo OAuth changes"))
+    await waitFor(() => expect(reset).toHaveBeenCalledWith("coder"))
+  })
   it("lists archived projects separately and can unarchive them", async () => {
     const user = userEvent.setup()
     const patch = vi.spyOn(api, "patchProject").mockResolvedValue({ ...project, archived: false })

@@ -18,6 +18,7 @@ import (
 type Paths struct{ ConfigDir, DataDir, ConfigFile, LanesFile, SecretsFile, DBFile, WorktreesDir, RunsDir, TLSDir, FilesDir string }
 
 var memoryLimitPattern = regexp.MustCompile(`^[1-9][0-9]*[KMGT]?$`)
+var cpuQuotaPattern = regexp.MustCompile(`^[1-9][0-9]*%$`)
 
 func PathsFromEnv() Paths {
 	home, _ := os.UserHomeDir()
@@ -73,6 +74,11 @@ type Runs struct {
 	RequestMaxPremium int `toml:"request_max_premium_runs"`
 	// CollectDelegations defaults to enabled when omitted.
 	CollectDelegations *bool `toml:"collect_delegations"`
+}
+type Computers struct {
+	Enabled     bool   `toml:"enabled"`
+	DiskSoftMax string `toml:"disk_soft_max"`
+	CPUQuota    string `toml:"cpu_quota"`
 }
 
 // Routines holds the settings that apply to every routine.
@@ -165,12 +171,13 @@ type LaneConfig struct {
 	Routine    []Routine    `toml:"routine"`
 }
 type Config struct {
-	Server   Server     `toml:"server"`
-	LAN      LAN        `toml:"lan"`
-	Runs     Runs       `toml:"runs"`
-	Routines Routines   `toml:"routines"`
-	Bridges  Bridges    `toml:"bridges"`
-	Lanes    LaneConfig `toml:"-"`
+	Server    Server     `toml:"server"`
+	LAN       LAN        `toml:"lan"`
+	Runs      Runs       `toml:"runs"`
+	Computers Computers  `toml:"computers"`
+	Routines  Routines   `toml:"routines"`
+	Bridges   Bridges    `toml:"bridges"`
+	Lanes     LaneConfig `toml:"-"`
 }
 
 type Bridges struct {
@@ -189,10 +196,11 @@ type SignalBridge struct {
 
 func Defaults() Config {
 	return Config{
-		Server:   Server{Listen: "127.0.0.1:7457", OpenBrowser: true, MaxUploadMB: 25},
-		LAN:      LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
-		Runs:     Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "required", SandboxMemoryMax: "auto", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
-		Routines: Routines{MaxPerDay: 20, PollInterval: "5m"},
+		Server:    Server{Listen: "127.0.0.1:7457", OpenBrowser: true, MaxUploadMB: 25},
+		LAN:       LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
+		Runs:      Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "required", SandboxMemoryMax: "auto", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
+		Computers: Computers{DiskSoftMax: "10G"},
+		Routines:  Routines{MaxPerDay: 20, PollInterval: "5m"},
 	}
 }
 func Load(p Paths) (Config, error) {
@@ -238,6 +246,15 @@ func (c Config) Validate() error {
 	if c.Runs.Sandbox != "auto" && c.Runs.Sandbox != "off" && c.Runs.Sandbox != "required" {
 		return errors.New("runs.sandbox: must be auto, off or required")
 	}
+	if c.Computers.Enabled && c.Runs.Sandbox != "required" {
+		return errors.New("computers.enabled requires runs.sandbox = required")
+	}
+	if c.Computers.DiskSoftMax != "" && !memoryLimitPattern.MatchString(c.Computers.DiskSoftMax) {
+		return errors.New("computers.disk_soft_max: use a positive size such as 10G")
+	}
+	if c.Computers.CPUQuota != "" && !cpuQuotaPattern.MatchString(c.Computers.CPUQuota) {
+		return errors.New("computers.cpu_quota: use a positive percentage such as 200%")
+	}
 	if c.Runs.SandboxMemoryMax != MemoryAuto && !memoryLimitPattern.MatchString(c.Runs.SandboxMemoryMax) {
 		return errors.New("runs.sandbox_memory_max: use auto or a positive size such as 4G")
 	}
@@ -279,6 +296,9 @@ func (c Config) Validate() error {
 		}
 		if l.Sandbox != "" && l.Sandbox != "auto" && l.Sandbox != "off" && l.Sandbox != "required" {
 			return fmt.Errorf("lane[%d].sandbox: must be auto, off or required", i)
+		}
+		if c.Computers.Enabled && l.Sandbox != "" && l.Sandbox != "required" {
+			return fmt.Errorf("lane[%d].sandbox: computers require required", i)
 		}
 		if l.ConserveAt != nil && (*l.ConserveAt < 1 || *l.ConserveAt > 100) {
 			return fmt.Errorf("lane[%d].conserve_at: must be between 1 and 100", i)
@@ -466,7 +486,7 @@ func WriteDefaults(p Paths) error {
 			return err
 		}
 	}
-	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\nca_listen = \"0.0.0.0:7459\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\nsandbox = \"required\"\nsandbox_memory_max = \"auto\"\nsandbox_tasks_max = 512\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n# sandbox_network = true\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
+	for _, f := range []struct{ path, body string }{{p.ConfigFile, "# Local server settings\n[server]\nlisten = \"127.0.0.1:7457\"\nopen_browser = true\n\n[lan]\nenabled = false\nlisten = \"0.0.0.0:7458\"\nca_listen = \"0.0.0.0:7459\"\n\n[runs]\ndefault_timeout = \"30m\"\ncontext_messages = 40\nsandbox = \"required\"\nsandbox_memory_max = \"auto\"\nsandbox_tasks_max = 512\n\n[computers]\nenabled = false\ndisk_soft_max = \"10G\"\n"}, {p.LanesFile, "# Agent lanes and personas. Run 'faztudo agents detect' to find local CLIs.\n# [[lane]]\n# id = \"codex/default\"\n# cli = \"codex\"\n# cost_class = \"standard\"\n# capacity = 1\n# conserve_at = 80\n# sandbox_network = true\n#\n# [[persona]]\n# handle = \"coder\"\n# display_name = \"Coder\"\n# lanes = [\"codex/default\"]\n# mode = \"write\"\n"}} {
 		h, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if errors.Is(err, os.ErrExist) {
 			continue

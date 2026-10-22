@@ -77,6 +77,123 @@ func TestBuild(t *testing.T) {
 	}
 }
 
+func TestComputerHomeBindPrecedesReadOnlyBinds(t *testing.T) {
+	hostHome := filepath.Join(t.TempDir(), "host")
+	computerHome := filepath.Join(t.TempDir(), "computer-home")
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	git := filepath.Join(t.TempDir(), "git")
+	settings := filepath.Join(hostHome, ".claude", "settings.json")
+	for _, dir := range []string{computerHome, worktree, git, filepath.Dir(settings)} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(settings, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: hostHome, ComputerHome: computerHome, CLI: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindAt := -1
+	settingsAt := -1
+	for i := 0; i+2 < len(args); i++ {
+		if args[i] == "--bind" && args[i+1] == computerHome && args[i+2] == hostHome {
+			bindAt = i
+		}
+		if args[i] == "--ro-bind" && args[i+1] == filepath.Join(hostHome, ".claude") {
+			settingsAt = i
+		}
+	}
+	if bindAt < 0 || settingsAt <= bindAt {
+		t.Fatalf("unsafe bind order: %v", args)
+	}
+	for _, name := range []string{".profile", ".bashrc", ".zshenv"} {
+		covered := false
+		for i := bindAt; i+2 < len(args); i++ {
+			if args[i] == "--ro-bind" && args[i+1] == "/dev/null" && args[i+2] == filepath.Join(hostHome, name) {
+				covered = true
+			}
+		}
+		if !covered {
+			t.Errorf("%s is not covered after the home bind", name)
+		}
+	}
+}
+
+func TestComputerHomeNestedSourceMounts(t *testing.T) {
+	t.Setenv(NestedEnv, "")
+	if err := Probe(context.Background(), true); err != nil {
+		t.Skip(err)
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostHome, err := os.MkdirTemp(userHome, "faztudo-computer-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(hostHome) })
+	computerHome := filepath.Join(hostHome, ".local", "share", "faztudo", "computers", "coder", "home")
+	worktree := filepath.Join(hostHome, "worktrees", "run")
+	git := filepath.Join(hostHome, "repo", ".git")
+	state := filepath.Join(hostHome, "runs", "run", "sandbox")
+	hostBin := filepath.Join(hostHome, ".local", "bin")
+	for _, dir := range []string{computerHome, worktree, git, state, hostBin, filepath.Join(computerHome, ".local", "bin")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{filepath.Join(computerHome, "persisted"): "home", filepath.Join(worktree, "project-file"): "worktree", filepath.Join(state, "state-file"): "state"} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(hostBin, "trusted"), []byte("host"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(computerHome, ".local", "bin", "planted"), []byte("agent"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pin := filepath.Join(filepath.Dir(state), "computer-gitconfig")
+	if err := os.WriteFile(pin, []byte("[core]\n hooksPath=/dev/null\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := Build(Options{Worktree: worktree, GitDir: git, Home: hostHome, ComputerHome: computerHome, StateDir: state, Network: true, ReadOnly: []string{hostBin, pin}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bwrap", append(args, "--", "/bin/sh", "-c", `test -f "$HOME/persisted" && test -f "$PWD/project-file" && test -f "`+state+`/state-file" && test -f "$HOME/.local/bin/trusted" && test ! -e "$HOME/.local/bin/planted" && ! (echo planted > "`+pin+`" 2>/dev/null)`)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("computer mounts: %v: %s", err, out)
+	}
+}
+
+func TestComputerSliceUnitAndScope(t *testing.T) {
+	runtimeDir := t.TempDir()
+	toolsDir := t.TempDir()
+	log := filepath.Join(runtimeDir, "systemctl.log")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n"
+	if err := os.WriteFile(filepath.Join(toolsDir, "systemctl"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", toolsDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	if err := EnsureComputerSlice(context.Background(), "coder", "2G", 512, "200%"); err != nil {
+		t.Fatal(err)
+	}
+	unit, err := os.ReadFile(filepath.Join(runtimeDir, "systemd", "user", "faztudo-computer-coder.slice"))
+	if err != nil || !strings.Contains(string(unit), "MemoryMax=2G") || !strings.Contains(string(unit), "TasksMax=512") || !strings.Contains(string(unit), "CPUQuota=200%") {
+		t.Fatalf("unit: %q %v", unit, err)
+	}
+	args := ComputerScopeArgs("2G", 512, "faztudo-computer-coder.slice", "200%", []string{"/bin/true"})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--slice=faztudo-computer-coder.slice") || !strings.Contains(joined, "--property=MemoryMax=2G") || !strings.Contains(joined, "--property=CPUQuota=200%") {
+		t.Fatalf("scope args: %v", args)
+	}
+}
+
 func hasBind(args []string, mode, path string) bool {
 	for i := 0; i+2 < len(args); i++ {
 		if args[i] == mode && args[i+1] == path && args[i+2] == path {

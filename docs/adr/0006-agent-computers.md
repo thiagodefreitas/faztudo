@@ -2,6 +2,19 @@
 
 Status: proposed, 2026-10-22, revised the same day after security review
 
+Implementation note, 2026-10-22: v1 computer homes, caches, write-run
+serialization, systemd user slices, disk soft limit, credential-copy scan,
+human-only reset API and Organization controls are built. The desk screen was
+left out under the issue's small-change allowance. Disk is measured when a
+computer is listed and before a write run, not by a background periodic walk.
+The second security check's three points are in: `GOCACHE` stays per run,
+login shell files in the home are covered by empty read-only files, and the
+credential scan runs at run start as well as at run end. The slice and CLI
+credential paths have not been exercised against a live signed-in systemd
+user session. Status stays proposed until the remaining v1 display and
+periodic measurement work is done and the live path is verified;
+`[computers] enabled` is off by default.
+
 ## Context
 
 Every write run today builds a fresh bubblewrap sandbox (`internal/sandbox`,

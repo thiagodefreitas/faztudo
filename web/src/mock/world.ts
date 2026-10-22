@@ -12,6 +12,7 @@ import type {
   ChannelCreate,
   ChannelPatch,
   CompareGroup,
+  Computer,
   Department,
   Device,
   DiffPage,
@@ -108,6 +109,7 @@ export class MockWorld {
   // The mock lists tasks for the board and project homes; it does not create
   // or run them.
   private tasks: Task[] = []
+  private computerResets = new Map<string, string>()
   // Two lessons for the demo: one for every channel, one for #faztudo-dev.
   private lessons: Lesson[] = [
     {
@@ -513,6 +515,18 @@ export class MockWorld {
   // refuse mentions in project channels the way the daemon does.
   getOrg(): Org {
     return structuredClone({ director_id: this.me.id, departments: this.departments, projects: this.projects })
+  }
+
+  getComputers(): Computer[] {
+    return this.members.filter((member) => member.kind === "agent").map((member) => ({ id: member.handle, state: "idle", disk_bytes: this.computerResets.has(member.handle) ? 0 : 12 * 1048576, disk_soft_max: 10 * 1073741824, ...(this.computerResets.has(member.handle) ? { last_reset: this.computerResets.get(member.handle) } : {}) }))
+  }
+
+  resetComputer(id: string): Result<Computer> {
+    const computer = this.getComputers().find((item) => item.id === id)
+    if (!computer) return err(404, "not_found", "resource not found")
+    const at = new Date().toISOString()
+    this.computerResets.set(id, at)
+    return ok({ ...computer, disk_bytes: 0, last_reset: at })
   }
 
   // The mock checks what the daemon checks: a human handle, known agents and

@@ -15,13 +15,14 @@ import (
 )
 
 type Options struct {
-	Worktree   string
-	GitDir     string
-	Home       string
-	CLI        string
-	Executable string
-	Network    bool
-	StateDir   string
+	Worktree     string
+	GitDir       string
+	Home         string
+	ComputerHome string
+	CLI          string
+	Executable   string
+	Network      bool
+	StateDir     string
 	// CodexHome is the host's Codex directory when it is not ~/.codex.
 	CodexHome string
 	// Branch is the run's own branch (fz/<run id>). Its ref and reflog are the
@@ -42,6 +43,27 @@ func Build(o Options) ([]string, error) {
 		args = append(args, "--share-net")
 	}
 	args = append(args, "--die-with-parent", "--new-session")
+	if o.ComputerHome != "" {
+		info, err := os.Lstat(o.ComputerHome)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("unsafe computer home: %s", o.ComputerHome)
+		}
+		// This must precede every read-only host bind, including toolchains
+		// and CLI settings. Later binds cover planted paths in the home.
+		var parents []string
+		for p := filepath.Dir(o.Home); p != "/"; p = filepath.Dir(p) {
+			parents = append(parents, p)
+		}
+		for i := len(parents) - 1; i >= 0; i-- {
+			args = append(args, "--dir", parents[i])
+		}
+		args = append(args, "--bind", o.ComputerHome, o.Home)
+		// A login sh reads ~/.profile and zsh always reads .zshenv; either
+		// could undo the runner's pins. Empty read-only files cover them.
+		for _, name := range loginShellFiles {
+			args = append(args, "--ro-bind", "/dev/null", filepath.Join(o.Home, name))
+		}
+	}
 	for _, p := range []string{"/usr", "/bin", "/lib", "/lib64", "/lib32"} {
 		if _, err := os.Stat(p); err == nil {
 			args = append(args, "--ro-bind", p, p)
@@ -55,6 +77,11 @@ func Build(o Options) ([]string, error) {
 	}
 	args = append(args, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp")
 	dirs := map[string]bool{"/": true, "/usr": true, "/bin": true, "/lib": true, "/lib64": true, "/lib32": true, "/etc": true, "/proc": true, "/dev": true, "/tmp": true}
+	if o.ComputerHome != "" {
+		for p := o.Home; p != "/"; p = filepath.Dir(p) {
+			dirs[p] = true
+		}
+	}
 	bind := func(path, mode string) error {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return fmt.Errorf("invalid sandbox bind path %q", path)
@@ -662,6 +689,13 @@ func refreshPaths(home, cli string) []string {
 	return nil
 }
 
+// loginShellFiles are the start-up files a shell reads from the home. In a
+// computer they would let one run plant code that the next run's shell runs.
+var loginShellFiles = []string{".profile", ".bash_profile", ".bash_login", ".bashrc", ".bash_logout", ".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"}
+
+// RefreshPaths names the host credential files exposed to a write run.
+func RefreshPaths(home, cli string) []string { return refreshPaths(home, cli) }
+
 func sessionFiles(cli string) []string {
 	switch cli {
 	case "codex":
@@ -760,6 +794,60 @@ func ScopeArgs(memory string, tasks int, command []string) []string {
 	// stdout; systemd-run rejects --wait and --pipe with --scope.
 	args := []string{"--user", "--scope", "--quiet", "--collect", "--property=MemoryMax=" + memory, fmt.Sprintf("--property=TasksMax=%d", tasks), "--"}
 	return append(args, command...)
+}
+
+func ComputerScopeArgs(memory string, tasks int, slice, cpuQuota string, command []string) []string {
+	args := []string{"--user", "--scope", "--quiet", "--collect", "--slice=" + slice,
+		"--property=MemoryMax=" + memory, fmt.Sprintf("--property=TasksMax=%d", tasks)}
+	if cpuQuota != "" {
+		args = append(args, "--property=CPUQuota="+cpuQuota)
+	}
+	return append(append(args, "--"), command...)
+}
+
+// EnsureComputerSlice installs a runtime user slice before its first scope.
+// The slice owns the aggregate limits; the scope keeps per-run counters.
+func EnsureComputerSlice(ctx context.Context, id, memory string, tasks int, cpuQuota string) error {
+	if !regexp.MustCompile(`^[a-z][a-z0-9_-]*$`).MatchString(id) {
+		return errors.New("invalid computer id")
+	}
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		return errors.New("XDG_RUNTIME_DIR is required for computer slices")
+	}
+	unitDir := filepath.Join(runtimeDir, "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0700); err != nil {
+		return err
+	}
+	unit := "faztudo-computer-" + id + ".slice"
+	body := fmt.Sprintf("[Unit]\nDescription=Faztudo computer %s\n[Slice]\nMemoryMax=%s\nTasksMax=%d\n", id, memory, tasks)
+	if cpuQuota != "" {
+		body += "CPUQuota=" + cpuQuota + "\n"
+	}
+	path := filepath.Join(unitDir, unit)
+	previous, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if string(previous) != body {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			return err
+		}
+		if out, err := exec.CommandContext(ctx, "systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
+			return fmt.Errorf("reload computer slice: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+	}
+	if out, err := exec.CommandContext(ctx, "systemctl", "--user", "start", unit).CombinedOutput(); err != nil {
+		return fmt.Errorf("start computer slice: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	properties := []string{"--user", "set-property", "--runtime", unit, "MemoryMax=" + memory, fmt.Sprintf("TasksMax=%d", tasks)}
+	if cpuQuota != "" {
+		properties = append(properties, "CPUQuota="+cpuQuota)
+	}
+	if out, err := exec.CommandContext(ctx, "systemctl", properties...).CombinedOutput(); err != nil {
+		return fmt.Errorf("limit computer slice: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func ScopeAvailable(ctx context.Context, memory string, tasks int) bool {

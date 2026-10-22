@@ -5,7 +5,7 @@ import { api } from "../api/client"
 import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { useNow } from "../state/now"
-import { useApprovals, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
+import { useApprovals, useComputers, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
 import type { AssignKind, Department, Member, Project } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { LessonsButton } from "./lessons/lessons-dialog"
@@ -84,6 +84,7 @@ function AgentRow({
 
 export function OrganizationPage() {
   const me = useMe()
+  const computers = useComputers(me.data?.kind === "human")
   const members = useMembers()
   const org = useOrg()
   const lanes = useLanes()
@@ -94,6 +95,18 @@ export function OrganizationPage() {
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+
+  async function resetComputer(id: string) {
+    const confirmed = window.confirm(`Reset @${id}'s computer? This removes its home and caches. It cannot undo OAuth changes, shared git objects, or anything already sent over the network.`)
+    if (!confirmed) return
+    setError(null)
+    try {
+      await api.resetComputer(id)
+      await qc.invalidateQueries({ queryKey: qk.computers })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reset the computer.")
+    }
+  }
 
   const all = members.data ?? []
   const director = all.find((member) => member.id === (org.data?.director_id ?? me.data?.id))
@@ -168,6 +181,24 @@ export function OrganizationPage() {
                   ))}
                 </ul>
               </div>
+            )}
+
+            {me.data?.kind === "human" && agents.length > 0 && (
+              <section aria-label="Agent computers">
+                <h2 className="pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Agent computers</h2>
+                <ul className="divide-y divide-line rounded-lg border border-line bg-surface px-3">
+                  {agents.map((agent) => {
+                    const computer = computers.data?.find((item) => sameHandle(item.id, agent.handle))
+                    return <li key={agent.id} className="flex min-h-10 flex-wrap items-center gap-2 py-1 text-[12px]">
+                      <span className="min-w-0 flex-1 font-medium">@{agent.handle}</span>
+                      <span>{computer?.state ?? "off"}</span>
+                      <span>{computer ? `${(computer.disk_bytes / 1048576).toFixed(1)} MB used` : ""}</span>
+                      {computer?.last_reset && <span>Reset {new Date(computer.last_reset).toLocaleString()}</span>}
+                      {computer && computer.state !== "off" && <button type="button" className="text-accent hover:underline" onClick={() => void resetComputer(agent.handle)}>Reset @{agent.handle}</button>}
+                    </li>
+                  })}
+                </ul>
+              </section>
             )}
 
             <div>

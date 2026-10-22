@@ -519,6 +519,14 @@ export interface Org {
   projects: Project[]
 }
 
+export interface Computer {
+  id: string
+  state: "off" | "idle" | "running" | "full"
+  disk_bytes: number
+  disk_soft_max: number
+  last_reset?: string
+}
+
 export type RoutineStatus = "ok" | "failed" | "skipped"
 
 export interface RoutineResult {

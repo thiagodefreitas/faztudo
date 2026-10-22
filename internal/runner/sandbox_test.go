@@ -37,6 +37,41 @@ func TestSandboxFallbackPolicy(t *testing.T) {
 	}
 }
 
+func TestComputerEnvPins(t *testing.T) {
+	state := t.TempDir()
+	caches := filepath.Join(t.TempDir(), "caches")
+	pins, err := computerPins(state, caches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"GOENV": "off", "SHELL": "/bin/sh", "ENV": "", "BASH_ENV": "", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null", "NPM_CONFIG_CACHE": filepath.Join(caches, "npm"), "XDG_CACHE_HOME": filepath.Join(caches, "xdg")} {
+		if pins[key] != want {
+			t.Errorf("%s = %q, want %q", key, pins[key], want)
+		}
+	}
+	if _, ok := pins["GOCACHE"]; ok {
+		t.Error("GOCACHE must stay per run, not in the computer")
+	}
+	if info, err := os.Stat(pins["ZDOTDIR"]); err != nil || !info.IsDir() || !strings.HasPrefix(pins["ZDOTDIR"], state) {
+		t.Errorf("ZDOTDIR = %q, want an empty per-run directory", pins["ZDOTDIR"])
+	}
+	gitConfig, err := os.ReadFile(pins["GIT_CONFIG_GLOBAL"])
+	if err != nil || !strings.Contains(string(gitConfig), "hooksPath = /dev/null") {
+		t.Fatalf("git config: %q %v", gitConfig, err)
+	}
+	if b, err := os.ReadFile(pins["NPM_CONFIG_USERCONFIG"]); err != nil || len(b) != 0 {
+		t.Fatalf("npm config: %q %v", b, err)
+	}
+	toolchain := filepath.Join(t.TempDir(), "toolchain")
+	if err := os.MkdirAll(filepath.Join(toolchain, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := computerPATH([]string{toolchain})
+	if !strings.HasPrefix(path, filepath.Join(toolchain, "bin")) || strings.Contains(path, filepath.Join(state, "home")) {
+		t.Fatalf("computer PATH: %s", path)
+	}
+}
+
 func TestVerificationNeverRunsUnsandboxedForSandboxedRuns(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
 	r := &Runner{}

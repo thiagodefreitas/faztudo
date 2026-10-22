@@ -162,22 +162,26 @@ type Runner struct {
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type WriteOptions struct {
-	Repo        string
-	Worktrees   worktree.Manager
-	TestCommand string
-	TestTimeout time.Duration
-	SandboxMode string
-	Network     bool
-	MemoryMax   string
-	TasksMax    int
-	ReadOnly    []string
-	OnFallback  func(string)
-	OnWait      func(string) // notice while queued for memory; defaults to OnFallback
-	runStateDir string
-	sandboxArgs []string
-	sandboxEnv  map[string]string
-	scopeUsed   bool
-	scopeReport string
+	Repo           string
+	Worktrees      worktree.Manager
+	TestCommand    string
+	TestTimeout    time.Duration
+	SandboxMode    string
+	Network        bool
+	MemoryMax      string
+	TasksMax       int
+	ReadOnly       []string
+	ComputerHome   string
+	ComputerCaches string
+	ComputerID     string
+	CPUQuota       string
+	OnFallback     func(string)
+	OnWait         func(string) // notice while queued for memory; defaults to OnFallback
+	runStateDir    string
+	sandboxArgs    []string
+	sandboxEnv     map[string]string
+	scopeUsed      bool
+	scopeReport    string
 }
 
 func (r *Runner) ExecuteWrite(ctx context.Context, run *domain.Run, adapter adapters.Adapter, req adapters.Request, opts WriteOptions) error {

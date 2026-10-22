@@ -12,6 +12,7 @@ import type {
   ChannelPatch,
   ChannelSummary,
   CompareGroup,
+  Computer,
   Device,
   DiffPage,
   Health,
@@ -102,6 +103,8 @@ export interface Api {
   compares: (channelId: ID) => Promise<CompareGroup[]>
   decideCompare: (channelId: ID, id: ID, decision: "merge_a" | "merge_b" | "discard_both" | "combine") => Promise<CompareGroup>
   org: () => Promise<Org>
+  computers: () => Promise<Computer[]>
+  resetComputer: (id: string) => Promise<Computer>
   createProject: (body: ProjectCreate) => Promise<Project>
   patchProject: (handle: string, body: ProjectPatch) => Promise<Project>
   assign: (project: string, body: AssignBody) => Promise<Project>
@@ -213,6 +216,8 @@ export function createApi(options: ApiOptions = {}): Api {
     compares: (channelId) => request("GET", `/channels/${encodeURIComponent(channelId)}/compares`),
     decideCompare: (channelId, id, decision) => request("POST", `/channels/${encodeURIComponent(channelId)}/compares/${encodeURIComponent(id)}/decide`, { decision }),
     org: () => request("GET", "/org"),
+    computers: () => request("GET", "/computers"),
+    resetComputer: (id) => request("POST", `/computers/${encodeURIComponent(id)}/reset`),
     createProject: (body) => request("POST", "/projects", body),
     patchProject: (handle, body) => request("PATCH", `/projects/${encodeURIComponent(handle)}`, body),
     assign: (project, body) => request("POST", `/projects/${encodeURIComponent(project)}/assignments`, body),

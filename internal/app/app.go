@@ -23,6 +23,7 @@ import (
 
 	"github.com/thiagodefreitas/faztudo/internal/adapters"
 	"github.com/thiagodefreitas/faztudo/internal/api"
+	"github.com/thiagodefreitas/faztudo/internal/computers"
 	"github.com/thiagodefreitas/faztudo/internal/config"
 	"github.com/thiagodefreitas/faztudo/internal/domain"
 	"github.com/thiagodefreitas/faztudo/internal/events"
@@ -30,6 +31,7 @@ import (
 	"github.com/thiagodefreitas/faztudo/internal/mcp"
 	"github.com/thiagodefreitas/faztudo/internal/org"
 	"github.com/thiagodefreitas/faztudo/internal/runner"
+	"github.com/thiagodefreitas/faztudo/internal/sandbox"
 	"github.com/thiagodefreitas/faztudo/internal/store"
 	"github.com/thiagodefreitas/faztudo/internal/usage"
 	"github.com/thiagodefreitas/faztudo/internal/worktree"
@@ -65,12 +67,13 @@ func shortenAnswer(s string) string {
 const mcpPromptNote = "Faztudo MCP tools are available for this channel only. ask_human returns immediately. You cannot resolve an approval."
 
 type App struct {
-	Store    *store.Store
-	Config   config.Config
-	Paths    config.Paths
-	Registry *lanes.Registry
-	Runner   *runner.Runner
-	Adapters map[string]adapters.Adapter
+	Store     *store.Store
+	Config    config.Config
+	Paths     config.Paths
+	Registry  *lanes.Registry
+	Runner    *runner.Runner
+	Computers *computers.Manager
+	Adapters  map[string]adapters.Adapter
 	// MCP is the in-process server. MCPBase is its loopback origin with no
 	// token in it, for example http://127.0.0.1:7457. An empty MCPBase leaves
 	// agent commands unchanged.
@@ -161,6 +164,10 @@ func New(ctx context.Context, s *store.Store, c config.Config, p config.Paths) (
 		"agy":      adapters.Agy{},
 		"opencode": adapters.OpenCode{},
 	}}
+	a.Computers, err = computers.New(filepath.Join(p.DataDir, "computers"), c.Computers.Enabled, c.Computers.DiskSoftMax)
+	if err != nil {
+		return nil, err
+	}
 	a.Runner = &runner.Runner{RunDir: p.RunsDir, Appender: s, Lanes: reg, PersonaForRun: func(r domain.Run) string { return byID[r.AgentID] }}
 	a.Runner.RecoveredOutcome = a.recoveredOutcome
 	a.Runner.RecoveredFinished = a.recoveredFinished
@@ -295,6 +302,7 @@ func (a *App) Bind(h *api.API) {
 	h.RegenerateSummary = a.RegenerateSummary
 	h.HideLane = func(l domain.Lane) bool { return a.Config.IsStaleDefaultLane(l.ID, l.CLI) }
 	h.Compare = a
+	h.Computers = a
 }
 
 func (a *App) Start(ctx context.Context) error {
@@ -992,6 +1000,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if current.State != domain.RunQueued {
 		return context.Canceled
 	}
+	var computerHome, computerCaches string
 	lane, skipped, err := a.Registry.WaitPick(runCtx, agent.Handle, override, a.laneUnfit(mode), func(busy []lanes.Skipped) {
 		signalQueuedReady(ctx)
 		ids := make([]string, 0, len(busy))
@@ -1006,6 +1015,44 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			return fmt.Errorf("lane %s cannot run now: %s. A /lane override does not fall back to another lane.", override, skipped[0].Reason)
 		}
 		return err
+	}
+	if mode == domain.RunWrite && a.Computers != nil && a.Computers.Enabled {
+		status, err := a.Computers.Status(agent.Handle)
+		if err != nil {
+			return err
+		}
+		if status.State == "full" {
+			return fmt.Errorf("@%s computer is full (%d bytes); reset it or raise computers.disk_soft_max", agent.Handle, status.DiskBytes)
+		}
+		release, err := a.Computers.Acquire(runCtx, agent.Handle, func() {
+			a.notice(ctx, channel.ID, "info", "@"+agent.Handle+" is queued: its computer is busy; it starts when the other write run finishes.")
+		})
+		if err != nil {
+			return err
+		}
+		defer release()
+		status, err = a.Computers.Status(agent.Handle)
+		if err != nil {
+			return err
+		}
+		if status.DiskBytes >= status.DiskSoftMax {
+			return fmt.Errorf("@%s computer is full (%d bytes); reset it or raise computers.disk_soft_max", agent.Handle, status.DiskBytes)
+		}
+		computerHome, computerCaches, err = a.Computers.Prepare(agent.Handle)
+		if err != nil {
+			return err
+		}
+		// Scan at the start too: a run killed before its end scan may have
+		// left a credential copy for this one to read (ADR 0006).
+		if hostHome, herr := os.UserHomeDir(); herr == nil {
+			removed, scanErr := a.Computers.Scan(agent.Handle, computers.Tokens(sandbox.RefreshPaths(hostHome, lane.CLI)))
+			if scanErr != nil {
+				return fmt.Errorf("@%s computer credential scan: %w", agent.Handle, scanErr)
+			}
+			if removed > 0 {
+				a.notice(ctx, channel.ID, "warn", fmt.Sprintf("Removed %d credential copies from @%s's computer before the run.", removed, agent.Handle))
+			}
+		}
 	}
 	if retryOf != "" {
 		if prior, perr := a.Store.Run(ctx, retryOf); perr == nil {
@@ -1023,6 +1070,9 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	network := true
 	sandboxMode := laneSandboxMode(a.Config.Runs.Sandbox, a.Config.Lanes.Lane, lane.ID)
+	if computerHome != "" && sandboxMode != "required" {
+		return errors.New("computer write runs require sandbox = required")
+	}
 	if mode == domain.RunWrite {
 		for _, configured := range a.Config.Lanes.Lane {
 			if configured.ID == lane.ID && configured.SandboxNetwork != nil {
@@ -1137,11 +1187,31 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			// Record the checked-out branch immediately before creating this
 			// run's worktree. Older runs lack it and retain prior merge behavior.
 			run.ChannelBranch, _ = git(ctx, channel.RepoPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+			var boundTokens [][]byte
+			if computerHome != "" {
+				if hostHome, homeErr := os.UserHomeDir(); homeErr == nil {
+					boundTokens = computers.Tokens(sandbox.RefreshPaths(hostHome, lane.CLI))
+				}
+			}
 			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{
 				Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand,
 				SandboxMode: sandboxMode, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly,
+				ComputerHome: computerHome, ComputerCaches: computerCaches, ComputerID: agent.Handle, CPUQuota: a.Config.Computers.CPUQuota,
 				OnFallback: func(message string) { a.notice(ctx, channel.ID, "warn", message) },
 			})
+			if computerHome != "" {
+				if hostHome, homeErr := os.UserHomeDir(); homeErr == nil {
+					boundTokens = append(boundTokens, computers.Tokens(sandbox.RefreshPaths(hostHome, lane.CLI))...)
+				}
+				removed, scanErr := a.Computers.Scan(agent.Handle, boundTokens)
+				if removed > 0 {
+					a.notice(context.Background(), channel.ID, "warn", fmt.Sprintf("Removed %d credential copies from @%s's computer.", removed, agent.Handle))
+				}
+				if scanErr != nil {
+					a.notice(context.Background(), channel.ID, "warn", "Computer credential scan failed: "+scanErr.Error())
+					err = errors.Join(err, scanErr)
+				}
+			}
 		} else {
 			err = a.Runner.Execute(runCtx, &run, adapter, req)
 		}
@@ -1305,6 +1375,15 @@ func (a *App) recoveredOutcome(ctx context.Context, run *domain.Run, code int) (
 		}
 	}
 	opts := runner.WriteOptions{Repo: channel.RepoPath, Worktrees: worktree.Manager{BaseDir: a.Paths.WorktreesDir}, TestCommand: channel.TestCommand, SandboxMode: mode, Network: network, MemoryMax: a.Config.Runs.SandboxMemoryMax, TasksMax: a.Config.Runs.SandboxTasksMax, ReadOnly: a.Config.Runs.SandboxReadOnly}
+	if a.Computers != nil && a.Computers.Enabled {
+		if agent, err := a.Store.Member(ctx, run.AgentID); err == nil {
+			opts.ComputerHome, opts.ComputerCaches, err = a.Computers.Prepare(agent.Handle)
+			if err != nil {
+				return domain.RunFailed, domain.FailureSemantic, err.Error(), nil
+			}
+			opts.ComputerID, opts.CPUQuota = agent.Handle, a.Config.Computers.CPUQuota
+		}
+	}
 	if err := a.Runner.RecoverWrite(ctx, run, adapter, adapters.Request{Mode: domain.RunWrite, Model: lane.Model, Workdir: run.Worktree}, opts); err != nil {
 		if run.Verification == nil {
 			run.Verification = &domain.Verification{OK: false, Detail: err.Error()}
@@ -1358,6 +1437,17 @@ func (a *App) recoveredFinished(ctx context.Context, run domain.Run) error {
 	lane, ok := a.Registry.Snapshot(run.LaneID)
 	if !ok {
 		lane, _ = a.Store.Lane(ctx, run.LaneID)
+	}
+	if run.Mode == domain.RunWrite && a.Computers != nil && a.Computers.Enabled {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			removed, scanErr := a.Computers.Scan(agent.Handle, computers.Tokens(sandbox.RefreshPaths(home, lane.CLI)))
+			if removed > 0 {
+				a.notice(ctx, run.ChannelID, "warn", fmt.Sprintf("Removed %d credential copies from @%s's computer.", removed, agent.Handle))
+			}
+			if scanErr != nil {
+				a.notice(ctx, run.ChannelID, "warn", "Computer credential scan failed after recovery: "+scanErr.Error())
+			}
+		}
 	}
 	adapter := a.Adapters[lane.CLI]
 	groups, err := a.CompareList(ctx, run.ChannelID)
