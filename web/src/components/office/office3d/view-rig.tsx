@@ -162,10 +162,11 @@ export function NameLabelDriver({
         halfW: anchor.halfW ?? (anchor.yield ? 40 : 52),
         halfH: anchor.halfH ?? (anchor.yield ? 11 : 14),
         depth,
+        yield: anchor.yield,
       }
     })
     map.clear()
-    for (const item of layoutNameLabels(boxes)) map.set(item.id, item)
+    for (const item of layoutNameLabels(boxes, size)) map.set(item.id, item)
   })
 
   return null

@@ -126,18 +126,27 @@ function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text
 }
 
-export const RUN_LINE_CHARS = 48
-// Only this much of the request fits under a 120 unit desk without touching its neighbors.
-const RUN_LINE_SHOWN = 26
+// Keep the visible line short enough for the desk and add an ellipsis before SVG clipping.
+const RUN_LINE_SHOWN = 17
 
-// "2m - Redesign the 2D floor..." under the name of a desk with an active run.
-// The request is cut at RUN_LINE_CHARS; the drawn line is cut further to fit.
-export function runLineOf(request: string | undefined, elapsedText: string | undefined): string | undefined {
+export function runLineOf(request: string | undefined): string | undefined {
   if (!request) return undefined
-  const cut = clip(request, RUN_LINE_CHARS)
-  const shown = clip(cut, RUN_LINE_SHOWN)
-  const elapsed = elapsedText?.split(" ")[0]
-  return elapsed ? `${elapsed} - ${shown}` : shown
+  return clip(request, RUN_LINE_SHOWN)
+}
+
+function wrapHoverText(value: string, max = 28): string[] {
+  const lines: string[] = []
+  let line = ""
+  for (const word of value.split(/\s+/)) {
+    if (line && `${line} ${word}`.length > max) {
+      lines.push(line)
+      line = word
+    } else {
+      line = line ? `${line} ${word}` : word
+    }
+  }
+  if (line) lines.push(line)
+  return lines
 }
 
 const SCREEN_STROKE: Partial<Record<DeskState, string>> = {
@@ -617,7 +626,7 @@ export function RoomDesk({
   const request = desk.runRequest ?? runTitle
   const hoverTitle = request ? `${baseHover}: ${request}` : baseHover
   const activeRun = state === "working" || state === "queued" || state === "waiting_approval"
-  const runLine = activeRun && desk.currentRun ? runLineOf(request, elapsedText) : undefined
+  const runLine = activeRun && desk.currentRun ? runLineOf(request) : undefined
   const ring =
     state === "working"
       ? hue.accent
@@ -631,6 +640,9 @@ export function RoomDesk({
   const sentence = request || stateLabel
   const laneLabel = desk.lane?.id ?? desk.laneId ?? "No lane"
   const hoverMeta = elapsedText ? `${laneLabel} - ${elapsedText}` : laneLabel
+  const hoverLines = wrapHoverText(sentence)
+  const hoverHeight = 28 + hoverLines.length * 15
+  const hoverTop = -hoverHeight - 10
 
   // An exhausted agent keeps its face so the team stays recognizable; it is dimmed and greyed.
   const character = (
@@ -843,7 +855,7 @@ export function RoomDesk({
         <title>{hoverTitle}</title>
         <defs>
           <clipPath id={`desk-copy-${member.id}`}>
-            <rect x="4" y="86" width="112" height="16" />
+            <rect x="4" y={faceUp ? "90" : "86"} width="112" height="18" />
           </clipPath>
         </defs>
         <rect width={DESK_W} height={DESK_H} fill="transparent" />
@@ -928,8 +940,8 @@ export function RoomDesk({
 
           {state === "working" && elapsedText && (
             <g data-testid={`elapsed-${member.id}`}>
-              <rect x="68" y="2" width="50" height="16" rx="8" fill={hue.soft} />
-              <text x="93" y="13.5" textAnchor="middle" fontSize="11" fontFamily={SANS} fontWeight="600" fill={hue.accent}>
+              <rect x="87" y="2" width="44" height="16" rx="8" fill={hue.soft} />
+              <text x="109" y="13.5" textAnchor="middle" fontSize="10" fontFamily={SANS} fontWeight="600" fill={hue.accent}>
                 {elapsedText}
               </text>
             </g>
@@ -951,14 +963,8 @@ export function RoomDesk({
               className="cursor-pointer"
             >
               <g data-testid={`raised-hand-badge-${member.id}`}>
-                <rect x="72" y="1" width="46" height="18" rx="9" fill="var(--color-warn-soft)" />
-                <path
-                  d="M82 12V8.5M83.5 12V7.8M85 12V8.2M86.5 12V9"
-                  stroke="var(--color-warn)"
-                  strokeWidth="1.1"
-                  strokeLinecap="round"
-                />
-                <text x="104" y="13" textAnchor="middle" fontSize="11" fontFamily={SANS} fontWeight="600" fill="var(--color-warn)">
+                <rect x="90" y="1" width="40" height="18" rx="9" fill="var(--color-warn-soft)" />
+                <text x="110" y="13" textAnchor="middle" fontSize="10" fontFamily={SANS} fontWeight="600" fill="var(--color-warn)">
                   Approve
                 </text>
               </g>
@@ -995,22 +1001,24 @@ export function RoomDesk({
           data-testid={`desk-hover-${member.id}`}
           className="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none"
         >
-          <rect x="-4" y="-50" width="128" height="40" rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
-          <text x="8" y="-32" fontSize="12" fontFamily={SANS} fontWeight="600" fill="var(--color-ink)">
-            {clip(sentence, 18)}
-          </text>
-          <text x="8" y="-18" fontSize="11" fontFamily={SANS} fill="var(--color-muted)">
-            {clip(hoverMeta, 22)}
+          <rect x="-40" y={hoverTop} width="200" height={hoverHeight} rx="8" fill="var(--color-surface)" stroke="var(--color-line)" />
+          {hoverLines.map((line, index) => (
+            <text key={`${index}-${line}`} x="-30" y={hoverTop + 18 + index * 15} fontSize="12" fontFamily={SANS} fontWeight="600" fill="var(--color-ink)">
+              {line}
+            </text>
+          ))}
+          <text x="-30" y={hoverTop + 18 + hoverLines.length * 15} fontSize="11" fontFamily={SANS} fill="var(--color-muted)">
+            {hoverMeta}
           </text>
         </g>
-        <text x="60" y="84" textAnchor="middle" fontSize="16" fontFamily={SANS} fontWeight="600" fill="var(--color-ink)">
+        <text x="60" y={faceUp ? "91" : "84"} textAnchor="middle" fontSize="16" fontFamily={SANS} fontWeight="600" fill="var(--color-ink)">
           {clip(member.display_name, 12)}
         </text>
         {runLine && !dimmed && (
           <text
             data-testid={`run-line-${member.id}`}
             x="8"
-            y="100"
+            y={faceUp ? "106" : "100"}
             textAnchor="start"
             fontSize="12"
             fontFamily={SANS}

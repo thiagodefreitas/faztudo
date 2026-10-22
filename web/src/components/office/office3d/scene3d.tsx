@@ -308,17 +308,17 @@ function RoomWorld({
         x: coords.x,
         y: 1.38 * coords.scale,
         z: coords.z + coords.chairOffsetZ,
-        halfW: stacked ? 64 : 52,
+        halfW: stacked ? 92 : 76,
         halfH: stacked ? 28 : 14,
       }
     })
     for (const zone of zones) {
       const anchor = zoneLabelAnchor(toWorld(zone, width, height))
-      anchors.push({ id: `zone-${zone.id}`, x: anchor.x, y: anchor.y + 0.28, z: anchor.z, yield: true })
+      anchors.push({ id: `zone-${zone.id}`, x: anchor.x, y: anchor.y, z: anchor.z, yield: true })
     }
     if (rug) {
       const anchor = directorLabelAnchor(toWorld(rug, width, height))
-      anchors.push({ id: "zone-director", x: anchor.x, y: anchor.y + 0.28, z: anchor.z, yield: true })
+      anchors.push({ id: "zone-director", x: anchor.x, y: anchor.y, z: anchor.z, yield: true })
     }
     return anchors
   }, [seats, zones, rug, width, height])
@@ -423,7 +423,7 @@ function RoomWorld({
             })}
             <FloorName
               id={`zone-${zone.id}`}
-              position={[zoneLabel.x, zoneLabel.y + 0.28, zoneLabel.z]}
+              position={[zoneLabel.x, zoneLabel.y, zoneLabel.z]}
               placementsRef={placementsRef}
               testId={`zone3d-label-${zone.id}`}
               label={zone.label}
@@ -446,7 +446,7 @@ function RoomWorld({
             </mesh>
             <FloorName
               id="zone-director"
-              position={[rugLabel.x, rugLabel.y + 0.28, rugLabel.z]}
+              position={[rugLabel.x, rugLabel.y, rugLabel.z]}
               placementsRef={placementsRef}
               testId="zone3d-label-director"
               label="Director"
@@ -554,6 +554,7 @@ export function Office3DScene({
   const [cameraTargetId, setCameraTargetId] = useState<string | null>(initialSelectedId ?? null)
   const [cameraArea, setCameraArea] = useState<RoomArea | null>(null)
   const [canvasAspect, setCanvasAspect] = useState(1.6)
+  const canvasAspectRef = useRef(1.6)
   const [moveToken, setMoveToken] = useState(0)
   const [cameraMoving, setCameraMoving] = useState(false)
   const [legendOn, setLegendOn] = useState<LegendKey[]>([])
@@ -634,7 +635,23 @@ export function Office3DScene({
   const selectedDesk = desks.find((desk) => desk.member.id === selectedId) ?? null
   const webglAvailable = useMemo(() => webglProp ?? isWebGLAvailable(), [webglProp])
   const room = useMemo(() => layoutRoom(desks, { departments }), [desks, departments])
-  const overviewPose = useMemo(() => defaultCameraPose(room.width, room.height), [room.width, room.height])
+  const overviewPose = useMemo(() => defaultCameraPose(room.width, room.height, canvasAspect), [room.width, room.height, canvasAspect])
+  useLayoutEffect(() => {
+    const frame = frameRef.current
+    if (!frame || typeof ResizeObserver === "undefined") return
+    const measure = () => {
+      if (frame.clientWidth <= 0 || frame.clientHeight <= 0) return
+      const next = frame.clientWidth / frame.clientHeight
+      if (Math.abs(canvasAspectRef.current - next) < 0.01) return
+      canvasAspectRef.current = next
+      setCanvasAspect(next)
+      setMoveToken((token) => token + 1)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(frame)
+    return () => observer.disconnect()
+  }, [webglAvailable, desks.length])
   const areas = useMemo(() => roomAreas(room), [room])
   const destinationPose = useMemo(() => {
     if (cameraArea && !cameraTargetId) {

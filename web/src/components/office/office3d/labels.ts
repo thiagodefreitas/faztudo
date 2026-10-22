@@ -5,6 +5,7 @@ export interface NameLabelBox {
   halfW: number
   halfH: number
   depth: number
+  yield?: boolean
 }
 
 export interface NameLabelPlacement {
@@ -16,6 +17,7 @@ export interface NameLabelPlacement {
 
 // Try these screen-space shifts before fading a label that sits behind another.
 const Y_SHIFTS = [0, -22, 22, -44, 44, -66, 66]
+const LABEL_MARGIN = 6
 
 // Floor labels sit above the desk top and monitor so furniture cannot cover them.
 export const FLOOR_LABEL_CLEAR_Y = 1.2
@@ -41,7 +43,10 @@ function overlaps(
 }
 
 // Closer labels stay put. Labels behind them shift up or down, then hide if every shift still collides.
-export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlacement[] {
+export function layoutNameLabels(
+  labels: readonly NameLabelBox[],
+  viewport?: { width: number; height: number },
+): NameLabelPlacement[] {
   const order = labels.map((label) => label)
   order.sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id))
 
@@ -58,23 +63,28 @@ export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlac
   const byId = new Map<string, NameLabelPlacement>()
 
   for (const label of order) {
+    const x = viewport
+      ? Math.max(LABEL_MARGIN + label.halfW, Math.min(viewport.width - LABEL_MARGIN - label.halfW, label.x))
+      : label.x
     let chosen: { offsetX: number; offsetY: number } | null = null
-    for (const shift of Y_SHIFTS) {
-      const y = label.y + shift
+    for (const shift of label.yield ? [0] : Y_SHIFTS) {
+      const y = viewport
+        ? Math.max(LABEL_MARGIN + label.halfH, Math.min(viewport.height - LABEL_MARGIN - label.halfH, label.y + shift))
+        : label.y + shift
       const hit = placed.some(
         (other) =>
           other.opacity > 0.5 &&
-          overlaps(label.x, y, label.halfW, label.halfH, other.x, other.y, other.halfW, other.halfH),
+          overlaps(x, y, label.halfW, label.halfH, other.x, other.y, other.halfW, other.halfH),
       )
       if (!hit) {
-        chosen = { offsetX: 0, offsetY: shift }
+        chosen = { offsetX: x - label.x, offsetY: y - label.y }
         break
       }
     }
     if (chosen) {
       placed.push({
         id: label.id,
-        x: label.x,
+        x,
         y: label.y + chosen.offsetY,
         halfW: label.halfW,
         halfH: label.halfH,
@@ -101,20 +111,19 @@ export function layoutNameLabels(labels: readonly NameLabelBox[]): NameLabelPlac
   return labels.map((label) => byId.get(label.id) ?? { id: label.id, offsetX: 0, offsetY: 0, opacity: 1 })
 }
 
-// Zone and Director names lie on the floor in strips the layout keeps free of desks:
-// the zone header (layout ZONE_HEAD = 22 units) and the margin below the Director rug
-// (layout BOTTOM = 12 units). One unit is 0.02 m.
+// Zone and Director names lie on the floor near the front edge, clear of desks.
+// One layout unit is 0.02 m.
 export const ZONE_LABEL_Y = 0.06
-const ZONE_HEAD_HALF_M = 0.22
+const ZONE_NEAR_EDGE_M = 0.12
 const ROOM_BOTTOM_HALF_M = 0.12
 
-// Center of a zone's header strip, near its left edge. Always inside the zone.
+// Near edge of the zone, toward the camera and clear of the desks.
 export function zoneLabelAnchor(rect: FloorRect): { x: number; y: number; z: number } {
   const insetX = Math.min(Math.max(rect.w * 0.5 - 0.04, 0.2), 0.95)
   return {
     x: rect.x - rect.w / 2 + insetX,
     y: ZONE_LABEL_Y,
-    z: rect.z - rect.d / 2 + Math.min(ZONE_HEAD_HALF_M, rect.d / 2),
+    z: rect.z + rect.d / 2 - Math.min(ZONE_NEAR_EDGE_M, rect.d / 2),
   }
 }
 

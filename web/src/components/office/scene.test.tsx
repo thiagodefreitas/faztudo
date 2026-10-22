@@ -213,12 +213,13 @@ describe("OfficeScene", () => {
     expect(codexBtn).toHaveAttribute("data-state", "waiting_approval")
     expect(screen.getByTestId("monitor-glow-m-claude")).toBeInTheDocument()
     expect(screen.getByTestId("progress-pulse-m-claude")).toBeInTheDocument()
-    expect(screen.getByTestId("run-line-m-claude")).toHaveTextContent("1m - Redesign the 2D floor p...")
+    expect(screen.getByTestId("run-line-m-claude")).toHaveTextContent("Redesign the 2...")
     expect(screen.getByTestId("status-ring-m-claude")).toHaveAttribute("data-status", "working")
     expect(screen.getByTestId("status-ring-m-codex")).toHaveAttribute("data-status", "waiting_approval")
     expect(screen.getByTestId("status-ring-m-grok")).toHaveAttribute("data-status", "out_of_quota")
     const hover = within(claudeBtn).getByTestId("desk-hover-m-claude")
-    expect(hover).toHaveTextContent("Redesign the 2D...")
+    expect(hover).toHaveTextContent("Redesign the 2D floor plan")
+    expect(hover).toHaveTextContent("and add department pods")
     expect(hover).toHaveTextContent("claude/opus - 1m 35s")
     expect(claudeBtn.querySelector("title")).toHaveTextContent(
       "Redesign the 2D floor plan and add department pods",

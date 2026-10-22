@@ -39,6 +39,12 @@ function worldAxis(yaw: number, local: [number, number, number]): Vector3 {
 }
 
 describe("office camera", () => {
+  it("pulls the overview back on a narrow canvas", () => {
+    const wide = defaultCameraPose(1200, 800, 1.6)
+    const phone = defaultCameraPose(1200, 800, 0.55)
+    expect(poseRadius(phone)).toBeGreaterThan(poseRadius(wide))
+    expect(phone.target).toEqual(wide.target)
+  })
   it("pulls the intro back from the overview and skips it under reduced motion", () => {
     const settled = defaultCameraPose(1200, 800)
     const intro = introCameraPose(settled)
@@ -165,6 +171,17 @@ describe("office name labels", () => {
     ])
     expect(blocked.find((item) => item.id === "near")?.opacity).toBe(1)
     expect(blocked.find((item) => item.id === "far")?.opacity).toBe(0)
+  })
+
+  it("clamps labels within a phone canvas and hides zone titles that meet desk labels", () => {
+    const placed = layoutNameLabels([
+      { id: "left", x: 2, y: 60, halfW: 70, halfH: 14, depth: 2 },
+      { id: "right", x: 388, y: 60, halfW: 70, halfH: 14, depth: 3 },
+      { id: "zone", x: 2, y: 60, halfW: 45, halfH: 12, depth: 900, yield: true },
+    ], { width: 390, height: 300 })
+    expect(placed.find((item) => item.id === "left")?.offsetX).toBe(74)
+    expect(placed.find((item) => item.id === "right")?.offsetX).toBe(-74)
+    expect(placed.find((item) => item.id === "zone")?.opacity).toBe(0)
   })
 
   it("lifts pod and department anchors above the desks", () => {

@@ -135,14 +135,15 @@ describe("deriveMemberDesk", () => {
     expect(desk.runRequest).toBe("Refactor the office layout and add tests for pods")
   })
 
-  it("builds the run line from the request: elapsed first, request cut at 48 characters", () => {
-    expect(runLineOf("Fix the lane strip", "2m 05s")).toBe("2m - Fix the lane strip")
-    expect(runLineOf("Fix the lane strip", "45s")).toBe("45s - Fix the lane strip")
-    expect(runLineOf(undefined, "2m")).toBeUndefined()
+  it("shows a single elapsed chip and a task line with a visible ellipsis", () => {
+    expect(runLineOf("Fix the lane strip")).toBe("Fix the lane s...")
+    expect(runLineOf("Fix lane")).toBe("Fix lane")
+    expect(runLineOf(undefined)).toBeUndefined()
     const long = "Refactor the office layout and add tests for pods and rooms and the zoom controls"
-    const line = runLineOf(long, "1h 3m") ?? ""
-    expect(line.startsWith("1h - Refactor the office")).toBe(true)
+    const line = runLineOf(long) ?? ""
+    expect(line.startsWith("Refactor the")).toBe(true)
     expect(line.endsWith("...")).toBe(true)
+    expect(line).not.toMatch(/1h|3m/)
     expect(line.length).toBeLessThan(long.length)
   })
 

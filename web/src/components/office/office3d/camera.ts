@@ -43,15 +43,24 @@ export function poseRadius(pose: CameraPose): number {
 }
 
 // Computes a smooth starting camera position that frames the entire room.
-export function defaultCameraPose(roomWidth: number, roomHeight: number): CameraPose {
+export function defaultCameraPose(roomWidth: number, roomHeight: number, aspect = 1.6): CameraPose {
   const floorW = roomWidth * SCALE_3D
   const floorD = roomHeight * SCALE_3D
   const span = Math.max(floorW * 0.68, floorD * 1.05, 10)
   const y = Math.round((span * 0.62 + 1.8) * 100) / 100
   const z = Math.round((span * 0.78 + 2.4) * 100) / 100
+  const target: [number, number, number] = [0, 0.2, 0.3]
+  const baseRadius = Math.hypot(y - target[1], z - target[2])
+  const halfV = Math.tan((38 * Math.PI) / 360)
+  const safeAspect = aspect > 0 && Number.isFinite(aspect) ? aspect : 1.6
+  const neededRadius = Math.max(
+    (floorW * 1.3) / (2 * halfV * safeAspect),
+    (floorD * 0.85 * 1.3) / (2 * halfV),
+  )
+  const scale = Math.max(1, neededRadius / baseRadius)
   return {
-    position: [0, y, z],
-    target: [0, 0.2, 0.3],
+    position: [0, target[1] + (y - target[1]) * scale, target[2] + (z - target[2]) * scale],
+    target,
   }
 }
 
