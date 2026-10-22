@@ -38,10 +38,10 @@ order we build them; each has an issue in the "Daily use" milestone.
 | 5 | Cost per run on All work and the Lanes page | usage readers | built |
 | 6 | Untrusted content marked in the prompt: every transcript message names its author as human or agent and cannot forge another speaker, and GitHub data is labelled as data | prompt sections, bridges | built |
 | 7 | Dictation in the message box, with the browser's speech recognition first and a local model later | composer | built |
-| 8 | Drafts before sending: anything an agent sends through a bridge waits as an approval card | bridges, approvals | in progress |
+| 8 | Drafts before sending: anything an agent sends through a bridge waits as an approval card | bridges, approvals | built |
 | 9 | Routine triggers for a failing CI run and a new issue or pull request | routines | built |
-| 10 | A read-only scout: a routine that reads the repository, CI and issues and files suggestions in the inbox; accepting one makes a task | routines, triggers, tasks | in progress |
-| 11 | Agent computers (see M4 and [ADR 0006](adr/0006-agent-computers.md)): a persistent sandbox per agent, logins stay on your machine | sandbox, worktrees | in progress |
+| 10 | A read-only scout: a routine that reads the repository, CI and issues and files suggestions in the inbox; accepting one makes a task | routines, triggers, tasks | built |
+| 11 | Agent computers (see M4 and [ADR 0006](adr/0006-agent-computers.md)): a persistent sandbox per agent, logins stay on your machine | sandbox, worktrees | built (v1, off by default) |
 
 ## M0 Foundation
 
