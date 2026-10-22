@@ -5,7 +5,7 @@ import { api } from "../api/client"
 import { questionsWaiting } from "../lib/approval-inbox"
 import { cx } from "../lib/cx"
 import { plainPreview } from "../lib/inbox"
-import { buildToday, readOpen, readSeen, resetLabel, writeOpen, writeSeen, type Outcome } from "../lib/today"
+import { buildToday, readOpen, readSeen, resetLabel, writeOpen, writeSeen, type FinishedGroup, type Outcome } from "../lib/today"
 import { formatAge, formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
 import { useNow } from "../state/now"
@@ -38,6 +38,7 @@ export function TodayBrief() {
   const lanes = useLanes()
   const [open, setOpen] = useState(readOpen)
   const [seen, setSeen] = useState(() => readSeen(Date.now()))
+  const [allFinished, setAllFinished] = useState(false)
 
   // A question is a message with options and no human answer in its thread.
   const channelList = channels.data ?? []
@@ -125,7 +126,7 @@ export function TodayBrief() {
               <p className="text-[12px] text-muted">Nothing new.</p>
             ) : (
               <div className="flex flex-col gap-2">
-                {today.finished.map((group) => (
+                {shownFinished(today.finished, allFinished).map((group) => (
                   <div key={group.channelId} className="flex flex-col gap-1.5">
                     <h3 className="truncate text-[12px] text-muted"># {group.channel}</h3>
                     <ul className="flex flex-col gap-1.5">
@@ -148,6 +149,15 @@ export function TodayBrief() {
                     </ul>
                   </div>
                 ))}
+                {hiddenFinished(today.finished, allFinished) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAllFinished(true)}
+                    className="min-h-10 self-start rounded-md px-2 text-[12px] text-muted hover:bg-sidebar hover:text-ink"
+                  >
+                    Show {hiddenFinished(today.finished, allFinished)} more
+                  </button>
+                )}
               </div>
             )}
           </Group>
@@ -193,6 +203,28 @@ export function TodayBrief() {
       )}
     </section>
   )
+}
+
+// FINISHED_SHOWN keeps a busy day from pushing the chats off the page; the
+// failures come first, so they stay in view.
+const FINISHED_SHOWN = 6
+
+function shownFinished(groups: FinishedGroup[], all: boolean): FinishedGroup[] {
+  if (all) return groups
+  let left = FINISHED_SHOWN
+  const out: FinishedGroup[] = []
+  for (const group of groups) {
+    if (left <= 0) break
+    out.push({ ...group, items: group.items.slice(0, left) })
+    left -= group.items.length
+  }
+  return out
+}
+
+function hiddenFinished(groups: FinishedGroup[], all: boolean): number {
+  if (all) return 0
+  const total = groups.reduce((sum, group) => sum + group.items.length, 0)
+  return Math.max(0, total - FINISHED_SHOWN)
 }
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {

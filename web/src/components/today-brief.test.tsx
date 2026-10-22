@@ -87,4 +87,13 @@ describe("TodayBrief", () => {
     expect(screen.queryByText("Needs you")).not.toBeInTheDocument()
     expect(localStorage.getItem("faztudo.today.open")).toBe("0")
   })
+
+  it("shows six finished runs, then a button for the rest", async () => {
+    const many: Run[] = Array.from({ length: 9 }, (_, i) => ({ id: `f${i}`, channel_id: "dev", trigger_message_id: "m", agent_id: "coder", lane_id: "codex/default", mode: "read", state: "done", started_at: at(60 - i), ended_at: at(50 - i) }))
+    await setup({ runs: many })
+    const more = await screen.findByRole("button", { name: "Show 3 more" })
+    expect(screen.getAllByText("read answer")).toHaveLength(6)
+    await userEvent.setup().click(more)
+    expect(screen.getAllByText("read answer")).toHaveLength(9)
+  })
 })
