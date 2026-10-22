@@ -35,6 +35,9 @@ import type {
   ReadResult,
   ResolveBody,
   RetryBody,
+  Lesson,
+  LessonCreate,
+  LessonPatch,
   Routine,
   RoutineCreate,
   Run,
@@ -101,6 +104,29 @@ export class MockWorld {
   // The mock lists tasks for the board and project homes; it does not create
   // or run them.
   private tasks: Task[] = []
+  // Two lessons for the demo: one for every channel, one for #faztudo-dev.
+  private lessons: Lesson[] = [
+    {
+      id: IDS.lessonDiffs,
+      persona: "coder",
+      channel_id: "",
+      text: "Keep diffs small and say what you did not touch.",
+      source_message_id: "",
+      created_by: IDS.ada,
+      created_at: "2026-10-20T08:30:00Z",
+      updated_at: "2026-10-20T08:30:00Z",
+    },
+    {
+      id: IDS.lessonChecks,
+      persona: "coder",
+      channel_id: IDS.dev,
+      text: "Run npm run typecheck and npm test before you say a web change is done.",
+      source_message_id: "",
+      created_by: IDS.ada,
+      created_at: "2026-10-21T16:10:00Z",
+      updated_at: "2026-10-21T16:10:00Z",
+    },
+  ]
   private routines: Routine[] = [
     {
       handle: "daily-debrief",
@@ -559,6 +585,61 @@ export class MockWorld {
     return ok(this.getCompares(channelId).find((item) => item.id === id) as CompareGroup)
   }
 
+  // Lessons newest first, like the daemon lists them.
+  getLessons(): Lesson[] {
+    return structuredClone(this.lessons.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)))
+  }
+
+  createLesson(body: LessonCreate): Result<Lesson> {
+    const text = body.text.trim()
+    if (!text || [...text].length > 500) return err(400, "bad_request", "text must be 1 to 500 characters")
+    const persona = this.members.find((item) => item.kind === "agent" && item.handle === body.persona.replace(/^@/, ""))
+    if (!persona) return err(400, "bad_request", `agent @${body.persona} does not exist`)
+    const channelId = body.channel_id ?? ""
+    if (channelId && !this.channels.some((item) => item.id === channelId)) return err(404, "not_found", "channel not found")
+    const at = iso(this.clock.now())
+    const lesson: Lesson = {
+      id: ulid(this.clock.now()),
+      persona: persona.handle,
+      channel_id: channelId,
+      text,
+      source_message_id: body.source_message_id ?? "",
+      created_by: this.me.id,
+      created_at: at,
+      updated_at: at,
+    }
+    this.lessons.push(lesson)
+    this.emit("lesson.added", channelId || undefined, lesson, `human:${this.me.id}`)
+    return ok(structuredClone(lesson), 201)
+  }
+
+  patchLesson(id: ID, body: LessonPatch): Result<Lesson> {
+    const found = this.lessons.find((item) => item.id === id)
+    if (!found) return err(404, "not_found", "lesson not found")
+    if (body.text !== undefined) {
+      const text = body.text.trim()
+      if (!text || [...text].length > 500) return err(400, "bad_request", "text must be 1 to 500 characters")
+      found.text = text
+    }
+    if (body.channel_id !== undefined) {
+      if (body.channel_id && !this.channels.some((item) => item.id === body.channel_id)) return err(404, "not_found", "channel not found")
+      if (body.channel_id !== found.channel_id) found.source_message_id = ""
+      found.channel_id = body.channel_id
+    }
+    found.updated_at = iso(this.clock.now())
+    this.emit("lesson.updated", found.channel_id || undefined, found, `human:${this.me.id}`)
+    return ok(structuredClone(found))
+  }
+
+  deleteLesson(id: ID): Result<null> {
+    const index = this.lessons.findIndex((item) => item.id === id)
+    const found = this.lessons[index]
+    if (!found) return err(404, "not_found", "lesson not found")
+    this.lessons.splice(index, 1)
+    this.emit("lesson.removed", found.channel_id || undefined, found, `human:${this.me.id}`)
+    return ok(null, 204)
+  }
+
   setRoutineEnabled(handle: string, enabled: boolean): Result<Routine> {
     const found = this.routines.find((item) => item.handle === handle)
     if (!found) return err(404, "not_found", "resource not found")
@@ -712,6 +793,8 @@ export class MockWorld {
     const handle = (id: ID) => this.members.find((member) => member.id === id)?.handle ?? "someone"
     const others = this.runs.filter((item) => item.id !== run.id && item.channel_id === run.channel_id && ["queued", "running", "verifying", "waiting_approval"].includes(item.state))
     const before = this.messages.filter((item) => item.channel_id === run.channel_id && !item.thread_id && (!trigger || item.created_at <= trigger.created_at)).slice(-8)
+    const persona = this.members.find((member) => member.id === run.agent_id)?.handle
+    const lessons = this.getLessons().filter((item) => item.persona === persona && (item.channel_id === "" || item.channel_id === run.channel_id))
     const parts = [
       {
         name: "summary",
@@ -721,6 +804,9 @@ export class MockWorld {
         ? [{ name: "working", text: `Working now:\n${others.map((item) => `- run ${item.id}: @${handle(item.agent_id)}, lane ${item.lane_id}, ${item.mode}, ${item.state}`).join("\n")}\n\n` }]
         : []),
       { name: "pinned", text: "Pinned in this channel:\n- @ada: Small diffs. Run the checks and give their exit codes.\n\n" },
+      ...(lessons.length
+        ? [{ name: "lessons", text: `Lessons the Director taught you. Follow them unless the request says otherwise:\n${lessons.map((item) => `- ${item.text}`).join("\n")}\n\n` }]
+        : []),
       { name: "transcript", text: `Recent channel messages (oldest first):\n${before.map((item) => `@${handle(item.author_id)}: ${item.body}`).join("\n")}\n` },
       { name: "request", text: `\nRequest:\n${trigger?.body ?? "Mock request"}` },
       { name: "instructions", text: "\n\nStart your answer with a summary of one or two plain sentences (no heading), then give the detail." },

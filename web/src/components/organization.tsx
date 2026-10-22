@@ -8,6 +8,7 @@ import { useNow } from "../state/now"
 import { useApprovals, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
 import type { AssignKind, Department, Member, Project } from "../types"
 import { AgentAvatar } from "./agent-avatar"
+import { LessonsButton } from "./lessons/lessons-dialog"
 import { avatarState } from "./office/avatar"
 import { deriveMemberDesk, type DeskInfo, type DeskState } from "./office/state"
 import { CreateProjectDialog } from "./project-dialogs"
@@ -47,8 +48,10 @@ function AgentRow({
   badge?: string
   action?: ReactNode
 }) {
+  // Lessons are the Director's to read and teach.
+  const human = useMe().data?.kind === "human"
   return (
-    <li className="flex min-h-10 items-center gap-2 py-1" data-agent={handle}>
+    <li className="flex min-h-10 flex-wrap items-center gap-2 py-1" data-agent={handle}>
       {member ? (
         <AgentAvatar member={member} size={28} state={desk ? avatarState(desk.state) : undefined} decorative />
       ) : (
@@ -67,6 +70,12 @@ function AgentRow({
       </div>
       {desk && (
         <span className={cx("shrink-0 rounded-full px-2 py-0.5 text-[11px]", STATE_CLASS[desk.state])}>{desk.stateLabel}</span>
+      )}
+      {member && human && (
+        <LessonsButton
+          persona={member.handle}
+          className="min-h-10 shrink-0 rounded px-2 text-[12px] text-muted hover:bg-canvas hover:text-ink md:min-h-7"
+        />
       )}
       {action}
     </li>

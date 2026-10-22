@@ -248,6 +248,27 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
       }),
     )
   }
+  if (parts[0] === "lessons" && parts.length === 1 && method === "GET") return { status: 200, body: world.getLessons() }
+  if (parts[0] === "lessons" && parts.length === 1 && method === "POST") {
+    const channelId = text(body.channel_id)
+    const sourceId = text(body.source_message_id)
+    return send(
+      world.createLesson({
+        persona: text(body.persona) ?? "",
+        text: text(body.text) ?? "",
+        ...(channelId ? { channel_id: channelId } : {}),
+        ...(sourceId ? { source_message_id: sourceId } : {}),
+      }),
+    )
+  }
+  if (parts[0] === "lessons" && parts.length === 2 && parts[1]) {
+    if (method === "DELETE") return send(world.deleteLesson(parts[1]))
+    if (method === "PATCH") {
+      const channelId = text(body.channel_id)
+      const lessonText = text(body.text)
+      return send(world.patchLesson(parts[1], { ...(lessonText !== undefined ? { text: lessonText } : {}), ...(channelId !== undefined ? { channel_id: channelId } : {}) }))
+    }
+  }
   if (parts[0] === "routines" && parts[1]) {
     if (parts.length === 2 && method === "DELETE") return send(world.deleteRoutine(parts[1]))
     if (parts.length === 2 && method === "PATCH") {

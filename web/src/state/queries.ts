@@ -48,6 +48,16 @@ export function useChannelSummary(channelId: string, enabled = true) {
   })
 }
 
+// Every lesson the Director can see. The stream keeps the cache current (see
+// state/cache.ts).
+export function useLessons() {
+  const qc = useQueryClient()
+  return useQuery({
+    queryKey: qk.lessons,
+    queryFn: async () => mergeById(await api.lessons(), qc.getQueryData(qk.lessons) ?? []),
+  })
+}
+
 export function useRoutines() {
   return useQuery({ queryKey: qk.routines, queryFn: () => api.routines() })
 }

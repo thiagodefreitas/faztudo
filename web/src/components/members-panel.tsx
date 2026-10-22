@@ -14,6 +14,7 @@ import { AgentAvatar } from "./agent-avatar"
 import { buttonClass, errorText, inputClass } from "./channel-dialogs"
 import { avatarState } from "./office/avatar"
 import { deriveMemberDesk, type DeskState } from "./office/state"
+import { LessonsButton } from "./lessons/lessons-dialog"
 import { TeamIcon } from "./team-icon"
 
 const STATE_CLASS: Record<DeskState, string> = {
@@ -176,6 +177,7 @@ function Panel({ channel }: { channel: Channel }) {
                             Clear default
                           </button>
                         )}
+                        {member.kind === "agent" && <LessonsButton persona={member.handle} className={SMALL} />}
                         {!you && (
                           <button
                             type="button"

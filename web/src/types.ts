@@ -371,6 +371,9 @@ export type EventType =
   | "project.updated"
   | "routine.updated"
   | "routine.removed"
+  | "lesson.added"
+  | "lesson.updated"
+  | "lesson.removed"
   | "task.created"
   | "task.updated"
   | "handoff.created"
@@ -523,6 +526,33 @@ export interface Routine {
 }
 
 export type RoutineSource = "config" | "app"
+
+/** A short correction the Director teaches a persona; every later run of that persona sees it. */
+export interface Lesson {
+  id: ID
+  persona: string
+  /** Empty applies in every channel. */
+  channel_id: ID | ""
+  text: string
+  source_message_id: ID | ""
+  created_by: ID
+  created_at: string
+  updated_at: string
+}
+
+/** POST /lessons. The persona is an agent handle. */
+export interface LessonCreate {
+  persona: string
+  text: string
+  channel_id?: ID
+  source_message_id?: ID
+}
+
+/** PATCH /lessons/{id}. An empty channel_id makes the lesson global. */
+export interface LessonPatch {
+  text?: string
+  channel_id?: ID | ""
+}
 
 /** POST /routines. The persona is an agent handle and the channel a channel name. */
 export interface RoutineCreate {

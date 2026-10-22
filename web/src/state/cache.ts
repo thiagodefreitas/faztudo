@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query"
-import type { Member, Message, NoticeItem, OutputLine, StreamEvent, Task } from "../types"
+import type { Lesson, Member, Message, NoticeItem, OutputLine, StreamEvent, Task } from "../types"
 import { qk } from "./keys"
 import { replaceById } from "./merge"
 import { emptySnapshot, reduce } from "./reduce"
@@ -31,6 +31,15 @@ export function applyEvent(qc: QueryClient, event: StreamEvent): void {
   }
   if (event.type === "routine.updated" || event.type === "routine.removed") {
     void qc.invalidateQueries({ queryKey: qk.routines })
+  }
+  if (event.type === "lesson.added" || event.type === "lesson.updated" || event.type === "lesson.removed") {
+    const lesson = event.payload as Lesson | null
+    if (lesson && typeof lesson.id === "string") {
+      qc.setQueryData<Lesson[] | undefined>(qk.lessons, (current) => {
+        if (!current) return current
+        return event.type === "lesson.removed" ? current.filter((item) => item.id !== lesson.id) : replaceById(current, lesson)
+      })
+    }
   }
   if (event.type === "compare.started" || event.type === "compare.decided") {
     if (event.channel_id) void qc.invalidateQueries({ queryKey: ["compares", event.channel_id] })

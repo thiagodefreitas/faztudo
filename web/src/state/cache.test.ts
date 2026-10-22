@@ -28,6 +28,26 @@ describe("applyEvent", () => {
     expect(qc.getQueryState(qk.output("other"))?.dataUpdatedAt).toBe(beforeOutput)
   })
 
+  it("applies lesson events to the cached list without a refetch", () => {
+    const qc = new QueryClient()
+    const invalidate = vi.spyOn(qc, "invalidateQueries")
+    const lesson = { id: "l1", persona: "coder", channel_id: "", text: "Small diffs.", source_message_id: "", created_by: "ada", created_at: "t", updated_at: "t" }
+    qc.setQueryData(qk.lessons, [])
+    applyEvent(qc, { ...outputEvent(1), type: "lesson.added", payload: lesson })
+    expect(qc.getQueryData(qk.lessons)).toEqual([lesson])
+    applyEvent(qc, { ...outputEvent(2), type: "lesson.updated", payload: { ...lesson, text: "Tiny diffs." } })
+    expect(qc.getQueryData(qk.lessons)).toEqual([{ ...lesson, text: "Tiny diffs." }])
+    applyEvent(qc, { ...outputEvent(3), type: "lesson.removed", payload: lesson })
+    expect(qc.getQueryData(qk.lessons)).toEqual([])
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it("keeps lessons unloaded until the list is first fetched", () => {
+    const qc = new QueryClient()
+    applyEvent(qc, { ...outputEvent(1), type: "lesson.added", payload: { id: "l1" } })
+    expect(qc.getQueryData(qk.lessons)).toBeUndefined()
+  })
+
   it("refreshes a comparison on its own events and candidate updates", () => {
     const qc = new QueryClient()
     const invalidate = vi.spyOn(qc, "invalidateQueries")

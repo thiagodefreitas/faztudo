@@ -5,7 +5,7 @@ import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
-import { useOutput, useRuns } from "../state/queries"
+import { useMe, useMembers, useOutput, useRuns } from "../state/queries"
 import { DiffView } from "./diff-view"
 import { RunContext } from "./run-context"
 import { RunTimeline } from "./run-timeline"
@@ -49,6 +49,10 @@ export function RunPanel({
     retry: false,
   })
   const run = runs.data?.find((item) => item.id === runId)
+  const me = useMe()
+  const members = useMembers()
+  // Lessons are the Director's; an agent viewer sees the plain text.
+  const persona = me.data?.kind === "human" ? members.data?.find((item) => item.id === run?.agent_id)?.handle : undefined
   const boxRef = useRef<HTMLPreElement>(null)
   const lines = output.data ?? []
   const tail = lines.map((line) => line.seq).join(",")
@@ -119,7 +123,7 @@ export function RunPanel({
             <p className="p-3 text-[13px] text-muted">The run is not loaded yet.</p>
           )
         ) : view === "context" ? (
-          prompt.data ? <RunContext data={prompt.data} /> : <p className="p-3 text-[13px] text-muted">{prompt.isError ? "Context is not available for this run." : "Loading context"}</p>
+          prompt.data ? <RunContext data={prompt.data} {...(persona ? { persona } : {})} /> : <p className="p-3 text-[13px] text-muted">{prompt.isError ? "Context is not available for this run." : "Loading context"}</p>
         ) : view === "diff" ? (
           <div className="p-2">
             {diff.isPending && <p className="text-[13px] text-muted">Loading diff</p>}

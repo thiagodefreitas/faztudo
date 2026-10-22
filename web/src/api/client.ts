@@ -32,6 +32,9 @@ import type {
   ReadResult,
   ResolveBody,
   RetryBody,
+  Lesson,
+  LessonCreate,
+  LessonPatch,
   Routine,
   RoutineCreate,
   Run,
@@ -97,6 +100,10 @@ export interface Api {
   setRoutineEnabled: (handle: string, enabled: boolean) => Promise<Routine>
   runRoutine: (handle: string) => Promise<{ status: string }>
   createRoutine: (body: RoutineCreate) => Promise<Routine>
+  lessons: () => Promise<Lesson[]>
+  createLesson: (body: LessonCreate) => Promise<Lesson>
+  patchLesson: (id: ID, body: LessonPatch) => Promise<Lesson>
+  deleteLesson: (id: ID) => Promise<void>
   deleteRoutine: (handle: string) => Promise<void>
   tasks: (query?: { channel_id?: ID; project?: string }) => Promise<Task[]>
   createTask: (body: TaskInput) => Promise<Task>
@@ -197,6 +204,10 @@ export function createApi(options: ApiOptions = {}): Api {
     setRoutineEnabled: (handle, enabled) => request("PATCH", `/routines/${encodeURIComponent(handle)}`, { enabled }),
     runRoutine: (handle) => request("POST", `/routines/${encodeURIComponent(handle)}/run`),
     createRoutine: (body) => request("POST", "/routines", body),
+    lessons: () => request("GET", "/lessons"),
+    createLesson: (body) => request("POST", "/lessons", body),
+    patchLesson: (id, body) => request("PATCH", `/lessons/${encodeURIComponent(id)}`, body),
+    deleteLesson: (id) => request("DELETE", `/lessons/${encodeURIComponent(id)}`),
     deleteRoutine: (handle) => request("DELETE", `/routines/${encodeURIComponent(handle)}`),
     tasks: (params = {}) => request("GET", query("/tasks", params)),
     createTask: (body) => request("POST", "/tasks", body),

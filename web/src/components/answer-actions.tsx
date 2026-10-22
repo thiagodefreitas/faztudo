@@ -6,8 +6,9 @@ import { ulid } from "../lib/id"
 import { qk } from "../state/keys"
 import { mergeById } from "../state/merge"
 import { routinePromptOf } from "../lib/request"
-import { useChannels, useMembers, useMessages } from "../state/queries"
+import { useChannels, useMe, useMembers, useMessages } from "../state/queries"
 import type { Member, Message, Run, ThreadPage } from "../types"
+import { TeachDialog } from "./lessons/teach-dialog"
 import { RepeatDialog } from "./routines/repeat-dialog"
 
 const ITEM = "flex min-h-10 cursor-default items-center rounded px-2 text-[13px] text-ink outline-none data-[highlighted]:bg-accent-soft md:min-h-8"
@@ -46,13 +47,17 @@ export function AnswerActions({
   const channel = channels.data?.find((item) => item.id === message.channel_id)
   const people = reviewers(author, members.data ?? [], channel?.member_ids ?? [])
   const lanes = otherLanes(author, run)
+  const me = useMe()
   const [repeatOpen, setRepeatOpen] = useState(false)
+  const [teachOpen, setTeachOpen] = useState(false)
   const triggers = useMessages(message.channel_id)
   const trigger = run ? triggers.data?.find((item) => item.id === run.trigger_message_id) : undefined
   // Only a finished run can be repeated, and only from a channel and by an agent
   // that a routine can name.
   const canRepeat = run?.state === "done" && channel !== undefined && author?.kind === "agent"
-  if (people.length === 0 && lanes.length === 0 && !canRepeat) return null
+  // A lesson is taught by the Director, about an agent's answer.
+  const canTeach = me.data?.kind === "human" && channel !== undefined && author?.kind === "agent"
+  if (people.length === 0 && lanes.length === 0 && !canRepeat && !canTeach) return null
 
   function ask(agent: Member) {
     setError(null)
@@ -105,6 +110,11 @@ export function AnswerActions({
                 Repeat this
               </Menu.Item>
             )}
+            {canTeach && author && (
+              <Menu.Item onSelect={() => setTeachOpen(true)} className={ITEM}>
+                Teach @{author.handle}...
+              </Menu.Item>
+            )}
           </Menu.Content>
         </Menu.Portal>
       </Menu.Root>
@@ -115,6 +125,16 @@ export function AnswerActions({
           channel={channel.name}
           open
           onOpenChange={setRepeatOpen}
+        />
+      )}
+      {teachOpen && channel && author && (
+        <TeachDialog
+          persona={author.handle}
+          channelId={channel.id}
+          channelName={channel.name}
+          sourceMessageId={message.id}
+          open
+          onOpenChange={setTeachOpen}
         />
       )}
       {error && (
