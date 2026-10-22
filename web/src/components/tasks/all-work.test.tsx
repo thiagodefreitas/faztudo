@@ -26,6 +26,13 @@ describe("AllWork", () => {
     const needs = screen.getByRole("region", { name: "Needs you" })
     expect(needs).toHaveTextContent("from @reviewer")
   })
+
+  it("shows measured tokens and estimated cost on a card", async () => {
+    const measured = run("priced", { state: "done", ended_at: recent, tokens: { input: 1200, output: 300, cache_read: 500, cache_write: 0 }, cost_usd: 0.0045 })
+    await renderWithApp(<AllWork channels={[channel]} />, { runs: [measured] })
+    const done = await screen.findByRole("region", { name: "Done" })
+    expect(done).toHaveTextContent("2,000 tokens - about $0.0045")
+  })
 })
 
 describe("view toggle", () => {

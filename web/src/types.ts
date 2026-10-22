@@ -214,6 +214,8 @@ export interface RunTokens {
   output: number
   cache_read: number
   cache_write: number
+  /** CLI total when it does not report an input/output split. */
+  total_only?: number
 }
 
 export type ApprovalStyle = "primary" | "danger"

@@ -19,12 +19,14 @@ type TokenUsage struct {
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
-	Entries          int
+	// TotalOnly is a CLI footer total with no reliable token-kind split.
+	TotalOnly int64
+	Entries   int
 }
 
 // Total is the sum of all token kinds.
 func (t TokenUsage) Total() int64 {
-	return t.InputTokens + t.OutputTokens + t.CacheReadTokens + t.CacheWriteTokens
+	return t.InputTokens + t.OutputTokens + t.CacheReadTokens + t.CacheWriteTokens + t.TotalOnly
 }
 
 // ClaudeResult is the usage measured from Claude Code session logs.

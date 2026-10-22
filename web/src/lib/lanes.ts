@@ -1,4 +1,4 @@
-import type { Lane, LaneWindow } from "../types"
+import type { Lane, LaneWindow, Run } from "../types"
 
 // The chip shows one window: the measurement taken most recently.
 export function primaryWindow(lane: Lane): LaneWindow | undefined {
@@ -25,4 +25,20 @@ function localDay(at: number): string {
 export function runsTodayOf(lane: Lane, now: number): number | undefined {
   if (lane.runs_date && lane.runs_date !== localDay(now)) return undefined
   return lane.runs_today
+}
+
+export function laneRunUsage(runs: Run[], laneId: string, now: number) {
+  const today = runs.filter((run) => run.lane_id === laneId && run.started_at && localDay(Date.parse(run.started_at)) === localDay(now))
+  const measured = today.filter((run) => run.tokens !== undefined)
+  const priced = today.filter((run) => run.cost_usd !== undefined)
+  return {
+    runs: today.length,
+    measured: measured.length,
+    tokens: measured.reduce((sum, run) => {
+      const t = run.tokens!
+      return sum + t.input + t.output + t.cache_read + t.cache_write + (t.total_only ?? 0)
+    }, 0),
+    priced: priced.length,
+    cost: priced.reduce((sum, run) => sum + run.cost_usd!, 0),
+  }
 }

@@ -1,4 +1,5 @@
 import type { Member, Message, Run } from "../types"
+import { formatTokens } from "./lane-format"
 
 export type WorkColumn = "queued" | "running" | "needs_you" | "done" | "failed"
 
@@ -70,6 +71,15 @@ const LEADING_ROUTING = /^\s*(?:@[\w-]+[\s,:]+|\/lane\s+\S+\s+)+/i
 /** First line of a request after its leading mentions and /lane override. */
 export function requestLine(body: string): string {
   return firstLine(body.replace(LEADING_ROUTING, "")) || firstLine(body)
+}
+
+/** A quiet usage suffix for a work card, with no implied zero for unknowns. */
+export function workUsage(run: Run): string {
+  if (!run.tokens) return ""
+  const { input, output, cache_read, cache_write, total_only = 0 } = run.tokens
+  const tokens = `${formatTokens(input + output + cache_read + cache_write + total_only)} tokens`
+  if (run.cost_usd === undefined) return tokens
+  return `${tokens} - about $${run.cost_usd.toFixed(run.cost_usd < 0.01 ? 4 : 2)}`
 }
 
 /** Handle of the agent that wrote the trigger message, unless it is the run's own agent. */

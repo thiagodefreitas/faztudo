@@ -1096,6 +1096,8 @@ export class MockWorld {
       started_at: iso(now - 30 * minute),
       ended_at: iso(now - 28 * minute),
       exit_code: 0,
+      tokens: { input: 2200, output: 460, cache_read: 800, cache_write: 0 },
+      cost_usd: 0.0124,
       verification: { ok: true, detail: SEED_PASS },
       diff_stat: { files: 1, insertions: 2, deletions: 1 },
     })

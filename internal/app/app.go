@@ -1153,6 +1153,13 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		run.FailureReason = err.Error()
 		_, _ = a.Store.Append(ctx, events.Draft{Type: events.RunUpdated, Actor: events.System, ChannelID: channel.ID, Payload: run})
 	}
+	if run.StartedAt != nil && run.EndedAt != nil {
+		dir := workdir
+		if run.Worktree != "" {
+			dir = run.Worktree
+		}
+		a.recordRunUsage(ctx, &run, lane.CLI, dir)
+	}
 	if err != nil && a.laneFailed(run) {
 		if explicit {
 			a.notice(ctx, channel.ID, "warn", fmt.Sprintf("You chose lane %s for this message, so @%s was not moved to another lane.", lane.ID, agent.Handle))
@@ -1171,13 +1178,6 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	}
 	if err == nil {
 		_ = a.Registry.RecoverSince(ctx, lane.ID, "last run succeeded", runStarted)
-	}
-	if run.StartedAt != nil && run.EndedAt != nil {
-		dir := workdir
-		if run.Worktree != "" {
-			dir = run.Worktree
-		}
-		a.recordRunUsage(ctx, &run, lane.CLI, dir)
 	}
 	if err := a.postRunResult(ctx, run, m, agent, adapter, compare); err != nil {
 		return err
@@ -1414,11 +1414,11 @@ func (a *App) recordRunUsage(ctx context.Context, run *domain.Run, cli, dir stri
 	if err != nil || run.StartedAt == nil || run.EndedAt == nil {
 		return
 	}
-	tu, ok := usage.ReadRun(cli, home, dir, *run.StartedAt, *run.EndedAt)
+	tu, ok := usage.ReadRunFiles(cli, home, dir, filepath.Join(a.Paths.RunsDir, run.ID), *run.StartedAt, *run.EndedAt)
 	if !ok {
 		return
 	}
-	run.Tokens = &domain.RunTokens{Input: tu.InputTokens, Output: tu.OutputTokens, CacheRead: tu.CacheReadTokens, CacheWrite: tu.CacheWriteTokens}
+	run.Tokens = &domain.RunTokens{Input: tu.InputTokens, Output: tu.OutputTokens, CacheRead: tu.CacheReadTokens, CacheWrite: tu.CacheWriteTokens, TotalOnly: tu.TotalOnly}
 	for _, configured := range a.Config.Lanes.Lane {
 		if configured.ID == run.LaneID {
 			run.CostUSD = usage.EstimateUSD(tu, configured.USDPerMillionInput, configured.USDPerMillionOutput, configured.USDPerMillionCached)

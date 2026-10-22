@@ -80,3 +80,40 @@ func TestRunWithoutLogsKeepsUsageUnknown(t *testing.T) {
 		t.Fatalf("unknown must stay unknown: %+v %v", got.Tokens, got.CostUSD)
 	}
 }
+
+func TestCodexFooterRecordsTotalWithoutEstimatedCost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	runsDir := t.TempDir()
+	s, err := store.Open(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	cfg := config.Config{}
+	cfg.Lanes.Lane = []config.Lane{{ID: "codex/default", CLI: "codex", USDPerMillionInput: 2, USDPerMillionOutput: 8}}
+	a, err := New(ctx, s, cfg, config.Paths{RunsDir: runsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().UTC().Add(-time.Minute)
+	end := time.Now().UTC()
+	run := domain.Run{ID: "codex-run", ChannelID: "ch", LaneID: "codex/default", State: domain.RunFailed, StartedAt: &start, EndedAt: &end}
+	if _, err := s.Append(ctx, events.Draft{Type: events.RunCreated, Actor: events.System, ChannelID: "ch", Payload: run}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runsDir, run.ID), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runsDir, run.ID, "stderr.log"), []byte("tokens used\n17,161\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.recordRunUsage(ctx, &run, "codex", "~/repo")
+	got, err := s.Run(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tokens == nil || got.Tokens.TotalOnly != 17161 || got.CostUSD != nil {
+		t.Fatalf("footer must stay unpriced: %+v, %v", got.Tokens, got.CostUSD)
+	}
+}

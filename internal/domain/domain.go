@@ -251,6 +251,7 @@ type RunTokens struct {
 	Output     int64 `json:"output"`
 	CacheRead  int64 `json:"cache_read"`
 	CacheWrite int64 `json:"cache_write"`
+	TotalOnly  int64 `json:"total_only,omitempty"` // total with no input/output split
 }
 
 type ApprovalOption struct {

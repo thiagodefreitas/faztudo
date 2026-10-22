@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
-import { groupWork, WORK_COLUMNS, WORK_TITLES } from "../../lib/all-work"
+import { groupWork, workUsage, WORK_COLUMNS, WORK_TITLES } from "../../lib/all-work"
 import { formatAge, formatElapsed } from "../../lib/time"
 import { useAllMessages, useMembers, useRuns } from "../../state/queries"
 import type { Channel, Member, Run } from "../../types"
@@ -77,6 +77,7 @@ export function AllWork({ channels, channelIds }: { channels: Channel[]; channel
                       <span className="mt-0.5 block truncate text-[12px] text-muted">
                         {channel ? `#${channel.name}` : "channel"} - {when}
                         {from ? ` - from @${from}` : ""}
+                        {workUsage(run) ? ` - ${workUsage(run)}` : ""}
                       </span>
                     </button>
                   </li>

@@ -1,8 +1,8 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { Lane } from "../types"
-import { runsTodayOf } from "../lib/lanes"
+import type { Lane, Run } from "../types"
+import { laneRunUsage, runsTodayOf } from "../lib/lanes"
 import { LaneCardView, LanesGauge } from "./lanes"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
@@ -105,15 +105,24 @@ describe("LaneCardView", () => {
     expect(screen.getByText("Probe now")).toBeEnabled()
   })
 
-  it("shows history for both time ranges and an estimated cost", () => {
+  it("shows history for both time ranges and measured run cost", () => {
     const history = [
       { lane_id: availableLane.id, window: { name: "5h" as const, used_pct: 10, source: "probe" as const }, read_at: new Date(now - 60_000).toISOString() },
       { lane_id: availableLane.id, window: { name: "5h" as const, used_pct: 20, source: "probe" as const }, read_at: new Date(now).toISOString() },
     ]
-    renderCard({ ...availableLane, cost_today_usd: 0.12 }, { history })
-    expect(screen.getByText("about $0.12 today, estimate")).toBeInTheDocument()
+    const runs: Run[] = [
+      { id: "a", channel_id: "c", trigger_message_id: "m", agent_id: "a", lane_id: availableLane.id, mode: "read", state: "done", started_at: new Date(now - 60_000).toISOString(), tokens: { input: 100, output: 20, cache_read: 0, cache_write: 0 }, cost_usd: 0.12 },
+      { id: "b", channel_id: "c", trigger_message_id: "m", agent_id: "a", lane_id: availableLane.id, mode: "read", state: "running", started_at: new Date(now - 30_000).toISOString() },
+    ]
+    renderCard(availableLane, { history, runs })
+    expect(screen.getByText(/Today: 120 tokens \(1 of 2 runs measured\); about \$0.12, estimate \(1 of 2 priced\)/)).toBeInTheDocument()
     expect(screen.getByRole("img", { name: "5h usage, last 24 hours" }).querySelector("path")?.getAttribute("d")).toContain("L")
     expect(screen.getByRole("img", { name: "5h usage, last 7 days" })).toBeInTheDocument()
+  })
+
+  it("filters runs by local start day and lane", () => {
+    const base: Run = { id: "a", channel_id: "c", trigger_message_id: "m", agent_id: "a", lane_id: availableLane.id, mode: "read", state: "done", started_at: new Date(now).toISOString(), tokens: { input: 5, output: 1, cache_read: 0, cache_write: 0 } }
+    expect(laneRunUsage([base, { ...base, id: "b", lane_id: "other" }, { ...base, id: "c", started_at: new Date(now - 2 * 86_400_000).toISOString() }], availableLane.id, now)).toEqual({ runs: 1, measured: 1, tokens: 6, priced: 0, cost: 0 })
   })
 
   it("shows tokens used when a lane logs tokens but has no quota percentage", () => {

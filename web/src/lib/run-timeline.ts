@@ -29,15 +29,16 @@ const COUNT = new Intl.NumberFormat("en-US")
 export function tokensTitle(run: Run): string {
   const t = run.tokens
   if (!t) return "Tokens unknown"
-  return `${COUNT.format(t.input + t.output + t.cache_read + t.cache_write)} tokens`
+  return `${COUNT.format(t.input + t.output + t.cache_read + t.cache_write + (t.total_only ?? 0))} tokens`
 }
 
 /** The split behind the total, plus the estimated cost when the lane has prices. */
 export function tokensDetail(run: Run): string {
   const t = run.tokens
   if (!t) return "This CLI does not record usage per run, or it could not be told apart from another run."
+  if (t.total_only) return "CLI total; input and output split unknown, so cost is unavailable."
   const split = `${COUNT.format(t.input)} in, ${COUNT.format(t.output)} out, ${COUNT.format(t.cache_read)} cache read, ${COUNT.format(t.cache_write)} cache write.`
-  return run.cost_usd === undefined ? split : `${split} About $${run.cost_usd.toFixed(2)}, estimate, not billing.`
+  return run.cost_usd === undefined ? split : `${split} About $${run.cost_usd.toFixed(run.cost_usd < 0.01 ? 4 : 2)}, estimate, not billing.`
 }
 
 /** "codex/default skipped: no capacity" from a "Lane switched from ... to ..." notice. */

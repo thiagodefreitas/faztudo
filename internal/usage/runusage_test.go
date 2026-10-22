@@ -1,6 +1,8 @@
 package usage
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -30,6 +32,48 @@ func TestReadRunClaudeCountsOnlyThisRunsEntries(t *testing.T) {
 	want := TokenUsage{InputTokens: 120, OutputTokens: 40, CacheReadTokens: 50, CacheWriteTokens: 5, Entries: 2}
 	if got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestReadRunFilesCodexPrefersPrivateRollout(t *testing.T) {
+	home := t.TempDir()
+	runDir := t.TempDir()
+	data, err := os.ReadFile("testdata/run-codex/rollout.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLog(t, runDir, "sandbox/codex-home/sessions/2026/10/18/rollout-test.jsonl", string(data))
+	got, ok := ReadRunFiles("codex", home, "~/repo", runDir, runStart, runEnd)
+	if !ok || got != (TokenUsage{InputTokens: 200, CacheReadTokens: 100, OutputTokens: 60, Entries: 1}) {
+		t.Fatalf("private rollout: %+v, %v", got, ok)
+	}
+}
+
+func TestReadRunFilesCodexFooterHasNoPriceableSplit(t *testing.T) {
+	runDir := t.TempDir()
+	data, err := os.ReadFile("testdata/run-codex/stderr.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "stderr.log"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := ReadRunFiles("codex", t.TempDir(), "~/repo", runDir, runStart, runEnd)
+	if !ok || got.TotalOnly != 17161 || got.Total() != 17161 {
+		t.Fatalf("stderr total: %+v, %v", got, ok)
+	}
+}
+
+func TestCodexFooterRejectsAmbiguousAndNonFinalCounts(t *testing.T) {
+	runDir := t.TempDir()
+	path := filepath.Join(runDir, "stderr.log")
+	for _, log := range []string{"tokens used\n1,000\nother output\n", "tokens used\n1,000\ntokens used\n2,000\n", "tokens used\ninvalid\n"} {
+		if err := os.WriteFile(path, []byte(log), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := codexStderrTotal(path); ok {
+			t.Fatalf("ambiguous footer accepted: %q", log)
+		}
 	}
 }
 
@@ -100,5 +144,22 @@ func TestReadRunGrokCountsTurnsEndedInTheRun(t *testing.T) {
 	want := TokenUsage{InputTokens: 1000, OutputTokens: 220, CacheReadTokens: 1100, CacheWriteTokens: 100, Entries: 2}
 	if got != want {
 		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestCodexStderrTotalWithVerificationAfter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stderr.log")
+	body := "codex\nanswer\ntokens used\n128,865\n\n[verification]\nok  \tpkg\t0.1s\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := codexStderrTotal(path); !ok || n != 128865 {
+		t.Fatalf("%d %v", n, ok)
+	}
+	if err := os.WriteFile(path, []byte(body+"tokens used\n5\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := codexStderrTotal(path); ok {
+		t.Fatal("two footers must not count")
 	}
 }

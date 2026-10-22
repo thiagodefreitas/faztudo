@@ -355,9 +355,20 @@ counts as usable, so the run waits for it.
 session logs.
 
 Lane prices are optional and apply only where the local CLI logs input,
-output and cache token counts. The Lanes page labels the result "about $X
-today, estimate". It is not a bill. Cache writes use the input rate because
-there is no separate cache-write setting. Usage history keeps each reading
+output and cache token counts. For example, add these illustrative prices
+to a `[[lane]]` entry in `lanes.toml` (replace them with your own rates):
+
+```toml
+usd_per_million_input = 2.00
+usd_per_million_output = 8.00
+usd_per_million_cached = 0.50
+```
+
+The run card and Lanes page show a cost only for runs with a known token-kind
+split and configured prices. Cost is an estimate, never billing. The Lanes
+page shows how many of today's runs were measured and priced, so a partial
+sum is clear. Cache writes use the input rate because there is no separate
+cache-write setting. Usage history keeps each reading
 for the history endpoint; the page draws 24-hour and 7-day trends.
 
 The summary lane produces a rolling channel summary after `summary_every`

@@ -63,6 +63,15 @@ describe("runTimeline", () => {
     expect(step?.detail).toBe("1,200 in, 300 out, 50,000 cache read, 0 cache write. About $0.12, estimate, not billing.")
   })
 
+  it("shows a Codex footer total without inventing a cost or split", () => {
+    const footer: Run = { ...run, tokens: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_only: 17161 } }
+    const step = runTimeline({ run: footer, now }).find((s) => s.key === "usage")
+    expect(step?.title).toBe("17,161 tokens")
+    expect(step?.detail).toMatch(/split unknown, so cost is unavailable/)
+    const priced: Run = { ...run, tokens: { input: 1200, output: 300, cache_read: 0, cache_write: 0 }, cost_usd: 0.0045 }
+    expect(runTimeline({ run: priced, now }).find((s) => s.key === "usage")?.detail).toContain("$0.0045")
+  })
+
   it("leaves tokens unknown when the CLI keeps no per-run log, and the cost out when there are no prices", () => {
     const unknown = runTimeline({ run, now }).find((s) => s.key === "usage")
     expect(unknown?.title).toBe("Tokens unknown")

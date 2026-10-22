@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +22,12 @@ const runSlack = 2 * time.Second
 // nothing was logged, or more than one session matches (two runs in the same
 // directory at the same time cannot be told apart).
 func ReadRun(cli, home, workdir string, start, end time.Time) (TokenUsage, bool) {
+	return ReadRunFiles(cli, home, workdir, "", start, end)
+}
+
+// ReadRunFiles also checks the private files of this run. Sandboxed Codex
+// writes its rollout under runDir/sandbox/codex-home, not the user's home.
+func ReadRunFiles(cli, home, workdir, runDir string, start, end time.Time) (TokenUsage, bool) {
 	if workdir == "" || start.IsZero() || end.Before(start) {
 		return TokenUsage{}, false
 	}
@@ -31,14 +39,59 @@ func ReadRun(cli, home, workdir string, start, end time.Time) (TokenUsage, bool)
 	case "claude":
 		tu, sessions = runClaude(home, workdir, start, end, opts)
 	case "codex":
-		tu, sessions = runCodex(home, workdir, start, end, opts)
+		codexHome := filepath.Join(runDir, "sandbox", "codex-home")
+		_, privateErr := os.Stat(codexHome)
+		if runDir != "" && privateErr == nil {
+			// A long rollout can exceed the generic 4 MiB probe limit.
+			opts.MaxFileBytes = 64 << 20
+			tu, sessions = runCodex(codexHome, workdir, start, end, opts)
+		}
+		if sessions == 0 && (runDir == "" || privateErr != nil) {
+			tu, sessions = runCodex(filepath.Join(home, CodexDir), workdir, start, end, opts)
+		}
+		if sessions == 0 && runDir != "" {
+			if n, ok := codexStderrTotal(filepath.Join(runDir, "stderr.log")); ok {
+				// The footer gives only a total. Its input/output split is
+				// unknown, so callers must not price it.
+				tu, sessions = TokenUsage{TotalOnly: n, Entries: 1}, 1
+			}
+		}
 	case "grok":
 		tu, sessions = runGrok(home, workdir, start, end, opts)
+		// Kimi and agy can emit structured usage, but their current adapter
+		// commands select text output. That text has no reliable per-run
+		// token count, so leave it unmeasured.
 	}
 	if sessions != 1 || tu.Entries == 0 {
 		return TokenUsage{}, false
 	}
 	return tu, true
+}
+
+var codexFooterLine = regexp.MustCompile(`(?m)^tokens used\r?$`)
+
+// The footer ends the CLI's output. faztudo may append a write run's
+// verification block after it; nothing else may follow.
+var codexFooter = regexp.MustCompile(`(?m)^tokens used\r?\n([0-9][0-9,]*)[ \t\r\n]*(?:\[verification\]\n[\s\S]*)?\z`)
+
+func codexStderrTotal(path string) (int64, bool) {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > 4<<20 {
+		return 0, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	if len(codexFooterLine.FindAll(data, -1)) != 1 {
+		return 0, false
+	}
+	match := codexFooter.FindSubmatch(data)
+	if match == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.ReplaceAll(string(match[1]), ",", ""), 10, 64)
+	return n, err == nil && n > 0
 }
 
 func inWindow(ts string, start, end time.Time) bool {
@@ -123,8 +176,8 @@ type codexTotals struct {
 
 // runCodex finds the rollout files that started in the run for workdir and
 // takes the last cumulative total of each. A codex exec writes one rollout.
-func runCodex(home, workdir string, start, end time.Time, opts Options) (TokenUsage, int) {
-	files := recentLogFiles(filepath.Join(home, CodexDir, "sessions"), opts, func(name string) bool {
+func runCodex(codexHome, workdir string, start, end time.Time, opts Options) (TokenUsage, int) {
+	files := recentLogFiles(filepath.Join(codexHome, "sessions"), opts, func(name string) bool {
 		return strings.HasPrefix(name, "rollout-") && filepath.Ext(name) == ".jsonl"
 	})
 	var total TokenUsage

@@ -3,15 +3,15 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
-import { compactTokens, displayPct, formatCostEstimate, formatCountdown, formatTokens, sparklinePath } from "../lib/lane-format"
+import { compactTokens, displayPct, formatCountdown, formatTokens, sparklinePath } from "../lib/lane-format"
 import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
-import { runsTodayOf } from "../lib/lanes"
+import { laneRunUsage, runsTodayOf } from "../lib/lanes"
 import { formatAge } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
-import { useLanes } from "../state/queries"
-import type { Lane, LaneHealth, LaneUsageReading, LaneWindow } from "../types"
+import { useLanes, useRuns } from "../state/queries"
+import type { Lane, LaneHealth, LaneUsageReading, LaneWindow, Run } from "../types"
 
 function WindowHistory({ window, history, now }: { window: LaneWindow; history: LaneUsageReading[]; now: number }) {
   const readings = history.filter((r) => r.window.name === window.name)
@@ -182,6 +182,7 @@ export function LaneCardView({
   probeError,
   onProbe,
   history = [],
+  runs = [],
 }: {
   lane: Lane
   now: number
@@ -189,7 +190,9 @@ export function LaneCardView({
   probeError: string | undefined
   onProbe: () => void
   history?: LaneUsageReading[]
+  runs?: Run[]
 }) {
+  const usage = laneRunUsage(runs, lane.id, now)
   return (
     <article aria-label={`lane ${lane.id}`} data-health={lane.health} className="flex flex-col rounded-md border border-line bg-surface p-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -225,7 +228,12 @@ export function LaneCardView({
           <dd className="font-mono text-[12px] tabular-nums text-ink">{formatTokens(lane.tokens_last_hour)}</dd>
         </div>
       </dl>
-      {formatCostEstimate(lane.cost_today_usd) && <p className="mt-2 text-[12px] text-muted">{formatCostEstimate(lane.cost_today_usd)}</p>}
+      <p className="mt-2 text-[12px] text-muted">
+        Today: {usage.measured ? `${formatTokens(usage.tokens)} tokens` : "tokens unknown"} ({usage.measured} of {usage.runs} runs measured)
+        {usage.priced > 0
+          ? `; about $${usage.cost.toFixed(usage.cost < 0.01 ? 4 : 2)}, estimate (${usage.priced} of ${usage.runs} priced)`
+          : "; cost unknown"}
+      </p>
       {lane.last_error && (
         <div className="mt-2 rounded-md border-l-2 border-danger bg-danger-soft px-2 py-1.5">
           <p className="text-[12px] font-medium text-danger">{lane.last_error.class}</p>
@@ -252,7 +260,7 @@ export function LaneCardView({
   )
 }
 
-function LaneCard({ lane, now, focused }: { lane: Lane; now: number; focused: boolean }) {
+function LaneCard({ lane, now, focused, runs }: { lane: Lane; now: number; focused: boolean; runs: Run[] }) {
   const qc = useQueryClient()
   const [probing, setProbing] = useState(false)
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
@@ -289,13 +297,14 @@ function LaneCard({ lane, now, focused }: { lane: Lane; now: number; focused: bo
       data-focused={focused || undefined}
       className={cx("rounded-md", focused && "ring-2 ring-accent")}
     >
-      <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} />
+      <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} runs={runs} />
     </div>
   )
 }
 
 export function LanesPage() {
   const lanes = useLanes()
+  const runs = useRuns()
   const focus = useSearch({ strict: false }).lane
   const now = useNow()
   useLanesShortcut()
@@ -315,7 +324,7 @@ export function LanesPage() {
         ) : (
           <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {list.map((lane) => (
-              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} />
+              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} runs={runs.data ?? []} />
             ))}
           </div>
         )}
