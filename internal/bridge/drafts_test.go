@@ -229,3 +229,40 @@ func TestApprovedDraftKeepsAttachments(t *testing.T) {
 		t.Fatalf("attachments: %+v", out.Attachments)
 	}
 }
+
+// A merge card is posted by the system for an agent's run. With draft (the
+// group default) or off it must not reach the group either.
+func TestSignalMergeCardStaysHomeUnlessSend(t *testing.T) {
+	ctx := context.Background()
+	h, _ := fixture(t)
+	channel := h.Config.Bind["self"]
+	h.Config.Bind = map[string]string{"group:people": channel}
+	h.API.SignalBindings = h.Config.Bind
+	card := domain.Approval{ID: store.NewID(), ChannelID: channel, RequestedBy: "agent", Title: "Choose what to do with branch fz/run", State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge"}}}
+	e, err := h.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: channel, Payload: card})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := NewConn(nil, nil, h)
+	if err := conn.deliver(ctx, e, "group:people", channel); err != nil {
+		t.Fatal(err)
+	}
+	after, err := h.Store.EventsAfter(ctx, e.Seq, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range after {
+		if item.Type == events.Notice || item.Type == events.ApprovalRequested {
+			t.Fatalf("merge card went toward the group: %s %s", item.Type, item.Payload)
+		}
+	}
+}
+
+func TestDraftDetailNamesAttachments(t *testing.T) {
+	if got := draftDetail("group:people", 0); strings.Contains(got, "file") {
+		t.Fatalf("no files: %q", got)
+	}
+	if got := draftDetail("group:people", 2); !strings.Contains(got, "2 attached file(s) go with it") {
+		t.Fatalf("files: %q", got)
+	}
+}

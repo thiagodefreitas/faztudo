@@ -145,3 +145,21 @@ func TestDiskLimitDoesNotFollowSymlinks(t *testing.T) {
 		t.Fatalf("soft limit: %+v %v", status, err)
 	}
 }
+
+func TestSecretLike(t *testing.T) {
+	for _, tc := range []struct {
+		key, value string
+		want       bool
+	}{
+		{"access_token", "abcdefghijklmnopqrstuv", true},
+		{"refreshtoken", "abcdefghijklmnopqrstuv", true},
+		{"expires_at", "short", false},
+		{"email", "someone@example.invalid.long", false},
+		{"opaque", strings.Repeat("Ab1", 15), true},
+		{"url", "https://auth.example.invalid/oauth/authorize/long/path", false},
+	} {
+		if got := secretLike(tc.key, tc.value); got != tc.want {
+			t.Errorf("secretLike(%q, %q) = %v, want %v", tc.key, tc.value, got, tc.want)
+		}
+	}
+}

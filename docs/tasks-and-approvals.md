@@ -111,10 +111,12 @@ channel rule and merges the current card. Choose the agent (or any agent), path
 globs, and a maximum number of changed lines. The channel's Members panel lists
 rules and lets you remove them. Only a human can manage rules.
 
-A rule applies only to a write run you asked for (never one a routine
-started, since a routine can act on a GitHub issue anyone can open) whose
-channel test command ran and passed; a channel without a test command never
-merges by rule. All changed paths must match its globs, and added plus
+A rule applies only to a write run started by a message you wrote yourself:
+never one a routine started, nor one another agent started by a mention or a
+handoff, since a routine can act on a GitHub issue anyone can open and pass
+it on. The channel's test command must have run and passed; a channel
+without a test command never merges by rule, and a command that always
+passes, such as `true`, makes the rule as loose as no check at all. All changed paths must match its globs, and added plus
 removed lines must be within the limit. An empty glob list allows any path,
 subject to the protected paths below. A trailing `/**` matches a directory
 and its contents; any other glob matches one path level, as in `path.Match`.

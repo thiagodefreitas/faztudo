@@ -126,9 +126,15 @@ func (a *App) applyApprovalRule(ctx context.Context, run domain.Run, persona str
 	if err != nil || len(rules) == 0 {
 		return
 	}
-	// A rule covers work the Director asked for. A routine run may come from
-	// a GitHub issue or pull request anyone can open, so it always waits.
-	if trigger, err := a.Store.Message(ctx, run.TriggerMessageID); err != nil || trigger.Routine != "" {
+	// A rule covers only work a human asked for directly. A routine run may
+	// come from a GitHub issue or pull request anyone can open, and an agent
+	// can pass such a request on by mention or handoff, so any run whose
+	// trigger a human did not write waits for the human.
+	trigger, err := a.Store.Message(ctx, run.TriggerMessageID)
+	if err != nil || trigger.Routine != "" || trigger.Handoff != nil {
+		return
+	}
+	if author, err := a.Store.Member(ctx, trigger.AuthorID); err != nil || author.Kind != domain.MemberHuman {
 		return
 	}
 	changed, stat, err := a.changedApprovalPaths(ctx, run)

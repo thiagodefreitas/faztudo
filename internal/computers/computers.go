@@ -331,8 +331,27 @@ func (m *Manager) Reset(ctx context.Context, id string) (Status, error) {
 	return status, err
 }
 
-// Tokens extracts credential values from the CLI's bound refresh files. It
-// never treats an arbitrary short JSON string as a secret.
+// secretKeys are parts of JSON key names that hold credentials.
+var secretKeys = []string{"token", "secret", "credential", "key", "password", "auth", "refresh", "access", "session", "cookie"}
+
+// secretLike reports whether a string in a credential file is worth scanning
+// for: a value of 20 or more characters under a credential-sounding key, or a
+// long opaque value (40 or more characters, no spaces or slashes) under any
+// key, since CLIs name their fields differently.
+func secretLike(key, value string) bool {
+	if len(value) < 20 {
+		return false
+	}
+	for _, part := range secretKeys {
+		if strings.Contains(key, part) {
+			return true
+		}
+	}
+	return len(value) >= 40 && !strings.ContainsAny(value, " /")
+}
+
+// Tokens extracts credential values from bound refresh files. It never
+// treats an arbitrary short JSON string as a secret.
 func Tokens(paths []string) [][]byte {
 	var values [][]byte
 	for _, path := range paths {
@@ -354,7 +373,7 @@ func Tokens(paths []string) [][]byte {
 						visit(v, key)
 					}
 				case string:
-					if len(x) >= 20 && (strings.Contains(key, "token") || strings.Contains(key, "secret") || strings.Contains(key, "credential") || strings.Contains(key, "api_key")) {
+					if secretLike(key, x) {
 						values = append(values, []byte(x))
 					}
 				}

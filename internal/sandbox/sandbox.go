@@ -693,6 +693,16 @@ func refreshPaths(home, cli string) []string {
 // computer they would let one run plant code that the next run's shell runs.
 var loginShellFiles = []string{".profile", ".bash_profile", ".bash_login", ".bashrc", ".bash_logout", ".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"}
 
+// AllRefreshPaths names the credential files of every supported CLI. A
+// computer is shared by a persona's lanes, so a scan looks for all of them.
+func AllRefreshPaths(home string) []string {
+	var paths []string
+	for _, cli := range []string{"claude", "codex", "grok", "kimi", "agy", "opencode"} {
+		paths = append(paths, refreshPaths(home, cli)...)
+	}
+	return paths
+}
+
 // RefreshPaths names the host credential files exposed to a write run.
 func RefreshPaths(home, cli string) []string { return refreshPaths(home, cli) }
 

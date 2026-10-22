@@ -1045,7 +1045,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 		// Scan at the start too: a run killed before its end scan may have
 		// left a credential copy for this one to read (ADR 0006).
 		if hostHome, herr := os.UserHomeDir(); herr == nil {
-			removed, scanErr := a.Computers.Scan(agent.Handle, computers.Tokens(sandbox.RefreshPaths(hostHome, lane.CLI)))
+			removed, scanErr := a.Computers.Scan(agent.Handle, computers.Tokens(sandbox.AllRefreshPaths(hostHome)))
 			if scanErr != nil {
 				return fmt.Errorf("@%s computer credential scan: %w", agent.Handle, scanErr)
 			}
@@ -1190,7 +1190,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			var boundTokens [][]byte
 			if computerHome != "" {
 				if hostHome, homeErr := os.UserHomeDir(); homeErr == nil {
-					boundTokens = computers.Tokens(sandbox.RefreshPaths(hostHome, lane.CLI))
+					boundTokens = computers.Tokens(sandbox.AllRefreshPaths(hostHome))
 				}
 			}
 			err = a.Runner.ExecuteWrite(runCtx, &run, adapter, req, runner.WriteOptions{
@@ -1201,7 +1201,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			})
 			if computerHome != "" {
 				if hostHome, homeErr := os.UserHomeDir(); homeErr == nil {
-					boundTokens = append(boundTokens, computers.Tokens(sandbox.RefreshPaths(hostHome, lane.CLI))...)
+					boundTokens = append(boundTokens, computers.Tokens(sandbox.AllRefreshPaths(hostHome))...)
 				}
 				removed, scanErr := a.Computers.Scan(agent.Handle, boundTokens)
 				if removed > 0 {
@@ -1440,7 +1440,7 @@ func (a *App) recoveredFinished(ctx context.Context, run domain.Run) error {
 	}
 	if run.Mode == domain.RunWrite && a.Computers != nil && a.Computers.Enabled {
 		if home, homeErr := os.UserHomeDir(); homeErr == nil {
-			removed, scanErr := a.Computers.Scan(agent.Handle, computers.Tokens(sandbox.RefreshPaths(home, lane.CLI)))
+			removed, scanErr := a.Computers.Scan(agent.Handle, computers.Tokens(sandbox.AllRefreshPaths(home)))
 			if removed > 0 {
 				a.notice(ctx, run.ChannelID, "warn", fmt.Sprintf("Removed %d credential copies from @%s's computer.", removed, agent.Handle))
 			}

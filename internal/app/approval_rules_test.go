@@ -63,7 +63,8 @@ func TestApprovalRuleAutoMergeAndFailedMerge(t *testing.T) {
 		lineCap       bool
 		symlink       bool
 		routine       bool
-	}{{name: "merge"}, {name: "failed merge", branchChanged: true}, {name: "fresh line cap", lineCap: true}, {name: "symlink", symlink: true}, {name: "routine run", routine: true}} {
+		byAgent       bool
+	}{{name: "merge"}, {name: "failed merge", branchChanged: true}, {name: "fresh line cap", lineCap: true}, {name: "symlink", symlink: true}, {name: "routine run", routine: true}, {name: "agent mention", byAgent: true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newTaskFixture(t)
 			ctx := context.Background()
@@ -120,6 +121,9 @@ func TestApprovalRuleAutoMergeAndFailedMerge(t *testing.T) {
 			if tc.routine {
 				trigger.Routine = "pr-watch"
 			}
+			if tc.byAgent {
+				trigger.AuthorID = f.coder.ID // an agent asked, as a routine's agent could
+			}
 			if _, err := f.s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: channel.ID, Payload: trigger}); err != nil {
 				t.Fatal(err)
 			}
@@ -139,7 +143,7 @@ func TestApprovalRuleAutoMergeAndFailedMerge(t *testing.T) {
 				t.Fatalf("approvals %+v %v", approvals, err)
 			}
 			want := domain.ApprovalResolved
-			if tc.branchChanged || tc.lineCap || tc.symlink || tc.routine {
+			if tc.branchChanged || tc.lineCap || tc.symlink || tc.routine || tc.byAgent {
 				want = domain.ApprovalPending
 			}
 			if approvals[0].State != want {

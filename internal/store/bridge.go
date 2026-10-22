@@ -102,6 +102,13 @@ func (s *Store) SetBridgeAgentPolicy(ctx context.Context, bridge, conversation, 
 
 // ClaimBridgeDelivery makes an approved draft an at-most-once send. A crash
 // after claiming may leave it undelivered, but cannot publish it twice.
+// ReleaseBridgeDelivery drops a claim whose send failed, so a later replay
+// of the same approval can try again instead of finding it claimed.
+func (s *Store) ReleaseBridgeDelivery(ctx context.Context, bridge, key string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM bridge_delivery WHERE bridge=? AND delivery_key=?", bridge, key)
+	return err
+}
+
 func (s *Store) ClaimBridgeDelivery(ctx context.Context, bridge, key string) (bool, error) {
 	result, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO bridge_delivery(bridge,delivery_key) VALUES(?,?)", bridge, key)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -423,12 +424,24 @@ func (c *Conn) pump(ctx context.Context, cursor *int64) error {
 }
 
 func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channel string) error {
-	if strings.HasPrefix(string(e.Actor), "agent:") && (e.Type == events.MessagePosted || e.Type == events.ApprovalRequested) {
+	// Approval cards (merge cards included, which the system posts for an
+	// agent's run) reach a Signal conversation only when agent messages may
+	// go there unasked; with draft or off they stay in faztudo.
+	if e.Type == events.ApprovalRequested {
 		policy, err := c.handler.Store.BridgeAgentPolicy(ctx, "signal", conversation, channel)
 		if err != nil {
 			return err
 		}
-		if policy == "off" || e.Type == events.ApprovalRequested && policy == "draft" {
+		if policy != "send" {
+			return nil
+		}
+	}
+	if strings.HasPrefix(string(e.Actor), "agent:") && e.Type == events.MessagePosted {
+		policy, err := c.handler.Store.BridgeAgentPolicy(ctx, "signal", conversation, channel)
+		if err != nil {
+			return err
+		}
+		if policy == "off" {
 			return nil
 		}
 		if policy == "draft" {
@@ -445,7 +458,7 @@ func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channe
 			approval := domain.Approval{
 				ID: store.NewID(), ChannelID: channel, RequestedBy: m.AuthorID,
 				Title:       title,
-				Detail:      "An agent wants to send this message to " + conversation + ".",
+				Detail:      draftDetail(conversation, len(m.Attachments)),
 				Options:     []domain.ApprovalOption{{Key: "send", Label: "Send", Style: "primary"}, {Key: "edit_send", Label: "Edit and send"}, {Key: "dont_send", Label: "Don't send"}},
 				State:       domain.ApprovalPending,
 				SignalDraft: &domain.SignalDraft{Conversation: conversation, MessageID: m.ID, Text: m.Body, Recipients: recipients, Attachments: m.Attachments},
@@ -459,14 +472,23 @@ func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channe
 		return nil
 	}
 	approvedDraft := e.Type == events.ApprovalResolved && outbound.Ref.MessageID != ""
+	claimKey := "draft:" + conversation + ":" + outbound.Ref.MessageID
+	sent := false
 	if approvedDraft {
-		claimed, err := c.handler.Store.ClaimBridgeDelivery(ctx, "signal", "draft:"+conversation+":"+outbound.Ref.MessageID)
+		claimed, err := c.handler.Store.ClaimBridgeDelivery(ctx, "signal", claimKey)
 		if err != nil {
 			return err
 		}
 		if !claimed {
 			return nil
 		}
+		defer func() {
+			if !sent {
+				if err := c.handler.Store.ReleaseBridgeDelivery(context.Background(), "signal", claimKey); err != nil {
+					slog.Warn("signal bridge: releasing a failed draft claim", "error", err)
+				}
+			}
+		}()
 	}
 	if err := c.attachments(&outbound, e); err != nil {
 		slog.Warn("signal bridge: attachment", "event", e.Seq, "error", err)
@@ -511,11 +533,22 @@ func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channe
 		c.skipped(ctx, e, "the bridge did not accept it")
 		return nil
 	}
+	sent = true
 	ref := store.BridgeOutbound{ExternalID: result.ExternalID, MessageID: outbound.Ref.MessageID, ApprovalID: outbound.Ref.ApprovalID}
 	if err := c.recordOutbound(ctx, ref); err != nil {
 		slog.Warn("signal bridge: recording outbound", "event", e.Seq, "error", err)
 	}
 	return nil
+}
+
+// draftDetail says where a drafted agent message would go, and that its files
+// go with it unchanged, also after Edit and send.
+func draftDetail(conversation string, files int) string {
+	text := "An agent wants to send this message to " + conversation + "."
+	if files > 0 {
+		text += fmt.Sprintf(" Its %d attached file(s) go with it as they are, also after Edit and send; choose Don't send to keep them here.", files)
+	}
+	return text
 }
 
 // skipped tells the channel that one message did not reach Signal.
