@@ -1,9 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react"
 import { ApiError, api } from "../api/client"
 import { formatSize } from "../lib/files"
+import { appendDictation } from "../lib/dictation"
 import { applyMention, filterMembers, mentionQuery } from "../lib/mentions"
 import { parseTaskCommand } from "../lib/tasks"
 import type { Attachment, Member } from "../types"
+import { DictationButton } from "./dictation-button"
 
 interface Upload {
   key: string
@@ -366,6 +368,7 @@ export function Composer({
             onSelect={(event) => sync(event.currentTarget)}
           />
         </label>
+        <DictationButton onText={(words) => setText((current) => appendDictation(current, words))} />
         <button
           type="submit"
           aria-label="Send"
