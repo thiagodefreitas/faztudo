@@ -26,6 +26,15 @@ const (
 	debriefIntro          = "Write the daily debrief for the Director. Use only the facts below and invent nothing. Keep it short: what ran, what merged, what failed, which approvals are waiting, and how the lanes are doing."
 )
 
+// scoutPrompt is what the scout routine asks when its configuration gives no
+// prompt of its own.
+const scoutPrompt = "You are the scout. Look for concrete problems in this project and file them as suggestions with the suggest tool. " +
+	"Read the repository, the recent CI failures and the open issues, using read-only commands only (git log, git grep, ls, cat, gh run list, gh issue list, gh issue view). Change nothing and run nothing that writes. " +
+	"Look for: failing tests, flaky jobs, TODOs that block work, stale issues with a clear fix, and docs that contradict the code. " +
+	"File at most 5 suggestions. Each has a title of up to 120 characters, a detail that says why it matters and what a fix looks like, and evidence: links or file:line references. " +
+	"Skip anything you cannot back with evidence, and skip anything the lessons above tell you not to suggest. Finding nothing is a fine result: file nothing and say so in one line. " +
+	"Do not create tasks, approvals or messages for the findings; the suggest tool is the only way to report them."
+
 // routineEngine runs the routines: on a schedule, and when a human posts in a
 // channel that a routine watches. The routines themselves live in the store;
 // the engine only keeps when each one runs next.
@@ -291,6 +300,9 @@ func (e *routineEngine) plan(ctx context.Context, r domain.Routine) (routinePlan
 	if agent.Agent != nil && agent.Agent.Mode != "" {
 		mode = agent.Agent.Mode
 	}
+	if r.Template == "scout" && mode != domain.RunRead {
+		return p, "the scout is read-only, but @" + agent.Handle + " writes"
+	}
 	lane, left, err := a.Registry.PickFit(agent.Handle, "", a.laneUnfit(mode))
 	switch {
 	case err != nil && !lanes.Busy(left):
@@ -327,6 +339,9 @@ func (e *routineEngine) start(ctx context.Context, r domain.Routine) error {
 // routine's handle on the message, and waits for the agent to finish.
 func (e *routineEngine) run(ctx context.Context, r domain.Routine, p routinePlan, data string) {
 	body := strings.TrimSpace(r.Prompt)
+	if body == "" && r.Template == "scout" {
+		body = scoutPrompt
+	}
 	if body == "" {
 		body = "Write the daily debrief."
 	}

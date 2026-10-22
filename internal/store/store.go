@@ -446,7 +446,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "approval_rules", "lanes", "org", "lane_usage_history", "channel_summaries", "pins", "tasks", "lessons", "app_routines"} {
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "approval_rules", "lanes", "org", "lane_usage_history", "channel_summaries", "pins", "tasks", "lessons", "app_routines", "suggestions"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -514,6 +514,16 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 			return errors.New("lesson id required")
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM lessons WHERE id=? AND channel_id=?", lesson.ID, lesson.ChannelID)
+		return err
+	case events.SuggestionCreated, events.SuggestionResolved:
+		var v domain.Suggestion
+		if err := json.Unmarshal(e.Payload, &v); err != nil {
+			return err
+		}
+		if v.ID == "" || v.ChannelID == "" || v.Persona == "" || v.Title == "" {
+			return errors.New("suggestion needs id, channel, persona and title")
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO suggestions(id,channel_id,run_id,state,created_at,data) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,data=excluded.data", v.ID, v.ChannelID, v.RunID, string(v.State), v.CreatedAt.Format(time.RFC3339Nano), e.Payload)
 		return err
 	case events.ApprovalRuleCreated:
 		var rule domain.ApprovalRule

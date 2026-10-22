@@ -58,6 +58,17 @@ export function useLessons() {
   })
 }
 
+// The open suggestions of the scout. The stream keeps the cache current (see
+// state/cache.ts); a resolved one stays in the cache until the next fetch, so
+// readers filter on the state.
+export function useSuggestions() {
+  const qc = useQueryClient()
+  return useQuery({
+    queryKey: qk.suggestions,
+    queryFn: async () => mergeById(await api.suggestions("open"), qc.getQueryData(qk.suggestions) ?? []),
+  })
+}
+
 export function useRoutines() {
   return useQuery({ queryKey: qk.routines, queryFn: () => api.routines() })
 }

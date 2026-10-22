@@ -391,6 +391,8 @@ export type EventType =
   | "routine.cursor"
   | "task.created"
   | "task.updated"
+  | "suggestion.created"
+  | "suggestion.resolved"
   | "handoff.created"
   | "notice"
 
@@ -527,7 +529,7 @@ export interface Routine {
   channel: string
   schedule?: string
   trigger?: "message" | "ci_failed" | "issue_opened" | "pr_opened"
-  template?: "debrief"
+  template?: "debrief" | "scout"
   enabled: boolean
   /** "config" for a routine in lanes.toml, "app" for one made in the app; only an app routine can be deleted. */
   source: RoutineSource
@@ -566,6 +568,30 @@ export interface LessonCreate {
 export interface LessonPatch {
   text?: string
   channel_id?: ID | ""
+}
+
+export type SuggestionState = "open" | "accepted" | "dismissed"
+
+/** Something a scout run found. It changes nothing until the Director makes a task of it or dismisses it. */
+export interface Suggestion {
+  id: ID
+  channel_id: ID
+  /** The handle of the agent that filed it. */
+  persona: string
+  run_id?: ID
+  title: string
+  /** Markdown, up to 2000 characters. */
+  detail: string
+  /** Links or file:line references. */
+  evidence: string[]
+  state: SuggestionState
+  created_at: string
+  resolved_by?: ID
+  resolved_at?: string
+  /** Set once accepted: the task it became. */
+  task_id?: ID
+  /** Set when dismissed with a reason. */
+  reason?: string
 }
 
 /** POST /routines. The persona is an agent handle and the channel a channel name. */

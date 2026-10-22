@@ -112,7 +112,7 @@ func channelToolHints() *sdkmcp.ToolAnnotations {
 	return &sdkmcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: &closed, OpenWorldHint: &closed}
 }
 
-func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
+func (h *Handler) addTools(ctx context.Context, server *sdkmcp.Server, grant Grant) {
 	hints := channelToolHints()
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "post_message",
@@ -180,6 +180,17 @@ func (h *Handler) addTools(server *sdkmcp.Server, grant Grant) {
 		out, err := h.listHandoffs(ctx, grant)
 		return nil, out, err
 	})
+	// Only a scout run sees suggest. The tool checks again when it is called.
+	if h.scoutRun(ctx, grant) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "suggest",
+			Description: "File a suggestion for the Director: a concrete problem with a title, a short explanation and evidence (links or file:line). At most 5 per run. It creates no task, message or approval and does not modify the work tree.",
+			Annotations: hints,
+		}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in suggestIn) (*sdkmcp.CallToolResult, suggestOut, error) {
+			out, err := h.suggest(ctx, grant, in)
+			return nil, out, err
+		})
+	}
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "delegate",
 		Description: delegateDescription,

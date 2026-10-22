@@ -275,6 +275,36 @@ type ApprovalResolution struct {
 	Note   string    `json:"note,omitempty"`
 }
 
+// SuggestionState is where a scout suggestion stands.
+type SuggestionState string
+
+const (
+	SuggestionOpen      SuggestionState = "open"
+	SuggestionAccepted  SuggestionState = "accepted"
+	SuggestionDismissed SuggestionState = "dismissed"
+)
+
+// Suggestion is something a scout run found and filed for the Director. It
+// changes nothing by itself: the Director turns it into a task or dismisses
+// it. Evidence is a list of links or file:line references. TaskID is the task
+// an accepted suggestion became; Reason is why it was dismissed, if the
+// Director said.
+type Suggestion struct {
+	ID         ID              `json:"id"`
+	ChannelID  ID              `json:"channel_id"`
+	Persona    string          `json:"persona"`
+	RunID      ID              `json:"run_id,omitempty"`
+	Title      string          `json:"title"`
+	Detail     string          `json:"detail"`
+	Evidence   []string        `json:"evidence"`
+	State      SuggestionState `json:"state"`
+	CreatedAt  time.Time       `json:"created_at"`
+	ResolvedBy ID              `json:"resolved_by,omitempty"`
+	ResolvedAt *time.Time      `json:"resolved_at,omitempty"`
+	TaskID     ID              `json:"task_id,omitempty"`
+	Reason     string          `json:"reason,omitempty"`
+}
+
 type ApprovalRule struct {
 	ID        string    `json:"id"`
 	ChannelID string    `json:"channel_id"`

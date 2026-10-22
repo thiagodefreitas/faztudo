@@ -83,6 +83,27 @@ The card stays pending and says why, so you can fix it and try again:
 See also [Using faztudo](https://github.com/thiagodefreitas/faztudo/blob/main/docs/wiki/Using-faztudo.md)
 and the [API](api.md) for the task and approval endpoints.
 
+## Suggestions from the scout
+
+The inbox also has a **Suggestions** section when a scout routine has filed
+something (see [the scout](organization.md#the-scout)). A suggestion is not an
+approval: nothing is waiting on it, and no run is blocked. Each row shows the
+title, the agent that found it, its channel and its age. Open it to read the
+detail and follow the evidence links.
+
+- **Make a task** creates a task in the suggestion's channel and marks the
+  suggestion accepted. The title is the suggestion's title, and the directive
+  is its detail followed by the evidence list. The task goes to the end of
+  Todo, assigned to the agent that filed it unless the request names another,
+  in read mode. Nothing starts until you start it from the board. Accepting
+  twice makes one task.
+- **Dismiss** closes the suggestion. The optional reason is saved as the lesson
+  "Do not suggest: <reason>" for that agent in the suggestion's channel, and the
+  dismiss field says so. With no reason, no lesson is made.
+
+Only a human can read or resolve suggestions through the API. See
+[api](api.md#endpoints).
+
 ## Approval rules
 
 On a write run's merge card, **Always merge changes like this here** saves a

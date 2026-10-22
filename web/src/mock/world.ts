@@ -40,6 +40,7 @@ import type {
   Lesson,
   LessonCreate,
   LessonPatch,
+  Suggestion,
   Routine,
   RoutineCreate,
   Run,
@@ -130,6 +131,7 @@ export class MockWorld {
       updated_at: "2026-10-21T16:10:00Z",
     },
   ]
+  private suggestions: Suggestion[] = []
   private routines: Routine[] = [
     {
       handle: "daily-debrief",
@@ -142,11 +144,45 @@ export class MockWorld {
       enabled: false,
       source: "config",
     },
+    {
+      handle: "weekday-scout",
+      name: "Weekday scout",
+      prompt: "",
+      persona: "reviewer",
+      channel: "faztudo-dev",
+      schedule: "0 8 * * 1-5",
+      template: "scout",
+      enabled: false,
+      source: "config",
+    },
   ]
 
   constructor(private readonly clock: Clock) {
     const minute = 60_000
     const now = clock.now()
+    // Two open suggestions from the weekday scout, for the inbox.
+    this.suggestions = [
+      {
+        id: IDS.suggestFlaky,
+        channel_id: IDS.dev,
+        persona: "reviewer",
+        title: "Fix the flaky stream reconnect test",
+        detail: "`stream.test.ts` failed in 3 of the last 10 CI runs with a timeout in the reconnect case.\n\nThe test waits a fixed 50 ms; waiting for the reconnect event instead would remove the race.",
+        evidence: ["web/src/api/stream.test.ts:88", "https://github.com/example/faztudo/actions/runs/1001"],
+        state: "open",
+        created_at: iso(now - 3 * 60 * minute),
+      },
+      {
+        id: IDS.suggestDocs,
+        channel_id: IDS.dev,
+        persona: "reviewer",
+        title: "Docs and code disagree on the daily routine limit",
+        detail: "`docs/configuration.md` gives a different default than `defaultRoutinesPerDay`. One of them is out of date.",
+        evidence: ["docs/configuration.md:212", "internal/app/routines.go:21"],
+        state: "open",
+        created_at: iso(now - 26 * 60 * minute),
+      },
+    ]
     this.me = {
       id: IDS.ada,
       kind: "human",
@@ -632,6 +668,61 @@ export class MockWorld {
     }
     found.updated_at = iso(this.clock.now())
     this.emit("lesson.updated", found.channel_id || undefined, found, `human:${this.me.id}`)
+    return ok(structuredClone(found))
+  }
+
+  // Suggestions newest first, like the daemon lists them.
+  getSuggestions(state?: string): Suggestion[] {
+    return structuredClone(
+      this.suggestions
+        .filter((item) => !state || item.state === state)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    )
+  }
+
+  // Makes a task in Todo from the suggestion and marks it accepted, as the daemon does.
+  acceptSuggestion(id: ID, assignee?: string): Result<Suggestion> {
+    const found = this.suggestions.find((item) => item.id === id)
+    if (!found) return err(404, "not_found", "suggestion not found")
+    if (found.state !== "open") return err(409, "conflict", `suggestion is already ${found.state}`)
+    const handle = (assignee ?? "").trim().replace(/^@/, "") || found.persona
+    if (!this.members.some((item) => item.kind === "agent" && item.handle === handle)) return err(400, "bad_request", `agent @${handle} does not exist`)
+    const at = iso(this.clock.now())
+    const body = `${found.detail}\n\nEvidence:\n${found.evidence.map((item) => `- ${item}`).join("\n")}`
+    const task: Task = {
+      id: ulid(this.clock.now()),
+      channel_id: found.channel_id,
+      title: found.title,
+      body,
+      assignee: handle,
+      mode: "read",
+      scope: [],
+      checks: [],
+      acceptance: [],
+      status: "todo",
+      order: this.tasks.reduce((top, item) => Math.max(top, item.order), 0) + 1,
+      run_ids: [],
+      created_by: this.me.id,
+      created_at: at,
+      updated_at: at,
+    }
+    this.tasks.push(task)
+    this.emit("task.created", task.channel_id, task, `human:${this.me.id}`)
+    Object.assign(found, { state: "accepted", resolved_by: this.me.id, resolved_at: at, task_id: task.id })
+    this.emit("suggestion.resolved", found.channel_id, found, `human:${this.me.id}`)
+    return ok(structuredClone(found))
+  }
+
+  // A dismissal with a reason also teaches the persona a lesson.
+  dismissSuggestion(id: ID, reason?: string): Result<Suggestion> {
+    const found = this.suggestions.find((item) => item.id === id)
+    if (!found) return err(404, "not_found", "suggestion not found")
+    if (found.state !== "open") return err(409, "conflict", `suggestion is already ${found.state}`)
+    const why = (reason ?? "").trim().replace(/\s+/g, " ")
+    if ([...why].length > 400) return err(400, "bad_request", "reason must be at most 400 characters")
+    Object.assign(found, { state: "dismissed", resolved_by: this.me.id, resolved_at: iso(this.clock.now()), ...(why ? { reason: why } : {}) })
+    this.emit("suggestion.resolved", found.channel_id, found, `human:${this.me.id}`)
+    if (why) this.createLesson({ persona: found.persona, text: `Do not suggest: ${why}`, channel_id: found.channel_id })
     return ok(structuredClone(found))
   }
 

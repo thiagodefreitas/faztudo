@@ -388,6 +388,9 @@ interface NoticeAction {
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
 | POST | `/api/v1/approvals/{id}/resolve` | `{option, commit_message?}`; humans only. An unknown approval is 404. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message. A merge stores the short id of the new commit in `resolution.note`, which the approvals inbox shows as "Merged as <id>" |
+| GET | `/api/v1/suggestions?state=&channel_id=` | scout suggestions, newest first, optionally only `open`, `accepted` or `dismissed` and one channel; humans only (403 for an agent); suggestions in channels the caller cannot see are omitted; 400 for another state |
+| POST | `/api/v1/suggestions/{id}/accept` | humans only. Optional `{assignee?}` (an agent handle, default the agent that filed it). Makes a Todo task in the suggestion's channel from its title, detail and evidence, marks it `accepted` with `task_id`, and returns the `Suggestion` (200). 404 for an unknown or unseen suggestion, 409 if it is no longer open, 400 if the task is refused (for example an unknown assignee; the suggestion stays open). Emits `task.created` and `suggestion.resolved` |
+| POST | `/api/v1/suggestions/{id}/dismiss` | humans only. Optional `{reason?}` (up to 400 characters, spaces collapsed). Marks it `dismissed` (200 with the `Suggestion`); a non-empty reason also adds the lesson `Do not suggest: <reason>` for the agent in the suggestion's channel (`lesson.added`). 404 and 409 as for accept. Emits `suggestion.resolved` |
 | GET | `/api/v1/approval-rules?channel_id=` | list visible approval rules, newest first; humans only, agents get 403; private channel rules are hidden from nonmembers |
 | POST | `/api/v1/approval-rules` | create `{channel_id, persona?, paths?, max_lines}`; humans only; `max_lines` is 1 to 2000, paths use `path.Match` globs or a trailing `/**` directory glob; 201 with the rule, 400 for invalid input, 404 for an unseen channel; emits `approval_rule.created` |
 | DELETE | `/api/v1/approval-rules/{id}` | remove a visible rule; humans only; 204, or 404 for an unknown or unseen rule; emits `approval_rule.removed` |
@@ -474,6 +477,8 @@ Event types in version 1:
 | `project.updated` | `Project` (sent when the Director creates a project or changes its fields or assignments) |
 | `routine.updated` | `Routine` (sent when it is made, switched or has run) |
 | `routine.removed` | `{handle}` (sent when an app routine is deleted) |
+| `suggestion.created` | `Suggestion` (state `open`); actor is the scout agent that filed it, through the `suggest` MCP tool. Carries the suggestion's `channel_id` |
+| `suggestion.resolved` | `Suggestion` with `state` `accepted` or `dismissed`, `resolved_by`, `resolved_at`, and `task_id` or `reason`; actor is the authenticated human |
 | `task.created`, `task.updated` | `Task` (the whole task, sent when it is created, edited, started or reported on by a run or an approval) |
 | `handoff.created` | `Handoff` plus `message_id` |
 | `notice` | `{level: "info" or "warn" or "error", text, action?: NoticeAction}` |

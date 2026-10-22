@@ -415,10 +415,11 @@ Unset, a Claude write run may use `Bash(go test:*)`, `Bash(go vet:*)`,
 `Bash(gh issue view:*)`. Setting the field replaces that list, and
 `allowed_tools = []` allows none. Read runs have no default list. Whenever
 faztudo passes its MCP endpoint, every Claude run, read or write, also allows
-the nine faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
+the ten faztudo tools (`mcp__faztudo__post_message`, `ask_human`,
 `request_approval`, `read_context`, `list_members`, `delegate`,
-`read_thread`, `search_messages`, `list_handoffs`); that is not
-configurable.
+`read_thread`, `search_messages`, `list_handoffs`, `suggest`); that is not
+configurable. The server only offers `suggest` to runs started by a scout
+routine (see [organization](organization.md#the-scout)).
 
 Claude read runs do not use plan mode, which makes the model write a plan
 file under `~/.claude/plans` and answer with the plan instead of calling

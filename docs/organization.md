@@ -30,6 +30,7 @@ way to the right agent.
 | Repeat this: "Repeat this" on a finished answer opens a dialog (request, persona, channel, schedule presets or a cron expression with the next run time) and saves a routine in the database; the Routines page shows where each one comes from and deletes the ones made in the app | built |
 | `faztudo init --template solo\|team\|empty` | built |
 | A lead or the Chief of Staff collecting delegated results into one combined answer | built; a read-only follow-up starts when the parent and all pieces finish, including failed, refused and never-started pieces; the follow-up uses the request budget; none for all-refused, retried or pre-version requests |
+| The scout: a read-only routine (`template = "scout"`) that files up to 5 suggestions per run with evidence; the inbox lists them with Make a task and Dismiss, and a dismissal reason becomes a lesson for the scout | built; shipped switched off in the team template; not tried against a live agent |
 | GitHub routine triggers for failing CI, new issues and new pull requests through the local `gh` CLI | built; one poll per repository interval, event-log cursors and five items per poll per routine |
 | Working groups, drag-to-assign, lane budgets shared across projects, deleting a project from the app | not built, next pass |
 | A project's `repo_path` choosing where runs happen | not built: runs use the channel's `repo_path` |
@@ -151,6 +152,58 @@ signed-in `gh` CLI, records a cursor on the first successful poll without
 running old items, and runs once for each later item, subject to the daily cap
 and lane guards. The Routines page shows the repository, last poll and result.
 Repeat this still creates scheduled routines only.
+
+### The scout
+
+The scout is a routine with `template = "scout"` that looks for problems and
+never acts on them. On its schedule it reads the repository, recent CI failures
+and open issues with read-only commands, and files up to 5 suggestions with
+the `suggest` tool. Each suggestion has a title (up to 120 characters), a
+detail in markdown (up to 2000), and evidence: links or `file:line`
+references. Finding nothing is a fine result. The scout looks for failing
+tests, flaky jobs, TODOs that block work, stale issues with a clear fix, and
+docs that contradict the code.
+
+What the scout cannot do:
+
+- It does not create tasks, messages or approvals. A suggestion is a record in
+  the **Suggestions** section of the inbox and nothing else.
+- It runs in read mode, on a lane with a read-only mode. A persona with
+  `mode = "write"` is refused when lanes.toml loads and when the routine runs.
+- `suggest` exists only in runs that a scout routine started. The server checks
+  this from the run's trigger message, so another agent or a human request
+  cannot call it. One run files at most 5; the sixth call is refused.
+
+You decide in the inbox. Open a suggestion to read the detail and follow the
+evidence, then:
+
+- **Make a task** creates a task in the suggestion's channel from it (title,
+  detail and evidence), in Todo and assigned to the scout persona unless you
+  pick another, and marks the suggestion accepted. Nothing runs until you start
+  the task; see [tasks and approvals](tasks-and-approvals.md#suggestions-from-the-scout).
+- **Dismiss** closes it. If you give a reason, faztudo also saves the lesson
+  "Do not suggest: <reason>" for the scout persona in that channel, so later
+  scout runs skip it. Without a reason nothing is taught.
+
+The team template ships a `weekday-scout` routine, switched off, for the
+reviewer at 08:00 on weekdays in #general. To use it, switch it on in the app
+(Routines page) or set `enabled = true` in lanes.toml. For a routine of your
+own:
+
+```toml
+[[routine]]
+handle = "weekday-scout"
+persona = "reviewer"        # a read-only persona
+channel = "general"         # the channel its suggestions belong to
+schedule = "0 8 * * 1-5"
+template = "scout"          # no prompt needed; add one to replace the default
+enabled = true
+```
+
+CI and issues come from the signed-in `gh` CLI. A Claude read run has no shell
+unless the lane's `allowed_tools` lists commands such as `Bash(gh run list:*)`,
+`Bash(gh issue list:*)`, `Bash(gh issue view:*)` and `Bash(git log:*)`; without
+them the scout reads files only.
 
 ## Templates
 

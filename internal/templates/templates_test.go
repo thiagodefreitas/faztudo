@@ -81,13 +81,19 @@ func TestTeamTemplate(t *testing.T) {
 }
 
 func TestTemplateRoutinesShipSwitchedOff(t *testing.T) {
-	for _, name := range []string{"solo", "team"} {
+	want := map[string][]string{"solo": {"debrief"}, "team": {"debrief", "scout"}}
+	for name, templates := range want {
 		c := load(t, name)
-		if len(c.Lanes.Routine) != 1 || c.Lanes.Routine[0].Template != "debrief" {
+		if len(c.Lanes.Routine) != len(templates) {
 			t.Fatalf("%s routines %+v", name, c.Lanes.Routine)
 		}
-		if on := c.Lanes.Routine[0].Enabled; on == nil || *on {
-			t.Errorf("%s: the debrief should ship switched off", name)
+		for i, r := range c.Lanes.Routine {
+			if r.Template != templates[i] {
+				t.Fatalf("%s routine %d is %q, want %q", name, i, r.Template, templates[i])
+			}
+			if r.Enabled == nil || *r.Enabled {
+				t.Errorf("%s: the %s routine should ship switched off", name, r.Template)
+			}
 		}
 	}
 }

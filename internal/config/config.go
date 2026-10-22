@@ -122,6 +122,8 @@ type Persona struct {
 // Routine is a prompt that runs on a schedule or when a human posts in the
 // channel. Exactly one of Schedule (a cron expression) and Trigger ("message")
 // is set. Template "debrief" adds facts about the last day to the prompt.
+// Template "scout" gives the run a default prompt and the suggest tool; it
+// needs a read-only agent.
 type Routine struct {
 	Handle   string `toml:"handle"`
 	Name     string `toml:"name"`
@@ -408,8 +410,15 @@ func (c Config) validateRoutines(agents map[string]bool) error {
 		if strings.TrimSpace(r.Prompt) == "" && r.Template == "" {
 			return fmt.Errorf("routine[%d].prompt: required unless a template is set", i)
 		}
-		if r.Template != "" && r.Template != "debrief" {
-			return fmt.Errorf("routine[%d].template: unknown template %q (use debrief)", i, r.Template)
+		if r.Template != "" && r.Template != "debrief" && r.Template != "scout" {
+			return fmt.Errorf("routine[%d].template: unknown template %q (use debrief or scout)", i, r.Template)
+		}
+		if r.Template == "scout" {
+			for _, p := range c.Lanes.Persona {
+				if p.Handle == r.Persona && p.Mode == "write" {
+					return fmt.Errorf("routine[%d].persona: the scout is read-only, but %s writes", i, r.Persona)
+				}
+			}
 		}
 		switch {
 		case r.Schedule != "" && r.Trigger != "":

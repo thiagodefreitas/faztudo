@@ -80,3 +80,17 @@ channel = "general"
 schedule = "0 18 * * 1-5"
 template = "debrief"
 enabled = false
+
+# A read-only scout: the reviewer reads the repository, recent CI failures and
+# open issues on weekdays at 08:00 and files up to 5 suggestions, which show
+# in the Suggestions section of the inbox. It never acts by itself. It needs
+# a read-only persona and, for CI and issues, a signed-in 'gh'. Switch it on
+# in the app on the Routines page, or set enabled = true here.
+[[routine]]
+handle = "weekday-scout"
+name = "Weekday scout"
+persona = "reviewer"
+channel = "general"
+schedule = "0 8 * * 1-5"
+template = "scout"
+enabled = false

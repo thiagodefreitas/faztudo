@@ -15,6 +15,7 @@ export const qk = {
   routines: ["routines"] as const,
   lessons: ["lessons"] as const,
   tasks: ["tasks"] as const,
+  suggestions: ["suggestions"] as const,
   summary: (channelId: string) => ["summary", channelId] as const,
   notices: ["notices"] as const,
   seq: ["seq"] as const,

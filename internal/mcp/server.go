@@ -99,7 +99,7 @@ func (h *Handler) serverFor(r *http.Request) *sdkmcp.Server {
 		Instructions: "Tools act only in this run's channel, as this run's agent. request_approval creates a pending request. delegate hands work to another agent and works only for the Chief of Staff and department leads. No tool resolves an approval.",
 		Logger:       slog.New(slog.DiscardHandler),
 	})
-	h.addTools(server, grant)
+	h.addTools(r.Context(), server, grant)
 	return server
 }
 

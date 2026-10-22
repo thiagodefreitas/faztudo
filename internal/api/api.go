@@ -58,6 +58,7 @@ type API struct {
 	// Tasks lists, starts and cancels task directives. OnApproval is called
 	// after a human decided an approval, so a task can follow it.
 	Tasks             TaskControl
+	suggestionMu      sync.Mutex // one accept or dismiss at a time
 	OnApproval        func(context.Context, domain.Approval)
 	ResolveApproval   func(ctx context.Context, approval domain.Approval, option, commitMessage string) (string, error)
 	ReadDiff          func(string) ([]byte, error)
@@ -190,6 +191,9 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("GET /api/v1/approval-rules", a.listApprovalRules)
 	m.HandleFunc("POST /api/v1/approval-rules", a.createApprovalRule)
 	m.HandleFunc("DELETE /api/v1/approval-rules/{id}", a.deleteApprovalRule)
+	m.HandleFunc("GET /api/v1/suggestions", a.listSuggestions)
+	m.HandleFunc("POST /api/v1/suggestions/{id}/accept", a.acceptSuggestion)
+	m.HandleFunc("POST /api/v1/suggestions/{id}/dismiss", a.dismissSuggestion)
 	m.HandleFunc("GET /api/v1/channels/{id}/compares", a.compares)
 	m.HandleFunc("POST /api/v1/channels/{id}/compares/{compare}/decide", a.decideCompare)
 	m.HandleFunc("GET /api/v1/lanes", a.lanes)

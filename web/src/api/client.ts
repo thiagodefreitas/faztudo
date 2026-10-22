@@ -42,6 +42,8 @@ import type {
   Run,
   RunState,
   SearchHit,
+  Suggestion,
+  SuggestionState,
   Task,
   TaskInput,
   TaskPatch,
@@ -110,6 +112,9 @@ export interface Api {
   patchLesson: (id: ID, body: LessonPatch) => Promise<Lesson>
   deleteLesson: (id: ID) => Promise<void>
   deleteRoutine: (handle: string) => Promise<void>
+  suggestions: (state?: SuggestionState) => Promise<Suggestion[]>
+  acceptSuggestion: (id: ID, body?: { assignee?: string }) => Promise<Suggestion>
+  dismissSuggestion: (id: ID, body?: { reason?: string }) => Promise<Suggestion>
   tasks: (query?: { channel_id?: ID; project?: string }) => Promise<Task[]>
   createTask: (body: TaskInput) => Promise<Task>
   patchTask: (id: ID, body: TaskPatch) => Promise<Task>
@@ -218,6 +223,9 @@ export function createApi(options: ApiOptions = {}): Api {
     deleteLesson: (id) => request("DELETE", `/lessons/${encodeURIComponent(id)}`),
     deleteRoutine: (handle) => request("DELETE", `/routines/${encodeURIComponent(handle)}`),
     tasks: (params = {}) => request("GET", query("/tasks", params)),
+    suggestions: (state) => request("GET", state ? `/suggestions?state=${state}` : "/suggestions"),
+    acceptSuggestion: (id, body) => request("POST", `/suggestions/${encodeURIComponent(id)}/accept`, body ?? {}),
+    dismissSuggestion: (id, body) => request("POST", `/suggestions/${encodeURIComponent(id)}/dismiss`, body ?? {}),
     createTask: (body) => request("POST", "/tasks", body),
     patchTask: (id, body) => request("PATCH", `/tasks/${encodeURIComponent(id)}`, body),
     startTask: (id) => request("POST", `/tasks/${encodeURIComponent(id)}/start`),

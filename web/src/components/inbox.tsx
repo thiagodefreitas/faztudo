@@ -12,6 +12,7 @@ import type { Member } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { OPEN_PALETTE_EVENT } from "./palette"
+import { SuggestionsSection } from "./suggestions"
 import { TeamIcon } from "./team-icon"
 import { TodayBrief } from "./today-brief"
 
@@ -135,6 +136,7 @@ export function InboxPage() {
           </Menu.Root>
         )}
       </section>
+      <SuggestionsSection />
       <div className="relative min-h-0 flex-1">
         <div ref={scroller} className="h-full overflow-y-auto border-t border-line" data-testid="inbox-list">
           <TodayBrief />

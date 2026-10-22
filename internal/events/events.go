@@ -45,6 +45,8 @@ const (
 	RoutineUpdated      Type = "routine.updated"
 	RoutineRemoved      Type = "routine.removed"
 	RoutineCursor       Type = "routine.cursor"
+	SuggestionCreated   Type = "suggestion.created"
+	SuggestionResolved  Type = "suggestion.resolved"
 	TaskCreated         Type = "task.created"
 	TaskUpdated         Type = "task.updated"
 	CompareStarted      Type = "compare.started"

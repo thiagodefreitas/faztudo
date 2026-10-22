@@ -42,6 +42,20 @@ describe("applyEvent", () => {
     expect(invalidate).not.toHaveBeenCalled()
   })
 
+  it("applies suggestion events to the cached list without a refetch", () => {
+    const qc = new QueryClient()
+    const invalidate = vi.spyOn(qc, "invalidateQueries")
+    const suggestion = { id: "s1", channel_id: "c1", persona: "reviewer", title: "Fix it", detail: "", evidence: ["a.go:1"], state: "open", created_at: "t" }
+    applyEvent(qc, { ...outputEvent(1), type: "suggestion.created", payload: suggestion })
+    expect(qc.getQueryData(qk.suggestions)).toBeUndefined()
+    qc.setQueryData(qk.suggestions, [])
+    applyEvent(qc, { ...outputEvent(2), type: "suggestion.created", payload: suggestion })
+    expect(qc.getQueryData(qk.suggestions)).toEqual([suggestion])
+    applyEvent(qc, { ...outputEvent(3), type: "suggestion.resolved", payload: { ...suggestion, state: "dismissed" } })
+    expect(qc.getQueryData(qk.suggestions)).toEqual([{ ...suggestion, state: "dismissed" }])
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
   it("keeps lessons unloaded until the list is first fetched", () => {
     const qc = new QueryClient()
     applyEvent(qc, { ...outputEvent(1), type: "lesson.added", payload: { id: "l1" } })

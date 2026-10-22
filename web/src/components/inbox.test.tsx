@@ -43,6 +43,7 @@ async function setup() {
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.members, [ada, bob, coder])
   client.setQueryData(qk.channels, [general, coderDm])
+  client.setQueryData(qk.suggestions, [])
   client.setQueryData(qk.messages("c1"), [message("m1", "c1", bob, new Date(Date.now() - 3 * 3600_000).toISOString(), "Notes for the **week**")])
   client.setQueryData(qk.messages("c2"), [message("m2", "c2", coder, new Date(Date.now() - 60_000).toISOString(), "## Done\n\nThe patch is ready")])
   const rootRoute = createRootRoute({ component: InboxPage })

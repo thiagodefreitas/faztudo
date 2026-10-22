@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query"
-import type { Lesson, Member, Message, NoticeItem, OutputLine, StreamEvent, Task } from "../types"
+import type { Lesson, Member, Message, NoticeItem, OutputLine, StreamEvent, Suggestion, Task } from "../types"
 import { qk } from "./keys"
 import { replaceById } from "./merge"
 import { emptySnapshot, reduce } from "./reduce"
@@ -39,6 +39,12 @@ export function applyEvent(qc: QueryClient, event: StreamEvent): void {
         if (!current) return current
         return event.type === "lesson.removed" ? current.filter((item) => item.id !== lesson.id) : replaceById(current, lesson)
       })
+    }
+  }
+  if (event.type === "suggestion.created" || event.type === "suggestion.resolved") {
+    const suggestion = event.payload as Suggestion | null
+    if (suggestion && typeof suggestion.id === "string") {
+      qc.setQueryData<Suggestion[] | undefined>(qk.suggestions, (current) => (current ? replaceById(current, suggestion) : current))
     }
   }
   if (event.type === "compare.started" || event.type === "compare.decided") {

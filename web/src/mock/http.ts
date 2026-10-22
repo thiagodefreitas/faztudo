@@ -260,6 +260,11 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
       }),
     )
   }
+  if (parts[0] === "suggestions") {
+    if (parts.length === 1 && method === "GET") return { status: 200, body: world.getSuggestions(url.searchParams.get("state") ?? undefined) }
+    if (parts.length === 3 && parts[1] && parts[2] === "accept" && method === "POST") return send(world.acceptSuggestion(parts[1], text(body.assignee)))
+    if (parts.length === 3 && parts[1] && parts[2] === "dismiss" && method === "POST") return send(world.dismissSuggestion(parts[1], text(body.reason)))
+  }
   if (parts[0] === "lessons" && parts.length === 1 && method === "GET") return { status: 200, body: world.getLessons() }
   if (parts[0] === "lessons" && parts.length === 1 && method === "POST") {
     const channelId = text(body.channel_id)

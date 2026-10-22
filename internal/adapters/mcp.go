@@ -19,7 +19,7 @@ type MCP struct {
 
 // allowedMCPTools are the exact names claude gives the faztudo server tools:
 // mcp__<server>__<tool>.
-var allowedMCPTools = []string{"mcp__faztudo__post_message", "mcp__faztudo__ask_human", "mcp__faztudo__request_approval", "mcp__faztudo__read_context", "mcp__faztudo__list_members", "mcp__faztudo__delegate", "mcp__faztudo__read_thread", "mcp__faztudo__search_messages", "mcp__faztudo__list_handoffs"}
+var allowedMCPTools = []string{"mcp__faztudo__post_message", "mcp__faztudo__ask_human", "mcp__faztudo__request_approval", "mcp__faztudo__read_context", "mcp__faztudo__list_members", "mcp__faztudo__delegate", "mcp__faztudo__read_thread", "mcp__faztudo__search_messages", "mcp__faztudo__list_handoffs", "mcp__faztudo__suggest"}
 
 func (m *MCP) valid() error {
 	if m == nil {

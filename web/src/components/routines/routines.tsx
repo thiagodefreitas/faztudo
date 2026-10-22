@@ -37,6 +37,9 @@ function whatText(routine: Routine): string {
   if (routine.template === "debrief") {
     return "Debrief: what ran, what merged, what failed, approvals waiting and lane health in the last day."
   }
+  if (routine.template === "scout" && routine.prompt === "") {
+    return "Scout: reads the repository, CI and issues, read-only, and files up to 5 suggestions in the inbox. It never acts by itself."
+  }
   return routine.prompt
 }
 
