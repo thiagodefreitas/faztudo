@@ -1,7 +1,10 @@
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
-import { render, screen } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
+import { qk } from "../state/keys"
+import type { Approval } from "../types"
 import { BottomTabs, showTabs, tabOf } from "./bottom-tabs"
 
 describe("tab helpers", () => {
@@ -23,11 +26,28 @@ describe("tab helpers", () => {
   })
 })
 
-async function renderTabs(pathname: string) {
+const ask = (id: string, state: Approval["state"]): Approval => ({
+  id,
+  run_id: `run-${id}`,
+  channel_id: "c1",
+  requested_by: "m1",
+  title: "Merge",
+  detail: "",
+  options: [],
+  state,
+})
+
+async function renderTabs(pathname: string, approvals: Approval[] = []) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(qk.approvals, approvals)
   const rootRoute = createRootRoute({ component: () => <BottomTabs pathname={pathname} /> })
   const router = createRouter({ routeTree: rootRoute.addChildren([]), history: createMemoryHistory({ initialEntries: ["/"] }) })
   await router.load()
-  render(<RouterProvider router={router} />)
+  render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 describe("BottomTabs", () => {
@@ -47,6 +67,24 @@ describe("BottomTabs", () => {
     for (const name of ["Lanes", "Organization", "Routines", "Devices"]) {
       expect(await screen.findByRole("menuitem", { name })).toBeInTheDocument()
     }
+  })
+
+  it("shows no badge on More when nothing waits", async () => {
+    await renderTabs("/")
+    expect(await screen.findByRole("button", { name: "More" })).toBeInTheDocument()
+    expect(screen.queryByLabelText(/waiting/)).not.toBeInTheDocument()
+  })
+
+  it("badges More and lists Needs you first with its count", async () => {
+    const user = userEvent.setup()
+    await renderTabs("/", [ask("a", "pending"), ask("b", "pending"), ask("c", "resolved")])
+    const more = await screen.findByRole("button", { name: /More/ })
+    expect(more).toHaveTextContent("2")
+    await user.click(more)
+    const items = await screen.findAllByRole("menuitem")
+    expect(items[0]).toHaveTextContent("Needs you")
+    expect(items[0]).toHaveAttribute("href", "/approvals")
+    expect(within(items[0]).getByLabelText("2 waiting")).toBeInTheDocument()
   })
 
   it("cycles the theme from More without closing the menu", async () => {

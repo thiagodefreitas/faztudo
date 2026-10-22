@@ -188,18 +188,18 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
         {WORKSPACE_NAME}
       </Link>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {waiting.length > 0 && (
-          <Link
-            to="/approvals"
-            onClick={onNavigate}
-            className={cx(ROW, "mb-2 justify-between bg-warn-soft font-medium text-warn")}
-          >
-            <span>Needs you</span>
+        <Link
+          to="/approvals"
+          onClick={onNavigate}
+          className={cx(ROW, "mb-2 justify-between", waiting.length > 0 ? "bg-warn-soft font-medium text-warn" : IDLE_ROW)}
+        >
+          <span>Needs you</span>
+          {waiting.length > 0 && (
             <span className={cx(BADGE, "bg-warn")} aria-label={`${waiting.length} waiting`}>
               {waiting.length}
             </span>
-          </Link>
-        )}
+          )}
+        </Link>
         {org.data && (
           <div className="flex items-center justify-between pb-1 pl-2">
             <p className="text-[11px] font-medium uppercase tracking-wide text-faint">Projects</p>

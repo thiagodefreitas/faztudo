@@ -195,10 +195,12 @@ describe("WorkspaceNav", () => {
     expect(link).toHaveAttribute("href", "/approvals")
   })
 
-  it("shows no Needs you row when nothing waits", async () => {
+  it("keeps a quiet Needs you row without a badge when nothing waits", async () => {
     await setup()
     await screen.findByText("Coder")
-    expect(screen.queryByRole("link", { name: /Needs you/ })).not.toBeInTheDocument()
+    const link = screen.getByRole("link", { name: "Needs you" })
+    expect(link).toHaveAttribute("href", "/approvals")
+    expect(within(link).queryByLabelText(/waiting/)).not.toBeInTheDocument()
   })
 
   it("shows the lane summary as a compact Lanes link", async () => {

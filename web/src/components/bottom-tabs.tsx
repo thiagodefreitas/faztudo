@@ -2,7 +2,9 @@ import * as Menu from "@radix-ui/react-dropdown-menu"
 import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { cx } from "../lib/cx"
+import { pendingApprovals } from "../lib/projects"
 import { THEME_LABEL, nextTheme, useTheme } from "../lib/theme"
+import { useApprovals } from "../state/queries"
 import { ThemeIcon } from "./sidebar"
 
 const TAB = "relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 pt-0.5 text-[11px] font-medium transition-colors"
@@ -68,6 +70,8 @@ function Mark({ on }: { on: boolean }) {
 
 export function BottomTabs({ pathname }: { pathname: string }) {
   const theme = useTheme()
+  const approvals = useApprovals()
+  const count = pendingApprovals(approvals.data ?? []).length
   const active = tabOf(pathname)
   const tab = (name: "chats" | "projects" | "office") => cx(TAB, active === name ? "text-accent" : "text-muted")
   return (
@@ -92,12 +96,25 @@ export function BottomTabs({ pathname }: { pathname: string }) {
           <Mark on={active === null} />
           {ICONS.more}
           More
+          {count > 0 && (
+            <span
+              className="absolute left-1/2 top-1 ml-1.5 min-w-4 rounded-full bg-warn px-1 text-center text-[10px] font-semibold leading-4 tabular-nums text-canvas"
+              aria-label={`${count} waiting for you`}
+            >
+              {count}
+            </span>
+          )}
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Content align="end" side="top" sideOffset={6} className="z-50 min-w-44 rounded-md border border-line bg-surface p-1 shadow-lg">
             <Menu.Item asChild>
-              <Link to="/approvals" className={ITEM}>
-                Needs you
+              <Link to="/approvals" className={cx(ITEM, "justify-between", count > 0 && "font-medium text-warn")}>
+                <span>Needs you</span>
+                {count > 0 && (
+                  <span className="min-w-5 rounded-full bg-warn px-1.5 text-center text-[11px] font-medium leading-[18px] tabular-nums text-canvas" aria-label={`${count} waiting`}>
+                    {count}
+                  </span>
+                )}
               </Link>
             </Menu.Item>
             <Menu.Item asChild>
