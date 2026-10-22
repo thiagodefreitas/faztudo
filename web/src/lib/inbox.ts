@@ -37,6 +37,32 @@ export interface InboxItem {
   last: Message | undefined
 }
 
+export type InboxFilter = "all" | "unread" | "agents" | "channels"
+
+// Pinned chats first (a direct chat with a pinned agent), then by last activity.
+export function orderInbox(items: InboxItem[], isPinned: (item: InboxItem) => boolean): InboxItem[] {
+  const sorted = sortInbox(items)
+  return [...sorted.filter(isPinned), ...sorted.filter((item) => !isPinned(item))]
+}
+
+export function filterInbox(
+  items: InboxItem[],
+  filter: InboxFilter,
+  isAgentChat: (item: InboxItem) => boolean,
+  isDirectChat: (item: InboxItem) => boolean,
+): InboxItem[] {
+  switch (filter) {
+    case "all":
+      return items
+    case "unread":
+      return items.filter((item) => item.channel.unread > 0)
+    case "agents":
+      return items.filter(isAgentChat)
+    case "channels":
+      return items.filter((item) => !isDirectChat(item))
+  }
+}
+
 // Newest activity first. A conversation with no messages sorts last, by name.
 export function sortInbox(items: InboxItem[]): InboxItem[] {
   return items.slice().sort((a, b) => {

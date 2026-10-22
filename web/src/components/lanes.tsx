@@ -3,9 +3,9 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
-import { compactTokens, displayPct, formatCountdown, formatTokens, sparklinePath } from "../lib/lane-format"
+import { compactTokens, displayPct, formatCostAbout, formatCountdown, sortLanes, sourceLabel, sparklinePath } from "../lib/lane-format"
 import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
-import { laneRunUsage, runsTodayOf } from "../lib/lanes"
+import { laneRunUsage, primaryWindow, runsTodayOf } from "../lib/lanes"
 import { laneAdvice } from "../lib/lane-advice"
 import { formatAge } from "../lib/time"
 import { qk } from "../state/keys"
@@ -21,13 +21,37 @@ function WindowHistory({ window, history, now }: { window: LaneWindow; history: 
     {([1, 7] as const).map((days) => {
       const path = sparklinePath(readings, now - days * 86_400_000, now)
       return <div key={days} className="min-w-0 flex-1">
-        <span className="font-mono text-[10px] text-faint">{days === 1 ? "24h" : "7d"}</span>
+        <span className="text-[10px] text-faint">{days === 1 ? "24h" : "7d"}</span>
         <svg role="img" aria-label={`${window.name} usage, last ${days === 1 ? "24 hours" : "7 days"}`} viewBox="0 0 100 24" preserveAspectRatio="none" className="h-6 w-full text-accent">
           {path ? <path d={path} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" /> : <path d="M0 23H100" fill="none" stroke="currentColor" strokeDasharray="2 3" opacity="0.35" />}
         </svg>
       </div>
     })}
   </div>
+}
+
+// True when some window has at least two readings in the last week.
+function hasHistory(lane: Lane, history: LaneUsageReading[], now: number): boolean {
+  return lane.windows.some((window) => sparklinePath(history.filter((r) => r.window.name === window.name), now - 7 * 86_400_000, now) !== "")
+}
+
+const VIEW_KEY = "faztudo.lanes.view"
+export type LanesView = "cards" | "list"
+
+export function readLanesView(): LanesView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "cards"
+  } catch {
+    return "cards"
+  }
+}
+
+function writeLanesView(view: LanesView): void {
+  try {
+    localStorage.setItem(VIEW_KEY, view)
+  } catch {
+    // Private mode: the choice lasts until the page closes.
+  }
 }
 
 // Alt+L jumps to the Lanes page from anywhere, except while typing.
@@ -147,7 +171,7 @@ function WindowFill({ health, pct }: { health: LaneHealth; pct: number | undefin
   }
 }
 
-function WindowBar({ lane, window, now, history }: { lane: Lane; window: LaneWindow; now: number; history: LaneUsageReading[] }) {
+function WindowBar({ lane, window, now, history, showHistory }: { lane: Lane; window: LaneWindow; now: number; history: LaneUsageReading[]; showHistory: boolean }) {
   const pct = displayPct(window, lane.health)
   // Without a percentage, a CLI that logs tokens still says how much it used.
   const tokens = pct === undefined && window.tokens !== undefined ? `${compactTokens(window.tokens)} tokens` : undefined
@@ -159,23 +183,59 @@ function WindowBar({ lane, window, now, history }: { lane: Lane; window: LaneWin
         : `${window.name} window unknown`
   return (
     <li data-window={window.name}>
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="font-mono text-[12px] text-muted">{window.name}</p>
-        <p className="font-mono text-[12px] tabular-nums text-ink">{pct !== undefined ? `${Math.round(pct)}%` : (tokens ?? "unknown")}</p>
+      <div className="flex items-baseline gap-2 text-[12px]">
+        <p className="w-9 shrink-0 text-muted">{window.name}</p>
+        <p className="shrink-0 font-medium tabular-nums text-ink">{pct !== undefined ? `${Math.round(pct)}%` : (tokens ?? "unknown")}</p>
+        <p className="min-w-0 flex-1 truncate text-right text-faint">{formatCountdown(window.resets_at, now)}</p>
+        <span
+          data-testid="window-source"
+          title={`${window.source}, ${formatAge(window.measured_at, now)}`}
+          className="shrink-0 rounded bg-sidebar px-1.5 text-[10px] text-faint"
+        >
+          {sourceLabel(window.source)}
+        </span>
       </div>
       <div className="mt-1" role="img" aria-label={label}>
         <WindowFill health={lane.health} pct={pct} />
       </div>
-      <div className="mt-0.5 flex items-baseline justify-between gap-2 font-mono text-[11px] text-faint">
-        <span>
-          {window.source}, {formatAge(window.measured_at, now)}
-        </span>
-        <span>{formatCountdown(window.resets_at, now)}</span>
-      </div>
-      <WindowHistory window={window} history={history} now={now} />
+      {showHistory && <WindowHistory window={window} history={history} now={now} />}
     </li>
   )
 }
+
+function LaneIdentity({ lane }: { lane: Lane }) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-muted">
+      <span>{lane.cli}</span>
+      {lane.model && <span>{lane.model}</span>}
+      <span data-testid="cost-class" className="rounded bg-sidebar px-1.5 text-[10px] text-faint">
+        {lane.cost_class}
+      </span>
+    </p>
+  )
+}
+
+function ErrorBlock({ lane, now, advice }: { lane: Lane; now: number; advice?: string | undefined }) {
+  return (
+    <>
+      {lane.last_error && (
+        <div className="mt-2 rounded-md border-l-2 border-danger bg-danger-soft px-2 py-1.5">
+          <p className="text-[12px] font-medium text-danger">{lane.last_error.class}</p>
+          <p className="text-[12px] text-ink">{lane.last_error.message}</p>
+          <p className="text-[11px] tabular-nums text-muted">{formatAge(lane.last_error.at, now)}</p>
+        </div>
+      )}
+      {advice && (
+        <p data-testid="lane-advice" className="mt-2 text-[12px] font-medium text-ink">
+          {advice}
+        </p>
+      )}
+    </>
+  )
+}
+
+const PROBE_BUTTON =
+  "min-h-10 rounded-lg border border-line bg-surface px-3 text-[12px] font-medium transition-colors duration-150 hover:bg-sidebar disabled:opacity-60 md:min-h-8"
 
 export function LaneCardView({
   lane,
@@ -198,68 +258,53 @@ export function LaneCardView({
   advice?: string | undefined
 }) {
   const usage = laneRunUsage(runs, lane.id, now)
+  const cost = usage.priced > 0 ? formatCostAbout(usage.cost) : undefined
+  const showHistory = hasHistory(lane, history, now)
+  const stats: [string, string][] = [
+    ["Running", `${lane.running} / ${lane.capacity}`],
+    ["Runs today", String(runsTodayOf(lane, now) ?? "-")],
+    ["Tokens last hour", lane.tokens_last_hour === undefined ? "-" : compactTokens(lane.tokens_last_hour)],
+  ]
   return (
     <article aria-label={`lane ${lane.id}`} data-health={lane.health} className={cx(CARD, "flex flex-col p-4")}>
       <div className="flex items-center gap-2">
-        <p className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">{lane.id}</p>
+        <p className="min-w-0 flex-1 truncate text-[14px] font-semibold">{lane.id}</p>
         <span className="shrink-0">
           <HealthBadge health={lane.health} />
         </span>
       </div>
-      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        <p className="text-[12px] text-faint">{lane.cli}</p>
-        <p className="font-mono text-[12px] text-muted">{lane.model ?? "model unknown"}</p>
-        <p className="text-[12px] text-faint">{lane.cost_class}</p>
+      <div className="mt-0.5">
+        <LaneIdentity lane={lane} />
       </div>
       {lane.health_reason && <p className="mt-1 text-[12px] text-muted">{lane.health_reason}</p>}
       {lane.windows.length > 0 && (
-        <ul className="mt-2 flex flex-col gap-2">
+        <ul className="mt-3 flex flex-col gap-2.5">
           {lane.windows.map((window) => (
-            <WindowBar key={window.name} lane={lane} window={window} now={now} history={history} />
+            <WindowBar key={window.name} lane={lane} window={window} now={now} history={history} showHistory={showHistory} />
           ))}
         </ul>
       )}
-      <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2">
-        <div>
-          <dt className="text-[11px] uppercase tracking-wide text-faint">Running</dt>
-          <dd className="font-mono text-[12px] tabular-nums text-ink">
-            {lane.running} / {lane.capacity}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[11px] uppercase tracking-wide text-faint">Runs today</dt>
-          <dd className="font-mono text-[12px] tabular-nums text-ink">{runsTodayOf(lane, now) ?? "-"}</dd>
-        </div>
-        <div>
-          <dt className="text-[11px] uppercase tracking-wide text-faint">Tokens last hour</dt>
-          <dd className="font-mono text-[12px] tabular-nums text-ink">{formatTokens(lane.tokens_last_hour)}</dd>
-        </div>
-      </dl>
-      <p className="mt-2 text-[12px] text-muted">
-        Today: {usage.measured ? `${formatTokens(usage.tokens)} tokens` : "tokens unknown"} ({usage.measured} of {usage.runs} runs measured)
-        {usage.priced > 0
-          ? `; about $${usage.cost.toFixed(usage.cost < 0.01 ? 4 : 2)}, estimate (${usage.priced} of ${usage.runs} priced)`
-          : "; cost unknown"}
-      </p>
-      {lane.last_error && (
-        <div className="mt-2 rounded-md border-l-2 border-danger bg-danger-soft px-2 py-1.5">
-          <p className="text-[12px] font-medium text-danger">{lane.last_error.class}</p>
-          <p className="text-[12px] text-ink">{lane.last_error.message}</p>
-          <p className="font-mono text-[11px] text-muted">{formatAge(lane.last_error.at, now)}</p>
-        </div>
-      )}
-      {advice && (
-        <p data-testid="lane-advice" className="mt-2 text-[12px] text-ink">
-          {advice}
+      {lane.windows.length > 0 && !showHistory && (
+        <p data-testid="no-history" className="mt-2 text-[11px] text-faint">
+          No history yet
         </p>
       )}
+      <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2">
+        {stats.map(([term, value]) => (
+          <div key={term}>
+            <dt className="text-[11px] text-faint">{term}</dt>
+            <dd className="text-[13px] font-medium tabular-nums text-ink">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {cost && (
+        <p className="mt-2 text-[12px] text-muted" title={`${usage.priced} of ${usage.runs} runs priced, estimate`}>
+          {cost} today
+        </p>
+      )}
+      <ErrorBlock lane={lane} now={now} advice={advice} />
       <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onProbe}
-          disabled={probing}
-          className="min-h-10 rounded-lg border border-line bg-surface px-3 text-[12px] font-medium transition-colors duration-150 hover:bg-sidebar disabled:opacity-60 md:min-h-8"
-        >
+        <button type="button" onClick={onProbe} disabled={probing} className={PROBE_BUTTON}>
           {probing ? "Probing..." : "Probe now"}
         </button>
         {probeError && (
@@ -272,7 +317,54 @@ export function LaneCardView({
   )
 }
 
-function LaneCard({ lane, now, focused, runs, advice }: { lane: Lane; now: number; focused: boolean; runs: Run[]; advice?: string | undefined }) {
+// One row per lane, for people with many lanes.
+export function LaneRowView({
+  lane,
+  now,
+  probing,
+  probeError,
+  onProbe,
+  advice,
+}: {
+  lane: Lane
+  now: number
+  probing: boolean
+  probeError: string | undefined
+  onProbe: () => void
+  advice?: string | undefined
+}) {
+  const window = primaryWindow(lane)
+  const pct = window ? displayPct(window, lane.health) : undefined
+  return (
+    <article aria-label={`lane ${lane.id}`} data-health={lane.health} data-view="row" className={cx(CARD, "px-3 py-2")}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="min-w-0 flex-1 basis-40 truncate text-[13px] font-semibold">{lane.id}</p>
+        <HealthBadge health={lane.health} />
+        <p className="w-24 shrink-0 text-[12px] tabular-nums text-muted">
+          {window ? `${window.name} ${pct !== undefined ? `${Math.round(pct)}%` : "unknown"}` : "no window"}
+        </p>
+        <p className="hidden w-28 shrink-0 truncate text-[12px] text-faint sm:block">{window ? formatCountdown(window.resets_at, now) : ""}</p>
+        <p className="w-12 shrink-0 text-[12px] tabular-nums text-muted" title="Running / capacity">
+          {lane.running} / {lane.capacity}
+        </p>
+        <button type="button" onClick={onProbe} disabled={probing} className={PROBE_BUTTON}>
+          {probing ? "Probing..." : "Probe now"}
+        </button>
+      </div>
+      <div className="mt-0.5">
+        <LaneIdentity lane={lane} />
+      </div>
+      {probeError && (
+        <p role="alert" className="text-[12px] text-danger">
+          {probeError}
+        </p>
+      )}
+      <ErrorBlock lane={lane} now={now} advice={advice} />
+    </article>
+  )
+}
+
+function LaneCard({ lane, now, focused, runs, advice, view }: { lane: Lane; now: number; focused: boolean; runs: Run[]; advice?: string | undefined; view: LanesView }) {
   const qc = useQueryClient()
   const [probing, setProbing] = useState(false)
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
@@ -284,6 +376,7 @@ function LaneCard({ lane, now, focused, runs, advice }: { lane: Lane; now: numbe
       return response.json() as Promise<LaneUsageReading[]>
     },
     staleTime: 60_000,
+    enabled: view === "cards",
   })
 
   function probe() {
@@ -309,7 +402,11 @@ function LaneCard({ lane, now, focused, runs, advice }: { lane: Lane; now: numbe
       data-focused={focused || undefined}
       className={cx("rounded-xl", focused && "ring-2 ring-accent")}
     >
-      <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} runs={runs} advice={advice} />
+      {view === "list" ? (
+        <LaneRowView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} advice={advice} />
+      ) : (
+        <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} runs={runs} advice={advice} />
+      )}
     </div>
   )
 }
@@ -321,7 +418,12 @@ export function LanesPage() {
   const focus = useSearch({ strict: false }).lane
   const now = useNow()
   useLanesShortcut()
-  const list = (lanes.data ?? []).slice().sort((a, b) => a.id.localeCompare(b.id))
+  const list = sortLanes(lanes.data ?? [])
+  const [view, setView] = useState<LanesView>(readLanesView)
+  function chooseView(next: LanesView) {
+    setView(next)
+    writeLanesView(next)
+  }
 
   const counts = new Map<LaneHealth, number>()
   for (const lane of list) counts.set(lane.health, (counts.get(lane.health) ?? 0) + 1)
@@ -338,6 +440,21 @@ export function LanesPage() {
         }
         actions={
           list.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+            <div role="radiogroup" aria-label="Lane layout" className="inline-flex rounded-lg border border-line p-0.5">
+              {(["cards", "list"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === option}
+                  onClick={() => chooseView(option)}
+                  className={cx("min-h-9 rounded-md px-3 text-[12px] font-medium capitalize transition-colors duration-150 md:min-h-7", view === option ? "bg-accent-soft text-ink" : "text-muted hover:text-ink")}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
             <ul aria-label="Lane health" className="flex flex-wrap items-center gap-1.5">
               {order
                 .filter((health) => counts.get(health))
@@ -348,6 +465,7 @@ export function LanesPage() {
                   </li>
                 ))}
             </ul>
+            </div>
           ) : undefined
         }
       />
@@ -359,9 +477,9 @@ export function LanesPage() {
             No lanes configured. Run <code className="font-mono">faztudo agents detect</code> in a terminal to find the installed CLIs, or add a <code className="font-mono">[[lane]]</code> entry to <code className="font-mono">~/.config/faztudo/lanes.toml</code> and restart the daemon.
           </EmptyState>
         ) : (
-          <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className={view === "list" ? "flex flex-col gap-2" : "grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3"}>
             {list.map((lane) => (
-              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} runs={runs.data ?? []} advice={laneAdvice(lane, list, members.data ?? [], now)} />
+              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} runs={runs.data ?? []} advice={laneAdvice(lane, list, members.data ?? [], now)} view={view} />
             ))}
           </div>
         )}

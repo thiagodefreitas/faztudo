@@ -3,11 +3,11 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { cx } from "../lib/cx"
 import { directPeer, isDirect } from "../lib/direct"
-import { offscreenUnread, plainPreview, relativeTime, sortInbox, type InboxItem } from "../lib/inbox"
+import { filterInbox, offscreenUnread, orderInbox, plainPreview, relativeTime, type InboxFilter, type InboxItem } from "../lib/inbox"
 import { usePins } from "../lib/pins"
 import { useOpenDirect } from "../state/direct"
 import { useNow } from "../state/now"
-import { useChannels, useLanes, useLastMessages, useMe, useMembers } from "../state/queries"
+import { useChannels, useLanes, useLastMessages, useMe, useMembers, useRuns } from "../state/queries"
 import type { Member } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
@@ -15,6 +15,13 @@ import { OPEN_PALETTE_EVENT } from "./palette"
 import { SuggestionsSection } from "./suggestions"
 import { TeamIcon } from "./team-icon"
 import { TodayBrief } from "./today-brief"
+
+const FILTERS: [InboxFilter, string][] = [
+  ["all", "All"],
+  ["unread", "Unread"],
+  ["agents", "Agents"],
+  ["channels", "Channels"],
+]
 
 const ICON_BUTTON =
   "inline-flex h-10 w-10 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink"
@@ -33,9 +40,22 @@ export function InboxPage() {
   const list = channels.data ?? []
   const people = members.data ?? []
   const last = useLastMessages(list.map((channel) => channel.id))
-  const items = sortInbox(list.map((channel) => ({ channel, last: last.get(channel.id) })))
   const agents = people.filter((member) => member.kind === "agent")
   const pinned = pins.map((id) => agents.find((agent) => agent.id === id)).filter((agent): agent is Member => Boolean(agent))
+  const runs = useRuns()
+  const liveChannels = new Set((runs.data ?? []).filter((run) => run.state === "running").map((run) => run.channel_id))
+  const [filter, setFilter] = useState<InboxFilter>("all")
+  const peerOf = (item: InboxItem) => directPeer(item.channel, me.data?.id, people)
+  const allItems = orderInbox(
+    list.map((channel) => ({ channel, last: last.get(channel.id) })),
+    (item) => pinned.some((agent) => agent.id === peerOf(item)?.id),
+  )
+  const items = filterInbox(
+    allItems,
+    filter,
+    (item) => peerOf(item)?.kind === "agent",
+    (item) => isDirect(item.channel),
+  )
   const scroller = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState<Set<string> | null>(null)
 
@@ -59,7 +79,7 @@ export function InboxPage() {
     )
     root.querySelectorAll("[data-channel]").forEach((row) => observer.observe(row))
     return () => observer.disconnect()
-  }, [items.length])
+  }, [items.length, filter])
 
   const hidden = visible ? offscreenUnread(items, visible) : []
   const unreadTotal = items.filter((item) => item.channel.unread > 0).length
@@ -169,7 +189,30 @@ export function InboxPage() {
                   </Menu.Trigger>,
                 )}
             </div>
+            {allItems.length > 0 && (
+              <div role="group" aria-label="Filter chats" className="flex gap-1.5 overflow-x-auto px-4 pb-2">
+                {FILTERS.map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={filter === id}
+                    onClick={() => setFilter(id)}
+                    className={cx(
+                      "min-h-9 shrink-0 rounded-full px-3 text-[12px] font-medium transition-colors duration-150",
+                      filter === id ? "bg-accent-soft text-ink" : "text-muted hover:bg-sidebar hover:text-ink",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             {channels.isPending && <p className="px-4 py-6 text-[13px] text-muted">Loading chats</p>}
+            {allItems.length > 0 && items.length === 0 && (
+              <p data-testid="inbox-filter-empty" className="px-4 py-6 text-center text-[13px] text-muted">
+                {filter === "unread" ? "You are all caught up." : "No chats match this filter."}
+              </p>
+            )}
             {!channels.isPending && items.length === 0 && (
               <div data-testid="inbox-empty" className="mx-4 my-4 rounded-xl border border-dashed border-line px-4 py-6 text-center">
                 <p className="text-[14px] font-medium">No channels yet</p>
@@ -191,7 +234,7 @@ export function InboxPage() {
             {/* The floating unread pill is 40px high and sits 16px above the bottom. */}
             <ul className={hidden.length > 0 ? "pb-16" : "pb-3"} data-padded={hidden.length > 0 || undefined}>
               {items.map((item) => (
-                <InboxRow key={item.channel.id} item={item} members={people} meId={me.data?.id} now={now} />
+                <InboxRow key={item.channel.id} item={item} members={people} meId={me.data?.id} now={now} working={liveChannels.has(item.channel.id)} />
               ))}
             </ul>
           </div>
@@ -215,19 +258,22 @@ function InboxRow({
   members,
   meId,
   now,
+  working,
 }: {
   item: InboxItem
   members: Member[]
   meId: string | undefined
   now: number
+  working: boolean
 }) {
   const { channel, last } = item
   const direct = isDirect(channel)
   const peer = directPeer(channel, meId, members)
   const name = direct ? (peer?.display_name ?? channel.name) : channel.name
   const author = last ? members.find((member) => member.id === last.author_id) : undefined
-  const prefix = !last ? "" : last.author_id === meId ? "You: " : direct ? "" : `${author?.display_name ?? "Member"}: `
+  const prefix = !last ? "" : last.author_id === meId ? "You: " : `${author?.display_name ?? "Member"}: `
   const unread = channel.unread
+  const mentioned = unread > 0 && meId !== undefined && last?.mentions.includes(meId) === true
   return (
     <li>
       <Link
@@ -247,6 +293,9 @@ function InboxRow({
               {direct ? "" : "# "}
               {name}
             </span>
+            {working && (
+              <span data-testid="live-dot" role="img" aria-label="An agent is working" title="An agent is working" className="h-2 w-2 shrink-0 self-center rounded-full bg-ok" />
+            )}
             <time className="shrink-0 text-[11px] tabular-nums text-faint" dateTime={last?.created_at}>
               {relativeTime(last?.created_at, now)}
             </time>
@@ -255,6 +304,11 @@ function InboxRow({
             <span className={cx("min-w-0 flex-1 truncate text-[13px]", unread > 0 ? "text-ink" : "text-muted")}>
               {last ? `${prefix}${plainPreview(last.body)}` : "No messages yet"}
             </span>
+            {mentioned && (
+              <span data-testid="mention-badge" className="rounded-full bg-warn-soft px-1.5 text-[11px] font-medium text-warn" aria-label="You were mentioned" title="You were mentioned">
+                @
+              </span>
+            )}
             {unread > 0 && (
               <span className="rounded-full bg-accent px-1.5 text-[11px] font-medium tabular-nums text-canvas" aria-label={`${unread} unread`}>
                 {unread}

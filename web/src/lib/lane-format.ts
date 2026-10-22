@@ -1,4 +1,4 @@
-import type { LaneHealth, LaneUsageReading, LaneWindow } from "../types"
+import type { CostClass, Lane, LaneHealth, LaneUsageReading, LaneWindow, UsageSource } from "../types"
 
 // Unknown is never rendered as zero: an unmeasured figure says "unknown".
 export function displayPct(window: LaneWindow, health: LaneHealth): number | undefined {
@@ -48,6 +48,43 @@ export function sparklinePath(readings: LaneUsageReading[], since: number, now: 
     const y = 24 - Math.min(24, Math.max(0, (values[i] / max) * 24))
     return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`
   }).join(" ")
+}
+
+// A plain word for where a reading came from; the exact source stays in the tooltip.
+export function sourceLabel(source: UsageSource): string {
+  switch (source) {
+    case "cli-log":
+      return "measured"
+    case "probe":
+      return "probe"
+    case "manual":
+      return "manual"
+    case "error":
+      return "from error"
+    case "unknown":
+      return "no source"
+  }
+}
+
+// "about $0.01" for a priced total, nothing when no run was priced.
+export function formatCostAbout(value: number | undefined): string | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined
+  return `about $${value.toFixed(value < 0.01 ? 4 : 2)}`
+}
+
+const COST_ORDER: Record<CostClass, number> = { premium: 0, standard: 1, cheap: 2, local: 3 }
+// Worst first: the states that block runs come before one that only warns.
+const ATTENTION_ORDER: Partial<Record<LaneHealth, number>> = { exhausted: 0, unavailable: 1, conserve: 2 }
+
+export function needsAttention(lane: Lane): boolean {
+  return ATTENTION_ORDER[lane.health] !== undefined || lane.last_error !== undefined
+}
+
+// Lanes that need attention first (worst health first), then by cost class
+// (premium first), then by id.
+export function sortLanes(lanes: Lane[]): Lane[] {
+  const rank = (lane: Lane) => (needsAttention(lane) ? (ATTENTION_ORDER[lane.health] ?? 2) : 3)
+  return lanes.slice().sort((a, b) => rank(a) - rank(b) || COST_ORDER[a.cost_class] - COST_ORDER[b.cost_class] || a.id.localeCompare(b.id))
 }
 
 export function formatCostEstimate(value: number | undefined): string | undefined {

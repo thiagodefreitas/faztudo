@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { displayPct, formatCostEstimate, formatCountdown, formatTokens, sparklinePath } from "./lane-format"
+import { displayPct, formatCostAbout, formatCostEstimate, formatCountdown, formatTokens, sortLanes, sourceLabel, sparklinePath } from "./lane-format"
 import { summarizeLanes } from "./lane-health"
 import type { Lane, LaneWindow } from "../types"
 
@@ -109,5 +109,40 @@ describe("summarizeLanes", () => {
   it("treats an unmeasured lane as worse than a known available one", () => {
     const lanes = [lane("unknown", []), lane("available", [])]
     expect(summarizeLanes(lanes).health).toBe("unknown")
+  })
+})
+
+describe("sortLanes", () => {
+  const make = (id: string, health: Lane["health"], cost_class: Lane["cost_class"]): Lane => ({ ...lane(health, []), id, cost_class })
+
+  it("puts lanes that need attention first, worst first, then by cost class and id", () => {
+    const sorted = sortLanes([
+      make("local/a", "available", "local"),
+      make("claude/b", "available", "premium"),
+      make("codex/c", "conserve", "cheap"),
+      make("grok/d", "exhausted", "standard"),
+      make("kimi/e", "unavailable", "cheap"),
+      make("claude/a", "available", "premium"),
+    ])
+    expect(sorted.map((item) => item.id)).toEqual(["grok/d", "kimi/e", "codex/c", "claude/a", "claude/b", "local/a"])
+  })
+
+  it("counts a recent error as needing attention", () => {
+    const errored: Lane = { ...make("a/x", "available", "local"), last_error: { class: "transient", message: "x", at: "2026-10-18T11:00:00Z" } }
+    expect(sortLanes([make("b/y", "available", "premium"), errored])[0]?.id).toBe("a/x")
+  })
+})
+
+describe("sourceLabel and formatCostAbout", () => {
+  it("uses plain words for sources", () => {
+    expect(sourceLabel("cli-log")).toBe("measured")
+    expect(sourceLabel("manual")).toBe("manual")
+    expect(sourceLabel("probe")).toBe("probe")
+  })
+
+  it("rounds a cost and omits an unknown one", () => {
+    expect(formatCostAbout(0.012)).toBe("about $0.01")
+    expect(formatCostAbout(0.004)).toBe("about $0.0040")
+    expect(formatCostAbout(undefined)).toBeUndefined()
   })
 })

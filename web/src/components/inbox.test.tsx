@@ -4,7 +4,7 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { qk } from "../state/keys"
-import type { Channel, Lane, Member, Message } from "../types"
+import type { Channel, Lane, Member, Message, Run } from "../types"
 import { InboxPage } from "./inbox"
 
 const ada: Member = { id: "ada", kind: "human", handle: "ada", display_name: "Ada", presence: "online" }
@@ -39,15 +39,18 @@ function message(id: string, channel: string, author: Member, at: string, body: 
   return { id, channel_id: channel, author_id: author.id, body, mentions: [], created_at: at }
 }
 
-async function setup(opts: { channels?: Channel[]; lanes?: Lane[] } = {}) {
+async function setup(opts: { channels?: Channel[]; lanes?: Lane[]; runs?: Run[]; lastMentions?: string[]; lastAt?: Record<string, number> } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(qk.me, ada)
   client.setQueryData(qk.members, [ada, bob, coder])
   client.setQueryData(qk.channels, opts.channels ?? [general, coderDm])
   client.setQueryData(qk.lanes, opts.lanes ?? [])
   client.setQueryData(qk.suggestions, [])
+  client.setQueryData(qk.runs, opts.runs ?? [])
   client.setQueryData(qk.messages("c1"), [message("m1", "c1", bob, new Date(Date.now() - 3 * 3600_000).toISOString(), "Notes for the **week**")])
-  client.setQueryData(qk.messages("c2"), [message("m2", "c2", coder, new Date(Date.now() - 60_000).toISOString(), "## Done\n\nThe patch is ready")])
+  client.setQueryData(qk.messages("c3"), [message("m3", "c3", bob, new Date(Date.now() - 2 * 3600_000).toISOString(), "Later")])
+  const reply = message("m2", "c2", coder, new Date(Date.now() - (opts.lastAt?.c2 ?? 60_000)).toISOString(), "## Done\n\nThe patch is ready")
+  client.setQueryData(qk.messages("c2"), [{ ...reply, mentions: opts.lastMentions ?? [] }])
   const rootRoute = createRootRoute({ component: InboxPage })
   const router = createRouter({
     routeTree: rootRoute.addChildren([
@@ -129,6 +132,42 @@ describe("InboxPage", () => {
     expect(await screen.findByText("1 unread")).toBeInTheDocument()
     const list = within(screen.getByTestId("inbox-list")).getAllByRole("list").find((el) => el.hasAttribute("data-padded"))
     expect(list).toHaveClass("pb-16")
+  })
+
+  it("filters by unread, agents and channels and says so when nothing matches", async () => {
+    await setup({ channels: [general, { ...coderDm, unread: 0 }] })
+    const list = await screen.findByTestId("inbox-list")
+    const group = screen.getByRole("group", { name: "Filter chats" })
+    await userEvent.click(within(group).getByRole("button", { name: "Unread" }))
+    expect(within(list).queryAllByRole("link")).toHaveLength(0)
+    expect(screen.getByTestId("inbox-filter-empty")).toHaveTextContent("all caught up")
+    await userEvent.click(within(group).getByRole("button", { name: "Agents" }))
+    expect(within(list).getAllByRole("link")).toHaveLength(1)
+    expect(within(list).getByRole("link")).toHaveTextContent("Coder")
+    await userEvent.click(within(group).getByRole("button", { name: "Channels" }))
+    expect(within(list).getByRole("link")).toHaveTextContent("# general")
+    await userEvent.click(within(group).getByRole("button", { name: "All" }))
+    expect(within(list).getAllByRole("link")).toHaveLength(2)
+  })
+
+  it("puts a chat with a pinned agent first, then orders by last activity", async () => {
+    const other: Channel = { ...general, id: "c3", name: "later", unread: 0 }
+    localStorage.setItem("faztudo.pins", JSON.stringify([coder.id]))
+    await setup({ channels: [general, other, coderDm], lastAt: { c2: 5 * 3600_000 } })
+    const rows = within(await screen.findByTestId("inbox-list")).getAllByRole("link")
+    expect(rows[0]).toHaveTextContent("Coder")
+  })
+
+  it("shows the author in a direct chat preview, a live dot while an agent runs there, and a mention badge", async () => {
+    const run = { id: "r1", channel_id: "c2", trigger_message_id: "m", agent_id: "coder", lane_id: "claude/default", mode: "read", state: "running" }
+    await setup({ runs: [run as never], lastMentions: [ada.id] })
+    const list = await screen.findByTestId("inbox-list")
+    const rows = within(list).getAllByRole("link").filter((row) => row.hasAttribute("data-channel"))
+    expect(rows[0]).toHaveTextContent("Coder: Done The patch is ready")
+    expect(within(rows[0] as HTMLElement).getByTestId("live-dot")).toBeInTheDocument()
+    expect(within(rows[0] as HTMLElement).getByTestId("mention-badge")).toBeInTheDocument()
+    expect(within(rows[1] as HTMLElement).queryByTestId("live-dot")).not.toBeInTheDocument()
+    expect(within(rows[1] as HTMLElement).queryByTestId("mention-badge")).not.toBeInTheDocument()
   })
 
   it("lists pinned agents with their names", async () => {

@@ -1,9 +1,11 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Lane, Run } from "../types"
 import { laneRunUsage, runsTodayOf } from "../lib/lanes"
-import { LaneCardView, LanesGauge } from "./lanes"
+import { qk } from "../state/keys"
+import { LaneCardView, LanesGauge, LanesPage, readLanesView } from "./lanes"
 
 const now = Date.parse("2026-10-18T12:00:00.000Z")
 
@@ -108,11 +110,14 @@ describe("LaneCardView", () => {
     renderCard(availableLane)
     const card = screen.getByRole("article", { name: "lane codex/default" })
     expect(card).toHaveTextContent("22%")
-    expect(card).toHaveTextContent("cli-log, 12m ago")
+    const source = within(card).getByTestId("window-source")
+    expect(source).toHaveTextContent("measured")
+    expect(source).toHaveAttribute("title", "cli-log, 12m ago")
     expect(card).toHaveTextContent("resets in 3h 48m")
     expect(card).toHaveTextContent("1 / 2")
     expect(card).toHaveTextContent("3")
-    expect(card).toHaveTextContent("1,200")
+    expect(card).toHaveTextContent("1.2k")
+    expect(within(card).getByTestId("cost-class")).toHaveTextContent("standard")
     expect(screen.getByText("Available")).toBeInTheDocument()
     expect(screen.getByText("Probe now")).toBeEnabled()
   })
@@ -127,7 +132,8 @@ describe("LaneCardView", () => {
       { id: "b", channel_id: "c", trigger_message_id: "m", agent_id: "a", lane_id: availableLane.id, mode: "read", state: "running", started_at: new Date(now - 30_000).toISOString() },
     ]
     renderCard(availableLane, { history, runs })
-    expect(screen.getByText(/Today: 120 tokens \(1 of 2 runs measured\); about \$0.12, estimate \(1 of 2 priced\)/)).toBeInTheDocument()
+    expect(screen.getByText("about $0.12 today")).toHaveAttribute("title", "1 of 2 runs priced, estimate")
+    expect(screen.queryByTestId("no-history")).not.toBeInTheDocument()
     expect(screen.getByRole("img", { name: "5h usage, last 24 hours" }).querySelector("path")?.getAttribute("d")).toContain("L")
     expect(screen.getByRole("img", { name: "5h usage, last 7 days" })).toBeInTheDocument()
   })
@@ -158,8 +164,21 @@ describe("LaneCardView", () => {
     expect(card).toHaveTextContent("unknown")
     expect(card).not.toHaveTextContent("0%")
     expect(card.querySelector('[data-pattern="dashed"]')).not.toBeNull()
-    expect(screen.getByText("model unknown")).toBeInTheDocument()
+    expect(screen.queryByText(/model unknown/)).not.toBeInTheDocument()
     expect(screen.getByText("Unknown")).toBeInTheDocument()
+    expect(card).not.toHaveTextContent("tokens unknown")
+    expect(card).not.toHaveTextContent("cost unknown")
+  })
+
+  it("says no history yet in one line and draws no chart when there are no readings", () => {
+    renderCard(availableLane)
+    expect(screen.getByTestId("no-history")).toHaveTextContent("No history yet")
+    expect(screen.queryByRole("img", { name: /usage, last/ })).not.toBeInTheDocument()
+  })
+
+  it("omits the cost when no run was priced", () => {
+    renderCard(availableLane, { runs: [] })
+    expect(screen.queryByText(/about \$/)).not.toBeInTheDocument()
   })
 
   it("shows an exhausted lane with its last error", () => {
@@ -192,6 +211,55 @@ describe("LaneCardView", () => {
     renderCard(availableLane, { onProbe })
     fireEvent.click(screen.getByRole("button", { name: "Probe now" }))
     expect(onProbe).toHaveBeenCalledTimes(1)
+  })
+})
+
+function renderPage(lanes: Lane[]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(qk.lanes, lanes)
+  client.setQueryData(qk.runs, [])
+  client.setQueryData(qk.members, [])
+  for (const item of lanes) client.setQueryData(["lane-history", item.id], [])
+  const rootRoute = createRootRoute({ component: LanesPage })
+  const router = createRouter({ routeTree: rootRoute, history: createMemoryHistory({ initialEntries: ["/"] }) })
+  return router.load().then(() =>
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    ),
+  )
+}
+
+describe("LanesPage", () => {
+  afterEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+  const cheap: Lane = { ...availableLane, id: "a/cheap", cost_class: "cheap" }
+
+  it("lists lanes that need attention first", async () => {
+    await renderPage([cheap, availableLane, exhaustedLane])
+    const cards = await screen.findAllByRole("article")
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(["lane grok/default", "lane codex/default", "lane a/cheap"])
+  })
+
+  it("switches to one row per lane and remembers the choice", async () => {
+    await renderPage([availableLane, exhaustedLane])
+    expect((await screen.findAllByRole("article"))[0]).not.toHaveAttribute("data-view")
+    fireEvent.click(screen.getByRole("radio", { name: "list" }))
+    expect(screen.getAllByRole("article").every((card) => card.getAttribute("data-view") === "row")).toBe(true)
+    expect(localStorage.getItem("faztudo.lanes.view")).toBe("list")
+    expect(screen.getByRole("radio", { name: "list" })).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("reads the remembered view and survives a broken storage", () => {
+    localStorage.setItem("faztudo.lanes.view", "list")
+    expect(readLanesView()).toBe("list")
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied")
+    })
+    expect(readLanesView()).toBe("cards")
   })
 })
 
