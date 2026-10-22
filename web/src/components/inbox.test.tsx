@@ -85,6 +85,13 @@ describe("InboxPage", () => {
     expect(screen.queryByText(/ unread$/)).not.toBeInTheDocument()
   })
 
+  it("greets the Director with the date and hides the pinned row until there is a pin", async () => {
+    await setup()
+    expect(await screen.findByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening), Ada$/ })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "Pinned agents" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Pin a chat" })).toBeInTheDocument()
+  })
+
   it("lists pinned agents with their names", async () => {
     localStorage.setItem("faztudo.pins", JSON.stringify([coder.id]))
     await setup()

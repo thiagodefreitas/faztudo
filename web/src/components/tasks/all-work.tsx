@@ -39,54 +39,56 @@ export function AllWork({ channels, channelIds }: { channels: Channel[]; channel
   if (runs.isPending) return <p className="p-4 text-[13px] text-muted">Loading work</p>
 
   return (
-    <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 md:grid-cols-5 md:overflow-x-auto" data-testid="all-work">
-      {WORK_COLUMNS.map((key) => (
-        <section key={key} aria-label={WORK_TITLES[key]} className="flex min-w-0 flex-col gap-2 md:min-w-[180px]">
-          <h2 className="flex items-center gap-2 text-[13px] font-semibold">
-            {WORK_TITLES[key]}
-            <span className="rounded-full border border-line px-2 text-[11px] font-normal text-muted">{columns[key].length}</span>
-          </h2>
-          {columns[key].length === 0 ? (
-            <p className="text-[12px] text-muted">Nothing here.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {columns[key].map(({ run, request, from }) => {
-                const agent = people.find((member) => member.id === run.agent_id)
-                const channel = channels.find((item) => item.id === run.channel_id)
-                const handle = agent?.handle ?? run.agent_id
-                const finished = run.ended_at
-                const when = finished
-                  ? `${run.state === "done" ? "done" : run.state} ${formatAge(finished, now)}`
-                  : run.started_at
-                    ? formatElapsed(run.started_at, undefined, now)
-                    : "waiting to start"
-                return (
-                  <li key={run.id}>
-                    <button
-                      type="button"
-                      title={request || undefined}
-                      onClick={() => void navigate({ to: "/c/$channelId", params: { channelId: run.channel_id }, search: { run: run.id } })}
-                      className="block min-h-10 w-full min-w-0 rounded-md border border-line bg-surface p-2 text-left hover:bg-canvas"
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <AgentAvatar member={agent} size={20} state={AVATAR_STATE[run.state]} decorative />
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">@{handle}</span>
-                        <span className="shrink-0 text-[12px] text-muted">{run.lane_id}</span>
-                      </span>
-                      <span className="mt-1 block truncate text-[13px]">{request || "Request not loaded"}</span>
-                      <span className="mt-0.5 block truncate text-[12px] text-muted">
-                        {channel ? `#${channel.name}` : "channel"} - {when}
-                        {from ? ` - from @${from}` : ""}
-                        {workUsage(run) ? ` - ${workUsage(run)}` : ""}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
-      ))}
+    <div className="min-h-0 flex-1 overflow-y-auto" data-testid="all-work">
+      <div className="grid items-start gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 min-[1360px]:grid-cols-5">
+        {WORK_COLUMNS.map((key) => (
+          <section key={key} aria-label={WORK_TITLES[key]} className="flex min-w-0 flex-col rounded-xl bg-sidebar/60 p-2">
+            <h2 className="mb-2 flex min-h-6 items-center gap-2 px-1 text-[11px] font-medium uppercase tracking-wide text-faint">
+              {WORK_TITLES[key]}
+              <span className="rounded-full bg-surface px-1.5 font-medium normal-case tabular-nums text-muted">{columns[key].length}</span>
+            </h2>
+            {columns[key].length === 0 ? (
+              <p className="rounded-lg border border-dashed border-line px-2 py-3 text-center text-[12px] text-faint">Nothing here.</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {columns[key].map(({ run, request, from }) => {
+                  const agent = people.find((member) => member.id === run.agent_id)
+                  const channel = channels.find((item) => item.id === run.channel_id)
+                  const handle = agent?.handle ?? run.agent_id
+                  const finished = run.ended_at
+                  const when = finished
+                    ? `${run.state === "done" ? "done" : run.state} ${formatAge(finished, now)}`
+                    : run.started_at
+                      ? formatElapsed(run.started_at, undefined, now)
+                      : "waiting to start"
+                  return (
+                    <li key={run.id}>
+                      <button
+                        type="button"
+                        title={request || undefined}
+                        onClick={() => void navigate({ to: "/c/$channelId", params: { channelId: run.channel_id }, search: { run: run.id } })}
+                        className="block min-h-10 w-full min-w-0 rounded-lg border border-line bg-surface p-2.5 text-left shadow-[0_1px_2px_rgb(16_24_40/0.05)] transition-colors duration-150 hover:border-faint/50"
+                      >
+                        <span className={`line-clamp-2 break-words text-[13px] font-medium leading-snug ${request ? "text-ink" : "text-faint"}`}>{request || "Request not loaded"}</span>
+                        <span className="mt-2 flex min-w-0 items-center gap-1.5 text-[12px] text-muted">
+                          <AgentAvatar member={agent} size={20} state={AVATAR_STATE[run.state]} decorative />
+                          <span className="min-w-0 truncate">@{handle}</span>
+                          <span className="ml-auto min-w-0 shrink truncate font-mono text-[11px] text-faint">{run.lane_id}</span>
+                        </span>
+                        <span className="mt-1 block truncate text-[11px] tabular-nums text-faint">
+                          {channel ? `#${channel.name}` : "channel"} - {when}
+                          {from ? ` - from @${from}` : ""}
+                          {workUsage(run) ? ` - ${workUsage(run)}` : ""}
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        ))}
+      </div>
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { useMembers, useRoutines } from "../../state/queries"
 import type { Routine, RoutineStatus } from "../../types"
 import { formatAge } from "../../lib/time"
 import { AgentAvatar } from "../agent-avatar"
+import { PageHeader, SECONDARY_BUTTON } from "../page-header"
 import { describeSchedule } from "./schedule"
 
 const STATUS_CLASS: Record<RoutineStatus, string> = {
@@ -168,14 +169,20 @@ export function RoutinesPage() {
   const routines = useRoutines()
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex items-baseline gap-3 border-b border-line px-3 py-2">
-        <Link to="/organization" className="min-h-10 py-2 text-[13px] text-muted">
-          Organization
-        </Link>
-        <h1 className="text-[15px] font-semibold">Routines</h1>
-        <p className="font-mono text-[12px] text-muted">{routines.data?.length ?? 0} routines</p>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <PageHeader
+        title="Routines"
+        description={
+          <>
+            Work that runs on a schedule or on each message, such as a daily debrief. <span className="tabular-nums">{routines.data?.length ?? 0}</span> routines.
+          </>
+        }
+        actions={
+          <Link to="/organization" className={SECONDARY_BUTTON}>
+            Organization
+          </Link>
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <RoutinesList />
       </div>
     </section>

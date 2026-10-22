@@ -14,6 +14,7 @@ import type { Approval, Message } from "../../types"
 import { AgentAvatar } from "../agent-avatar"
 import { ApprovalCard } from "../approval-card"
 import { MessageChoices } from "../message-list"
+import { CARD, PageHeader } from "../page-header"
 
 const routeApi = getRouteApi("/approvals")
 
@@ -143,12 +144,15 @@ export function ApprovalsInbox({ focus }: { focus?: string | undefined }) {
 
   return (
     <section aria-label="Approvals" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2">
-        <h1 className="text-[15px] font-semibold">Needs you</h1>
-        <span className="font-mono text-[12px] text-muted">
-          {total} {total === 1 ? "approval" : "approvals"}, {questions.length} {questions.length === 1 ? "question" : "questions"}
-        </span>
-        <div className="ml-auto flex gap-2">
+      <PageHeader
+        title="Needs you"
+        description={
+          <span className="tabular-nums">
+            {total} {total === 1 ? "approval" : "approvals"}, {questions.length} {questions.length === 1 ? "question" : "questions"}
+          </span>
+        }
+        actions={
+        <div className="flex flex-wrap gap-2">
           <select aria-label="Project" value={project} onChange={(event) => setProject(event.target.value)} className={SELECT}>
             <option value="">All projects</option>
             {projects.map((item) => (
@@ -166,17 +170,19 @@ export function ApprovalsInbox({ focus }: { focus?: string | undefined }) {
             ))}
           </select>
         </div>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {nothing && (
-          <p className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-[13px] text-muted">
-            {total > 0 ? "Nothing matches these filters." : "Nothing needs you right now."}
-          </p>
+          <div className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-[13px] text-muted">
+            <p className="font-medium text-ink">{total > 0 ? "Nothing matches these filters." : "Nothing needs you right now."}</p>
+            <p className="mt-0.5">{total > 0 ? "Clear the project or agent filter to see the rest." : "Approvals and questions from the team land here."}</p>
+          </div>
         )}
         {rows.length > 0 && (
           <section aria-label="Approvals waiting" className="mb-5">
             <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">Approvals waiting</h2>
-            <ul className={cx("divide-y divide-line rounded-lg border border-line bg-surface")}>
+            <ul className={cx("divide-y divide-line overflow-hidden", CARD)}>
               {rows.map((row) => (
                 <Row key={row.approval.id} row={row} now={now} open={isOpen(row.approval.id)} onToggle={() => toggle(row.approval.id)} />
               ))}
@@ -186,7 +192,7 @@ export function ApprovalsInbox({ focus }: { focus?: string | undefined }) {
         {questions.length > 0 && (
           <section aria-label="Questions waiting">
             <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-faint">Questions waiting</h2>
-            <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+            <ul className={cx("divide-y divide-line overflow-hidden", CARD)}>
               {questions.map((question) => (
                 <QuestionRow
                   key={question.message.id}

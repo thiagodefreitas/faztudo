@@ -32,15 +32,14 @@ import {
 } from "./project-dialogs";
 import { TeamIcon } from "./team-icon";
 import { ProjectDigest } from "./projects/digest";
+import { CARD, PageHeader, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./page-header";
 
 const homeApi = getRouteApi("/p/$handle");
 
-const LIST = "divide-y divide-line rounded-lg border border-line bg-surface";
-const ROW = "flex min-h-10 items-center gap-2 px-3 py-1.5 text-[13px]";
-const ACTION =
-  "inline-flex min-h-8 items-center gap-1 rounded-md border border-line bg-surface px-2.5 text-[12px] font-medium text-ink hover:bg-sidebar";
-const PRIMARY =
-  "inline-flex min-h-8 items-center gap-1 rounded-md bg-accent px-2.5 text-[12px] font-medium text-canvas hover:opacity-90";
+const LIST = `divide-y divide-line ${CARD} overflow-hidden`;
+const ROW = "flex min-h-11 items-center gap-2.5 px-3 py-2 text-[13px] transition-colors duration-150";
+const ACTION = SECONDARY_BUTTON;
+const PRIMARY = PRIMARY_BUTTON;
 
 function Section({
   title,
@@ -58,7 +57,7 @@ function Section({
       <h2 className="mb-1.5 flex items-baseline gap-2 text-[11px] font-medium uppercase tracking-wide text-faint">
         {title}
         {count !== undefined && (
-          <span className="font-mono normal-case">{count}</span>
+          <span className="rounded-full bg-sidebar px-1.5 font-medium normal-case tabular-nums text-muted">{count}</span>
         )}
         {action && (
           <span className="ml-auto normal-case tracking-normal">{action}</span>
@@ -78,7 +77,7 @@ function Empty({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-line px-3 py-2.5 text-[13px] text-muted">
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-line px-3 py-3 text-[13px] text-muted">
       <p className="min-w-0 flex-1">{children}</p>
       {action}
     </div>
@@ -135,16 +134,15 @@ export function ProjectsIndexPage() {
   const projects = (org.data?.projects ?? []).filter((project) => !project.archived);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex items-center gap-3 border-b border-line px-3 py-2">
-        <h1 className="min-w-0 flex-1 text-[15px] font-semibold">Projects</h1>
-        <button
-          type="button"
-          onClick={() => setCreating(true)}
-          className={PRIMARY}
-        >
-          New project
-        </button>
-      </header>
+      <PageHeader
+        title="Projects"
+        description="Each project groups channels, a repository and the team that works there."
+        actions={
+          <button type="button" onClick={() => setCreating(true)} className={PRIMARY}>
+            New project
+          </button>
+        }
+      />
       <CreateProjectDialog
         open={creating}
         onOpenChange={setCreating}
@@ -155,7 +153,7 @@ export function ProjectsIndexPage() {
           })
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {projects.length === 0 ? (
           <Empty
             action={
@@ -302,22 +300,25 @@ export function ProjectHome({ handle }: { handle: string }) {
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="project-home"
     >
-      <header className="border-b border-line px-3 py-2">
+      <header className="border-b border-line bg-canvas px-4 py-3">
         <div className="flex items-center gap-3">
           <Link
             to="/"
-            className="min-h-10 py-2 text-[13px] text-muted md:hidden"
+            aria-label="Back to Inbox"
+            className="-ml-2 inline-flex h-10 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-sidebar hover:text-ink md:hidden"
           >
-            Inbox
+            <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m12 4-6 6 6 6" />
+            </svg>
           </Link>
           <div className="min-w-0 flex-1">
-            <h1 className="flex min-w-0 items-baseline gap-2 text-[15px] font-semibold">
+            <h1 className="flex min-w-0 items-baseline gap-2 text-[17px] font-semibold tracking-tight">
               <span className="truncate">{project.name}</span>
               <span className="shrink-0 font-mono text-[11px] font-normal text-faint">
                 @{project.handle}
               </span>
             </h1>
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-muted">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] tabular-nums text-muted">
               {project.repo_path ? (
                 <span className="font-mono" title={project.repo_path}>
                   {repoName(project.repo_path)}
@@ -407,7 +408,7 @@ export function ProjectHome({ handle }: { handle: string }) {
           })
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="mb-5"><ProjectDigest project={project} channels={channels.data ?? []} runs={runs.data ?? []} approvals={approvals.data ?? []} tasks={tasks.data ?? []} now={new Date(now)} /></div>
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="min-w-0 space-y-5">

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
@@ -12,7 +12,10 @@ const ada: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA1", kind: "human", handle: "
 const coder: Member = { id: "01ARZ3NDEKTSV4RRFFQ69G5AA2", kind: "agent", handle: "coder", display_name: "Coder", presence: "online" }
 const dev: Channel = { id: "chan-dev", name: "faztudo-dev", kind: "team", visibility: "public", member_ids: [ada.id], unread: 0 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  localStorage.clear()
+})
 
 async function setup(channels: Channel[] = [dev], lanes: Lane[] = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
@@ -118,6 +121,57 @@ describe("CommandPalette", () => {
     await user.keyboard("{Control>}k{/Control}channel settings{Enter}")
     expect(seen).toHaveBeenCalledTimes(1)
     window.removeEventListener(OPEN_SETTINGS_EVENT, seen)
+  })
+
+  it("groups results and shows shortcuts on the right", async () => {
+    const user = userEvent.setup()
+    await setup()
+    await user.keyboard("{Control>}k{/Control}")
+    const dialog = await screen.findByRole("dialog")
+    for (const name of ["Go to", "Channels", "Agents", "Actions"]) expect(within(dialog).getByText(name)).toBeInTheDocument()
+    const search = screen.getByRole("option", { name: "Search messages" })
+    expect(search).toHaveTextContent("Shift")
+    expect(screen.getByRole("option", { name: "Lanes" })).toHaveTextContent("Alt")
+    expect(screen.getByRole("option", { name: "New task" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Today" })).toBeInTheDocument()
+  })
+
+  it("puts the group with the best match first", async () => {
+    const user = userEvent.setup()
+    const general: Channel = { ...dev, id: "chan-general", name: "general" }
+    const router = await setup([dev, general])
+    await user.keyboard("{Control>}k{/Control}gen{Enter}")
+    await waitFor(() => expect(router.state.location.pathname).toBe("/c/chan-general"))
+  })
+
+  it("lists recent picks first when nothing is typed", async () => {
+    localStorage.clear()
+    const user = userEvent.setup()
+    const other: Channel = { ...dev, id: "chan-ops", name: "ops" }
+    await setup([dev, other])
+    await user.keyboard("{Control>}k{/Control}ops{Enter}")
+    await user.keyboard("{Control>}k{/Control}")
+    const options = await screen.findAllByRole("option")
+    expect(options[0]).toHaveTextContent("ops")
+    expect(screen.getByText("Recent")).toBeInTheDocument()
+    await user.keyboard("dev")
+    expect(screen.queryByText("Recent")).not.toBeInTheDocument()
+    localStorage.clear()
+  })
+
+  it("opens the keyboard shortcuts sheet with ?, but not while typing", async () => {
+    const user = userEvent.setup()
+    await setup()
+    await user.keyboard("?")
+    const sheet = await screen.findByRole("dialog", { name: "Keyboard shortcuts" })
+    expect(within(sheet).getByText("Command palette")).toBeInTheDocument()
+    expect(within(sheet).getByText("Search messages")).toBeInTheDocument()
+    expect(within(sheet).getByText("Lanes page")).toBeInTheDocument()
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    await user.keyboard("{Control>}k{/Control}")
+    await user.keyboard("?")
+    expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument()
   })
 
   it("closes on Escape and offers create channel", async () => {

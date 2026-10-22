@@ -12,10 +12,11 @@ import { LessonsButton } from "./lessons/lessons-dialog"
 import { avatarState } from "./office/avatar"
 import { deriveMemberDesk, type DeskInfo, type DeskState } from "./office/state"
 import { CreateProjectDialog } from "./project-dialogs"
+import { CARD as CARD_BASE, EmptyState, PageHeader, PRIMARY_BUTTON, SECONDARY_BUTTON, SECTION_LABEL } from "./page-header"
 
-const CARD = "rounded-lg border border-line bg-surface p-3"
+const CARD = `${CARD_BASE} min-w-0 p-4`
 const CHIP = "inline-flex items-center rounded-full bg-sidebar px-2 py-0.5 text-[11px] text-muted"
-const PRIMARY = "inline-flex min-h-8 items-center rounded-md bg-accent px-2.5 text-[12px] font-medium text-canvas hover:opacity-90"
+const HEADING = `pb-2 ${SECTION_LABEL}`
 
 const STATE_CLASS: Record<DeskState, string> = {
   idle: "bg-sidebar text-muted",
@@ -57,7 +58,7 @@ function AgentRow({
       ) : (
         <span className="inline-block h-7 w-7 rounded-md bg-sidebar" aria-hidden="true" />
       )}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-40">
         <p className="flex items-center gap-2 text-[13px]">
           <span className="truncate font-medium">{member?.display_name ?? handle}</span>
           <span className="font-mono text-[11px] text-faint">@{handle}</span>
@@ -133,23 +134,27 @@ export function OrganizationPage() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex items-baseline gap-3 border-b border-line px-3 py-2">
-        <Link to="/" className="min-h-10 py-2 text-[13px] text-muted md:hidden">
-          Inbox
-        </Link>
-        <h1 className="text-[15px] font-semibold">Organization</h1>
-        <p className="font-mono text-[12px] text-muted">
-          {departments.length} departments, {activeProjects.length} projects
-        </p>
-        <Link to="/routines" className="ml-auto min-h-10 py-2 text-[13px] text-accent hover:underline md:min-h-0 md:py-0">
-          Routines
-        </Link>
-        <button type="button" onClick={() => setCreating(true)} className={PRIMARY}>
-          New project
-        </button>
-      </header>
+      <PageHeader
+        title="Organization"
+        description={
+          <>
+            Who works where, and who leads. <span className="tabular-nums">{departments.length}</span> {departments.length === 1 ? "department" : "departments"},{" "}
+            <span className="tabular-nums">{activeProjects.length}</span> {activeProjects.length === 1 ? "project" : "projects"}.
+          </>
+        }
+        actions={
+          <>
+            <Link to="/routines" className={SECONDARY_BUTTON}>
+              Routines
+            </Link>
+            <button type="button" onClick={() => setCreating(true)} className={PRIMARY_BUTTON}>
+              New project
+            </button>
+          </>
+        }
+      />
       <CreateProjectDialog open={creating} onOpenChange={setCreating} onCreated={(project) => void navigate({ to: "/p/$handle", params: { handle: project.handle } })} />
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
         {error && (
           <p role="alert" className="text-[13px] text-danger">
             {error}
@@ -159,54 +164,42 @@ export function OrganizationPage() {
           <p className="text-[13px] text-muted">Loading organization</p>
         ) : (
           <>
-            {director && (
-              <div className="flex items-center gap-3" data-testid="director">
-                <AgentAvatar member={director} size={36} decorative />
-                <div>
-                  <p className="text-[14px] font-medium">{director.display_name}</p>
-                  <p className="text-[12px] text-muted">Director. Assigns teams to projects and answers judgment calls.</p>
-                </div>
+            {(director || chiefs.length > 0) && (
+              <div className={cx("grid items-start gap-3", chiefs.length > 0 && director && "lg:grid-cols-2")}>
+                {director && (
+                  <div className={cx(CARD, "flex items-center gap-3")} data-testid="director">
+                    <AgentAvatar member={director} size={36} decorative />
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 text-[14px] font-semibold">
+                        {director.display_name}
+                        <span className="rounded-full bg-accent-soft px-2 text-[11px] font-medium text-accent">Director</span>
+                      </p>
+                      <p className="text-[12px] text-muted">Assigns teams to projects and answers judgment calls.</p>
+                    </div>
+                  </div>
+                )}
+                {chiefs.length > 0 && (
+                  <div className={CARD} data-testid="chief-of-staff">
+                    <h2 className={SECTION_LABEL}>Chief of Staff</h2>
+                    <p className="pb-1 pt-0.5 text-[12px] text-muted">
+                      Gets messages that are not addressed to anyone, in channels that opted in, and hands them to the right agent in a thread.
+                    </p>
+                    <ul className="divide-y divide-line">
+                      {chiefs.map((chief) => (
+                        <AgentRow key={chief.id} handle={chief.handle} member={chief} desk={deskOf(chief)} badge="Chief of Staff" />
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
-            )}
-
-            {chiefs.length > 0 && (
-              <div data-testid="chief-of-staff">
-                <h2 className="pb-1 text-[11px] font-medium uppercase tracking-wide text-faint">Chief of Staff</h2>
-                <p className="pb-1 text-[12px] text-muted">
-                  Gets messages that are not addressed to anyone, in channels that opted in, and hands them to the right agent in a thread.
-                </p>
-                <ul className="divide-y divide-line">
-                  {chiefs.map((chief) => (
-                    <AgentRow key={chief.id} handle={chief.handle} member={chief} desk={deskOf(chief)} badge="Chief of Staff" />
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {me.data?.kind === "human" && agents.length > 0 && (
-              <section aria-label="Agent computers">
-                <h2 className="pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Agent computers</h2>
-                <ul className="divide-y divide-line rounded-lg border border-line bg-surface px-3">
-                  {agents.map((agent) => {
-                    const computer = computers.data?.find((item) => sameHandle(item.id, agent.handle))
-                    return <li key={agent.id} className="flex min-h-10 flex-wrap items-center gap-2 py-1 text-[12px]">
-                      <span className="min-w-0 flex-1 font-medium">@{agent.handle}</span>
-                      <span>{computer?.state ?? "off"}</span>
-                      <span>{computer ? `${(computer.disk_bytes / 1048576).toFixed(1)} MB used` : ""}</span>
-                      {computer?.last_reset && <span>Reset {new Date(computer.last_reset).toLocaleString()}</span>}
-                      {computer && computer.state !== "off" && <button type="button" className="text-accent hover:underline" onClick={() => void resetComputer(agent.handle)}>Reset @{agent.handle}</button>}
-                    </li>
-                  })}
-                </ul>
-              </section>
             )}
 
             <div>
-              <h2 className="pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Departments</h2>
+              <h2 className={HEADING}>Departments</h2>
               {departments.length === 0 ? (
-                <p className="text-[13px] text-muted">
-                  No departments yet. Add <code className="font-mono">[[department]]</code> entries to lanes.toml.
-                </p>
+                <EmptyState>
+                  No departments yet. Add <code className="font-mono">[[department]]</code> entries to lanes.toml to group agents under a lead.
+                </EmptyState>
               ) : (
                 <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                   {departments.map((department) => {
@@ -265,16 +258,22 @@ export function OrganizationPage() {
             </div>
 
             <div>
-              <h2 className="flex items-baseline gap-2 pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">
+              <h2 className={cx("flex items-baseline gap-2", HEADING)}>
                 Projects
                 <button type="button" onClick={() => setCreating(true)} className="ml-auto text-[12px] font-medium normal-case tracking-normal text-accent hover:underline">
                   New project
                 </button>
               </h2>
               {activeProjects.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-line px-3 py-2.5 text-[13px] text-muted">
+                <EmptyState
+                  action={
+                    <button type="button" onClick={() => setCreating(true)} className={SECONDARY_BUTTON}>
+                      New project
+                    </button>
+                  }
+                >
                   No projects yet. Create one here or add <code className="font-mono">[[project]]</code> entries to lanes.toml.
-                </p>
+                </EmptyState>
               ) : (
                 <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                   {activeProjects.map((project) => (
@@ -292,10 +291,39 @@ export function OrganizationPage() {
                 </div>
               )}
             </div>
+            {me.data?.kind === "human" && agents.length > 0 && (
+              <section aria-label="Agent computers">
+                <h2 className={HEADING}>Agent computers</h2>
+                <ul className={cx(CARD_BASE, "divide-y divide-line px-4")}>
+                  {agents.map((agent) => {
+                    const computer = computers.data?.find((item) => sameHandle(item.id, agent.handle))
+                    return (
+                      <li key={agent.id} className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 py-1.5 text-[12px] text-muted">
+                        <AgentAvatar member={agent} size={20} decorative />
+                        <span className="min-w-0 flex-1 truncate font-medium text-ink">@{agent.handle}</span>
+                        <span className={cx("rounded-full px-2 text-[11px]", computer && computer.state !== "off" ? "bg-sidebar text-muted" : "text-faint")}>{computer?.state ?? "off"}</span>
+                        {computer && <span className="tabular-nums">{`${(computer.disk_bytes / 1048576).toFixed(1)} MB used`}</span>}
+                        {computer?.last_reset && <span className="tabular-nums">Reset {new Date(computer.last_reset).toLocaleString()}</span>}
+                        {computer && computer.state !== "off" && (
+                          <button
+                            type="button"
+                            className="min-h-10 rounded-md px-2 font-medium text-accent transition-colors duration-150 hover:bg-sidebar md:min-h-7"
+                            onClick={() => void resetComputer(agent.handle)}
+                          >
+                            Reset @{agent.handle}
+                          </button>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
+            )}
+
             {archivedProjects.length > 0 && (
               <section aria-label="Archived">
-                <h2 className="pb-2 text-[11px] font-medium uppercase tracking-wide text-faint">Archived</h2>
-                <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                <h2 className={HEADING}>Archived</h2>
+                <ul className={cx(CARD_BASE, "divide-y divide-line")}>
                   {archivedProjects.map((project) => (
                     <li key={project.handle} className="flex min-h-10 items-center gap-3 px-3 py-1.5 text-[13px]">
                       <Link to="/p/$handle" params={{ handle: project.handle }} className="min-w-0 flex-1 truncate hover:underline">{project.name}</Link>
@@ -376,7 +404,7 @@ function ProjectCard({
         <p className="py-1 text-[12px] text-muted">No lead: @{project.handle} reaches nobody yet.</p>
       )}
 
-      <p className="pt-2 text-[11px] font-medium uppercase tracking-wide text-faint">Departments</p>
+      <p className={cx("pt-3", SECTION_LABEL)}>Departments</p>
       {assignedDepartments.length === 0 ? (
         <p className="py-1 text-[12px] text-muted">None assigned.</p>
       ) : (
@@ -393,7 +421,7 @@ function ProjectCard({
         </ul>
       )}
 
-      <p className="pt-2 text-[11px] font-medium uppercase tracking-wide text-faint">Specialists</p>
+      <p className={cx("pt-3", SECTION_LABEL)}>Specialists</p>
       {project.specialists.length === 0 ? (
         <p className="py-1 text-[12px] text-muted">None assigned.</p>
       ) : (

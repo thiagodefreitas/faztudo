@@ -41,6 +41,23 @@ describe("TaskBoard", () => {
     expect(within(screen.getByRole("region", { name: "Running" })).getByText("Nothing here.")).toBeInTheDocument()
   })
 
+  it("offers a quick Add in Todo only when the page can add", async () => {
+    const onAdd = vi.fn()
+    await renderWithApp(<TaskBoard tasks={tasks} members={[coder, reviewer]} channels={[channel]} onAdd={onAdd} />, { tasks })
+    const todo = screen.getByRole("region", { name: "Todo" })
+    await userEvent.click(within(todo).getByRole("button", { name: "Add" }))
+    expect(onAdd).toHaveBeenCalledTimes(1)
+    expect(within(screen.getByRole("region", { name: "Running" })).queryByRole("button", { name: "Add" })).not.toBeInTheDocument()
+  })
+
+  it("shows the assignee, the status pill and the age on a card", async () => {
+    await renderBoard()
+    const card = within(screen.getByRole("region", { name: "Running" })).getByRole("button", { name: /^Running one/ })
+    expect(card).toHaveTextContent("Reviewer")
+    expect(card).toHaveTextContent("Running")
+    expect(card.querySelector("time")).not.toBeNull()
+  })
+
   it("moves a Todo task down with the keyboard buttons", async () => {
     const patch = vi.spyOn(api, "patchTask").mockResolvedValue(task("a", "todo"))
     await renderBoard()

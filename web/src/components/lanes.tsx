@@ -12,6 +12,7 @@ import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
 import { useLanes, useRuns } from "../state/queries"
 import type { Lane, LaneHealth, LaneUsageReading, LaneWindow, Run } from "../types"
+import { CARD, EmptyState, Kbd, PageHeader } from "./page-header"
 
 function WindowHistory({ window, history, now }: { window: LaneWindow; history: LaneUsageReading[]; now: number }) {
   const readings = history.filter((r) => r.window.name === window.name)
@@ -194,15 +195,17 @@ export function LaneCardView({
 }) {
   const usage = laneRunUsage(runs, lane.id, now)
   return (
-    <article aria-label={`lane ${lane.id}`} data-health={lane.health} className="flex flex-col rounded-md border border-line bg-surface p-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <p className="font-mono text-[13px] font-medium">{lane.id}</p>
+    <article aria-label={`lane ${lane.id}`} data-health={lane.health} className={cx(CARD, "flex flex-col p-4")}>
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 truncate font-mono text-[13px] font-medium">{lane.id}</p>
+        <span className="shrink-0">
+          <HealthBadge health={lane.health} />
+        </span>
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <p className="text-[12px] text-faint">{lane.cli}</p>
         <p className="font-mono text-[12px] text-muted">{lane.model ?? "model unknown"}</p>
         <p className="text-[12px] text-faint">{lane.cost_class}</p>
-        <span className="ml-auto">
-          <HealthBadge health={lane.health} />
-        </span>
       </div>
       {lane.health_reason && <p className="mt-1 text-[12px] text-muted">{lane.health_reason}</p>}
       {lane.windows.length > 0 && (
@@ -246,7 +249,7 @@ export function LaneCardView({
           type="button"
           onClick={onProbe}
           disabled={probing}
-          className="min-h-8 rounded-md border border-line px-2 text-[12px] disabled:opacity-60"
+          className="min-h-10 rounded-lg border border-line bg-surface px-3 text-[12px] font-medium transition-colors duration-150 hover:bg-sidebar disabled:opacity-60 md:min-h-8"
         >
           {probing ? "Probing..." : "Probe now"}
         </button>
@@ -295,7 +298,7 @@ function LaneCard({ lane, now, focused, runs }: { lane: Lane; now: number; focus
         if (focused && el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center" })
       }}
       data-focused={focused || undefined}
-      className={cx("rounded-md", focused && "ring-2 ring-accent")}
+      className={cx("rounded-xl", focused && "ring-2 ring-accent")}
     >
       <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} runs={runs} />
     </div>
@@ -310,17 +313,41 @@ export function LanesPage() {
   useLanesShortcut()
   const list = (lanes.data ?? []).slice().sort((a, b) => a.id.localeCompare(b.id))
 
+  const counts = new Map<LaneHealth, number>()
+  for (const lane of list) counts.set(lane.health, (counts.get(lane.health) ?? 0) + 1)
+  const order: LaneHealth[] = ["available", "conserve", "exhausted", "unavailable", "unknown"]
+
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex items-baseline gap-3 border-b border-line px-3 py-2">
-        <h1 className="text-[15px] font-semibold">Lanes</h1>
-        <p className="font-mono text-[12px] text-muted">{list.length} lanes, Alt+L</p>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <PageHeader
+        title="Lanes"
+        description={
+          <>
+            <span className="tabular-nums">{list.length}</span> {list.length === 1 ? "lane" : "lanes"}: the CLIs and models the team runs on, and how much each has left. <Kbd>Alt</Kbd> <Kbd>L</Kbd> opens this page.
+          </>
+        }
+        actions={
+          list.length > 0 ? (
+            <ul aria-label="Lane health" className="flex flex-wrap items-center gap-1.5">
+              {order
+                .filter((health) => counts.get(health))
+                .map((health) => (
+                  <li key={health} className={cx("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-medium", HEALTH_META[health].badgeClass)}>
+                    <HealthIcon health={health} className="h-2.5 w-2.5 shrink-0" />
+                    <span className="tabular-nums">{counts.get(health)}</span> {HEALTH_META[health].label.toLowerCase()}
+                  </li>
+                ))}
+            </ul>
+          ) : undefined
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {lanes.isPending ? (
           <p className="text-[13px] text-muted">Loading lanes</p>
         ) : list.length === 0 ? (
-          <p className="text-[13px] text-muted">No lanes configured.</p>
+          <EmptyState>
+            No lanes configured. Add a <code className="font-mono">[[lane]]</code> entry to lanes.toml and restart the daemon; the lane shows up here with its windows.
+          </EmptyState>
         ) : (
           <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {list.map((lane) => (

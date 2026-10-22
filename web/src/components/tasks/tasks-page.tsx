@@ -6,6 +6,7 @@ import { useChannels, useMembers, useOrg, useTasks } from "../../state/queries"
 import { AllWork } from "./all-work"
 import { TaskBoard } from "./task-board"
 import { TaskBuilder } from "./task-builder"
+import { PageHeader, PRIMARY_BUTTON, SECONDARY_BUTTON } from "../page-header"
 
 const VIEW_KEY = "faztudo.tasks.view"
 
@@ -56,44 +57,48 @@ export function TasksView({ handle }: { handle?: string }) {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="tasks-page">
-      <header className="flex items-center gap-3 border-b border-line px-3 py-2">
-        <Link to="/" className="min-h-10 py-2 text-[13px] text-muted md:hidden">
-          Inbox
-        </Link>
-        <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold">{project ? `${project.name} tasks` : "Tasks"}</h1>
-        {project && (
-          <Link to="/p/$handle" params={{ handle: project.handle }} className="text-[13px] text-accent hover:underline">
-            Project home
-          </Link>
-        )}
-        <button
-          type="button"
-          onClick={() => setBuilding(true)}
-          disabled={scope.length === 0}
-          className="min-h-10 rounded-md bg-accent px-3 text-[13px] font-medium text-canvas hover:opacity-90 disabled:opacity-50 md:min-h-8"
-        >
-          New task
-        </button>
-      </header>
-      <div role="group" aria-label="View" className="flex gap-1 border-b border-line px-3 py-1.5">
-        {(["tasks", "all"] as const).map((key) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={view === key}
-            onClick={() => setView(key)}
-            className={`min-h-10 rounded-md px-3 text-[13px] md:min-h-8 ${view === key ? "bg-sidebar font-medium text-ink" : "text-muted hover:text-ink"}`}
-          >
-            {key === "tasks" ? "Tasks" : "All work"}
-          </button>
-        ))}
-      </div>
+      <PageHeader
+        title={project ? `${project.name} tasks` : "Tasks"}
+        description={view === "all" ? "Every run of the last 24 hours, by where it stands." : "Work you gave the team, from Todo to Done."}
+        actions={
+          <>
+            {project && (
+              <Link to="/p/$handle" params={{ handle: project.handle }} className={SECONDARY_BUTTON}>
+                Project home
+              </Link>
+            )}
+            <button type="button" onClick={() => setBuilding(true)} disabled={scope.length === 0} className={PRIMARY_BUTTON}>
+              New task
+            </button>
+          </>
+        }
+      >
+        <div role="group" aria-label="View" className="mt-3 inline-flex rounded-lg bg-sidebar p-0.5">
+          {(["tasks", "all"] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={view === key}
+              onClick={() => setView(key)}
+              className={`min-h-9 rounded-md px-3 text-[13px] transition-colors duration-150 md:min-h-7 ${view === key ? "bg-surface font-medium text-ink shadow-[0_1px_2px_rgb(16_24_40/0.08)]" : "text-muted hover:text-ink"}`}
+            >
+              {key === "tasks" ? "Tasks" : "All work"}
+            </button>
+          ))}
+        </div>
+      </PageHeader>
       {view === "all" ? (
         <AllWork channels={channels.data ?? []} channelIds={project ? new Set(scope.map((channel) => channel.id)) : undefined} />
       ) : tasks.isPending ? (
         <p className="p-4 text-[13px] text-muted">Loading tasks</p>
       ) : (
-        <TaskBoard tasks={visible} members={members.data ?? []} channels={channels.data ?? []} showChannel={scope.length > 1} />
+        <TaskBoard
+          tasks={visible}
+          members={members.data ?? []}
+          channels={channels.data ?? []}
+          showChannel={scope.length > 1}
+          {...(scope.length > 0 ? { onAdd: () => setBuilding(true) } : {})}
+        />
       )}
       <TaskBuilder open={building} onOpenChange={setBuilding} channels={scope} />
     </section>

@@ -76,8 +76,33 @@ describe("TodayBrief", () => {
     const user = userEvent.setup()
     await user.click(await screen.findByRole("button", { name: "Mark as seen" }))
     expect(screen.queryByText("verification failed")).not.toBeInTheDocument()
-    expect(screen.getByText("Nothing new.")).toBeInTheDocument()
+    // An empty section folds away instead of saying it is empty.
+    expect(screen.queryByRole("heading", { name: "Finished since you were last here" })).not.toBeInTheDocument()
     expect(Date.parse(localStorage.getItem("faztudo.today.seen") ?? "")).not.toBeNaN()
+  })
+
+  it("folds empty sections and sums up lanes that are fine in one line", async () => {
+    const fine: Lane = { ...exhausted, id: "codex/default", health: "available" }
+    await setup({ lanes: [fine] })
+    const brief = await screen.findByTestId("today")
+    expect(within(brief).getByText("Nothing waits for you.")).toBeInTheDocument()
+    expect(within(brief).queryByRole("heading", { name: "Running now" })).not.toBeInTheDocument()
+    expect(within(brief).queryByRole("heading", { name: "Finished since you were last here" })).not.toBeInTheDocument()
+    expect(within(brief).queryByRole("heading", { name: "Lanes" })).not.toBeInTheDocument()
+    expect(within(brief).getByRole("link", { name: "1 lane, none short" })).toHaveAttribute("href", "/lanes")
+  })
+
+  it("gives each item a status pill and one clear action", async () => {
+    await setup({ runs, approvals: [approval], lanes: [exhausted] })
+    const brief = await screen.findByTestId("today")
+    const review = within(brief).getByRole("link", { name: /Merge the patch/ })
+    expect(review).toHaveTextContent("approval")
+    expect(review).toHaveTextContent("Review")
+    expect(review).toHaveAttribute("href", "/approvals?a=a1")
+    const failed = within(brief).getByRole("link", { name: /verification failed/ })
+    expect(failed).toHaveTextContent("failed")
+    expect(failed).toHaveTextContent("Open")
+    expect(within(brief).getByRole("link", { name: /grok\/default/ })).toHaveAttribute("href", "/lanes?lane=grok%2Fdefault")
   })
 
   it("collapses and remembers the choice", async () => {
