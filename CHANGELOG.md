@@ -21,9 +21,10 @@ All notable changes are listed here. The format follows
   finished or failed since your last visit, what runs now and which lanes
   are short.
 - Approval rules: Always merge changes like this here on a merge card
-  creates a rule for the channel, with path globs and a line cap. Protected
-  paths (CI, hooks, build and lock files, scripts), executables, symlinks
-  and submodules never pass a rule, and a rule never pushes.
+  creates a rule for the channel, with path globs and a line cap. A rule
+  needs a channel test command that passed, never applies to a run a
+  routine started, never passes dot paths, build and lock files, scripts,
+  executables, symlinks or submodules, and never pushes.
 - Cost per run: All work cards show tokens and estimated cost when known,
   and the Lanes page sums today's tokens and cost per lane with how many
   runs were measured. Codex runs are now measured.
@@ -49,6 +50,7 @@ All notable changes are listed here. The format follows
   and its further lines are indented, so a message cannot pose as one from
   you.
 - Database migrations from 012 on run in order, each once.
+- Listing routines is for humans only: an agent token gets 403.
 
 ## [0.1.7] - 2026-10-20
 
