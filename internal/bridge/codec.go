@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -403,7 +404,9 @@ func (c *Conn) pump(ctx context.Context, cursor *int64) error {
 	for _, e := range eventsAfter {
 		for conversation, channel := range bindings {
 			if channel == e.ChannelID {
-				c.deliver(ctx, e, conversation, channel)
+				if err := c.deliver(ctx, e, conversation, channel); err != nil {
+					return err
+				}
 			}
 		}
 		if ctx.Err() != nil {
@@ -419,10 +422,51 @@ func (c *Conn) pump(ctx context.Context, cursor *int64) error {
 	return nil
 }
 
-func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channel string) {
+func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channel string) error {
+	if strings.HasPrefix(string(e.Actor), "agent:") && (e.Type == events.MessagePosted || e.Type == events.ApprovalRequested) {
+		policy, err := c.handler.Store.BridgeAgentPolicy(ctx, "signal", conversation, channel)
+		if err != nil {
+			return err
+		}
+		if policy == "off" || e.Type == events.ApprovalRequested && policy == "draft" {
+			return nil
+		}
+		if policy == "draft" {
+			var m domain.Message
+			if err := json.Unmarshal(e.Payload, &m); err != nil {
+				return err
+			}
+			kind, recipient, _ := strings.Cut(conversation, ":")
+			title := "Send to Signal " + kind + " " + recipient + "?"
+			recipients := conversation
+			if conversation == "self" {
+				title, recipients = "Send to Signal note-to-self?", "the Director's note-to-self"
+			}
+			approval := domain.Approval{
+				ID: store.NewID(), ChannelID: channel, RequestedBy: m.AuthorID,
+				Title:       title,
+				Detail:      "An agent wants to send this message to " + conversation + ".",
+				Options:     []domain.ApprovalOption{{Key: "send", Label: "Send", Style: "primary"}, {Key: "edit_send", Label: "Edit and send"}, {Key: "dont_send", Label: "Don't send"}},
+				State:       domain.ApprovalPending,
+				SignalDraft: &domain.SignalDraft{Conversation: conversation, MessageID: m.ID, Text: m.Body, Recipients: recipients, Attachments: m.Attachments},
+			}
+			_, err := c.handler.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: channel, IdempotencyKey: "signal-draft:" + conversation + ":" + m.ID, Payload: approval})
+			return err
+		}
+	}
 	outbound, ok := OutboundFor(e, map[string]string{conversation: channel})
 	if !ok {
-		return
+		return nil
+	}
+	approvedDraft := e.Type == events.ApprovalResolved && outbound.Ref.MessageID != ""
+	if approvedDraft {
+		claimed, err := c.handler.Store.ClaimBridgeDelivery(ctx, "signal", "draft:"+conversation+":"+outbound.Ref.MessageID)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return nil
+		}
 	}
 	if err := c.attachments(&outbound, e); err != nil {
 		slog.Warn("signal bridge: attachment", "event", e.Seq, "error", err)
@@ -431,15 +475,19 @@ func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channe
 			reason = "an attachment is too large"
 		}
 		c.skipped(ctx, e, reason)
-		return
+		return nil
 	}
 	var result struct {
 		ExternalID string `json:"external_id"`
 	}
 	var err error
-	for attempt := 0; attempt < sendAttempts; attempt++ {
+	attempts := sendAttempts
+	if approvedDraft {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 && !sleepCtx(ctx, c.retryDelay) {
-			return
+			return nil
 		}
 		callCtx, cancel := context.WithTimeout(ctx, c.callTimeout)
 		err = c.call(callCtx, "outbound.send", outbound, &result)
@@ -453,7 +501,7 @@ func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channe
 		}
 	}
 	if ctx.Err() != nil {
-		return
+		return nil
 	}
 	if err == nil && result.ExternalID == "" {
 		err = errors.New("bridge returned no external_id")
@@ -461,12 +509,13 @@ func (c *Conn) deliver(ctx context.Context, e events.Event, conversation, channe
 	if err != nil {
 		slog.Warn("signal bridge: outbound.send", "event", e.Seq, "error", err)
 		c.skipped(ctx, e, "the bridge did not accept it")
-		return
+		return nil
 	}
 	ref := store.BridgeOutbound{ExternalID: result.ExternalID, MessageID: outbound.Ref.MessageID, ApprovalID: outbound.Ref.ApprovalID}
 	if err := c.recordOutbound(ctx, ref); err != nil {
 		slog.Warn("signal bridge: recording outbound", "event", e.Seq, "error", err)
 	}
+	return nil
 }
 
 // skipped tells the channel that one message did not reach Signal.
@@ -493,18 +542,30 @@ func (c *Conn) recordOutbound(ctx context.Context, ref store.BridgeOutbound) err
 }
 
 func (c *Conn) attachments(out *Outbound, e events.Event) error {
-	if e.Type != events.MessagePosted {
+	var items []domain.Attachment
+	switch e.Type {
+	case events.MessagePosted:
+		var m domain.Message
+		if err := json.Unmarshal(e.Payload, &m); err != nil {
+			return err
+		}
+		items = m.Attachments
+	case events.ApprovalResolved:
+		var a domain.Approval
+		if err := json.Unmarshal(e.Payload, &a); err != nil {
+			return err
+		}
+		if a.SignalDraft != nil {
+			items = a.SignalDraft.Attachments
+		}
+	default:
 		return nil
-	}
-	var m domain.Message
-	if err := json.Unmarshal(e.Payload, &m); err != nil {
-		return err
 	}
 	limit := c.handler.MaxUpload
 	if limit <= 0 {
 		limit = 25 << 20
 	}
-	for _, item := range m.Attachments {
+	for _, item := range items {
 		f, err := (files.Store{Dir: c.handler.FilesDir}).Open(item.ID)
 		if err != nil {
 			return err
@@ -578,8 +639,21 @@ func OutboundFor(e events.Event, bindings map[string]string) (Outbound, bool) {
 		if json.Unmarshal(e.Payload, &a) != nil {
 			return Outbound{}, false
 		}
+		if a.SignalDraft != nil {
+			return Outbound{}, false
+		}
 		out.Text = a.Title + "\nOpen the web app to keep or discard."
 		out.Ref.ApprovalID = a.ID
+	case events.ApprovalResolved:
+		var a domain.Approval
+		if json.Unmarshal(e.Payload, &a) != nil || a.SignalDraft == nil || a.SignalDraft.Conversation != key || a.Resolution == nil || a.Resolution.Option != "send" && a.Resolution.Option != "edit_send" {
+			return Outbound{}, false
+		}
+		out.Text = a.SignalDraft.Text
+		if a.Resolution.Option == "edit_send" {
+			out.Text = a.Resolution.Note
+		}
+		out.Ref.MessageID = a.SignalDraft.MessageID
 	default:
 		return Outbound{}, false
 	}

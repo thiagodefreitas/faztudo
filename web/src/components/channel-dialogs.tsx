@@ -1,11 +1,11 @@
 import * as Dialog from "@radix-ui/react-dialog"
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState, type FormEvent, type ReactNode } from "react"
 import { ApiError, api } from "../api/client"
 import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
-import type { Channel, ChannelPatch, Member } from "../types"
+import type { BridgeBinding, Channel, ChannelPatch, Member } from "../types"
 import { DevicesPanel } from "./auth"
 
 export const CHANNEL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -113,7 +113,7 @@ export function ChannelSettingsDialog({
   agents: Member[]
   open: boolean
   onOpenChange: (open: boolean) => void
-  initialTab?: "channel" | "devices"
+  initialTab?: "channel" | "devices" | "bridge"
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -138,11 +138,11 @@ function SettingsForm({
 }: {
   channel: Channel
   agents: Member[]
-  initialTab?: "channel" | "devices"
+  initialTab?: "channel" | "devices" | "bridge"
   onDone: () => void
 }) {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<"channel" | "devices">(initialTab)
+  const [tab, setTab] = useState<"channel" | "devices" | "bridge">(initialTab)
   const [topic, setTopic] = useState(channel.topic ?? "")
   const [repoPath, setRepoPath] = useState(channel.repo_path ?? "")
   const [testCommand, setTestCommand] = useState(channel.test_command ?? "")
@@ -204,8 +204,32 @@ function SettingsForm({
       >
         Devices
       </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "bridge"}
+        onClick={() => setTab("bridge")}
+        className={cx("min-h-8 rounded px-2.5 text-[12px] font-medium", tab === "bridge" ? "bg-accent-soft text-ink" : "text-muted hover:bg-canvas")}
+      >
+        Bridge
+      </button>
     </div>
   )
+
+  if (tab === "bridge") {
+    return (
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-md border border-line bg-surface p-4 shadow-lg">
+          <Dialog.Title className="text-[15px] font-semibold">Settings</Dialog.Title>
+          <Dialog.Description className="mt-1 text-[12px] text-muted">Signal delivery for #{channel.name}.</Dialog.Description>
+          {tabs}
+          <BridgeSettings channelId={channel.id} />
+          <div className="mt-4 flex justify-end"><Dialog.Close type="button" className={buttonClass}>Close</Dialog.Close></div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    )
+  }
 
   if (tab === "devices") {
     return (
@@ -312,6 +336,50 @@ function SettingsForm({
         )}
       </div>
     </Shell>
+  )
+}
+
+function BridgeSettings({ channelId }: { channelId: string }) {
+  const qc = useQueryClient()
+  const queryKey = ["bridge-bindings", channelId]
+  const bindings = useQuery({ queryKey, queryFn: () => api.bridgeBindings(channelId) })
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState("")
+  async function update(binding: BridgeBinding, policy: BridgeBinding["outbound_agents"]) {
+    setBusy(binding.conversation)
+    setError("")
+    try {
+      const next = await api.patchBridgeBinding(channelId, binding.conversation, policy)
+      qc.setQueryData<BridgeBinding[]>(queryKey, (list = []) => list.map((item) => item.conversation === next.conversation ? next : item))
+    } catch (cause) {
+      setError(errorText(cause))
+    } finally {
+      setBusy("")
+    }
+  }
+  return (
+    <section aria-label="Signal bridge settings" className="mt-3">
+      {bindings.isLoading && <p className="text-[12px] text-muted">Loading bindings...</p>}
+      {bindings.isError && <p role="alert" className="text-[12px] text-danger">{errorText(bindings.error)}</p>}
+      {bindings.data?.length === 0 && <p className="text-[12px] text-muted">No Signal conversations are bound to this channel.</p>}
+      {bindings.data?.map((binding) => (
+        <label key={binding.conversation} className="mt-3 block text-[13px]">
+          {binding.recipients}
+          <select
+            aria-label={`Agent messages to ${binding.recipients}`}
+            className={inputClass}
+            disabled={busy !== ""}
+            value={binding.outbound_agents}
+            onChange={(event) => void update(binding, event.target.value as BridgeBinding["outbound_agents"])}
+          >
+            <option value="send">Send automatically</option>
+            <option value="draft">Ask before sending</option>
+            <option value="off">Do not send</option>
+          </select>
+        </label>
+      ))}
+      {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
+    </section>
   )
 }
 

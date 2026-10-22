@@ -20,6 +20,30 @@ const approval: Approval = {
 }
 
 describe("ApprovalCard", () => {
+  it("shows the exact Signal draft and sends either original or edited text", async () => {
+    const user = userEvent.setup()
+    const onResolve = vi.fn()
+    const draft: Approval = { ...approval, title: "Send to Signal group people?", signal_draft: { conversation: "group:people", recipients: "group:people", message_id: "message", text: "First line\nSecond line" }, options: [{ key: "send", label: "Send" }, { key: "edit_send", label: "Edit and send" }, { key: "dont_send", label: "Don't send" }] }
+    render(<ApprovalCard approval={draft} onResolve={onResolve} />)
+    expect(screen.getByText("Recipients: group:people")).toBeInTheDocument()
+    expect(document.querySelector("pre")?.textContent).toBe("First line\nSecond line")
+    await user.click(screen.getByRole("button", { name: /^Send$/ }))
+    expect(onResolve).toHaveBeenCalledWith("send")
+    await user.click(screen.getByRole("button", { name: "Edit and send" }))
+    const box = screen.getByRole("textbox", { name: "Edit message" })
+    await user.clear(box)
+    await user.type(box, "Edited")
+    await user.click(screen.getByRole("button", { name: "Send edited text" }))
+    expect(onResolve).toHaveBeenCalledWith("edit_send", "Edited")
+    await user.click(screen.getByRole("button", { name: "Don't send" }))
+    expect(onResolve).toHaveBeenCalledWith("dont_send")
+  })
+
+  it("shows who decided a Signal draft", () => {
+    const draft: Approval = { ...approval, title: "Send to Signal group people?", state: "resolved", signal_draft: { conversation: "group:people", recipients: "group:people", message_id: "message", text: "original" }, resolution: { option: "send", by: "human", at: new Date().toISOString() } }
+    render(<ApprovalCard approval={draft} decider="Director" onResolve={() => undefined} />)
+    expect(screen.getByRole("article", { name: draft.title })).toHaveTextContent("by Director")
+  })
   it("answers from the keyboard when the card is focused", async () => {
     const user = userEvent.setup()
     const onResolve = vi.fn()

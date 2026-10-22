@@ -39,7 +39,7 @@ export function ConnectedApproval({ approval }: { approval: Approval }) {
         decider={deciderName(approval, members.data ?? [])}
         onResolve={(option, commitMessage) => {
           setResolveError("")
-          const body = commitMessage ? { option, commit_message: commitMessage } : { option }
+          const body = approval.signal_draft && option === "edit_send" ? { option, text: commitMessage } : commitMessage ? { option, commit_message: commitMessage } : { option }
           void api.resolveApproval(approval.id, body).then((next) => {
             qc.setQueryData<Approval[]>(qk.approvals, (list = []) => replaceById(list, next))
           }).catch((error: unknown) => {

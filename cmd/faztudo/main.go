@@ -163,6 +163,7 @@ func run(args []string) error {
 			return err
 		}
 		handler := api.New(s, humanID, version.Get().Version)
+		handler.SignalBindings = c.Bridges.Signal.Bind
 		handler.AllowedHosts = c.Server.AllowedHosts
 		handler.LocalTokenPath = localTokenPath
 		handler.FilesDir = p.FilesDir

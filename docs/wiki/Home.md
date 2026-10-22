@@ -22,6 +22,7 @@ See the office in motion: [20 second tour](https://thiagodefreitas.github.io/faz
   archive and the daily digest
 - [Lanes and quota](Lanes-and-quota): what a lane is and how switching works
 - [Phone and LAN access](Phone-and-LAN-access): use the web app from a phone
+- [Signal](Signal): bridge bindings and agent message approval
 - [Troubleshooting](Troubleshooting): the sandbox, memory kills, OpenCode,
   merges and the phone certificate
 - [FAQ](FAQ)

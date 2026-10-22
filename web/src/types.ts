@@ -248,6 +248,13 @@ export interface Approval {
   options: ApprovalOption[]
   state: ApprovalState
   resolution?: ApprovalResolution
+  signal_draft?: { conversation: string; message_id: ID; text: string; recipients: string; attachments?: Attachment[] }
+}
+
+export interface BridgeBinding {
+  conversation: string
+  recipients: string
+  outbound_agents: "send" | "draft" | "off"
 }
 
 export interface ApprovalRule {
@@ -449,6 +456,7 @@ export interface ResolveBody {
   option: string
   note?: string
   commit_message?: string
+  text?: string
 }
 
 export interface LanePatch {

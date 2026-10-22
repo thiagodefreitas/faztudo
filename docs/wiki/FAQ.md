@@ -44,7 +44,8 @@ Linux is the supported system. Other systems are untested.
 No. LAN mode is built in. See [Phone and LAN access](Phone-and-LAN-access).
 
 **Is there a Signal or Discord bridge?**
-Not yet. Signal is planned for M3 and Discord for M5.
+Signal is available through `signal-cli`; see [Signal](Signal). Discord is
+planned for M5.
 
 **Do agents get their own computer?**
 Each write run gets a fresh git worktree and a clean environment on your

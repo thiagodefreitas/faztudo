@@ -37,6 +37,8 @@ func (noopTrigger) OnMessage(context.Context, domain.Message, []domain.Member) {
 type API struct {
 	Store            *store.Store
 	HumanID, Version string
+	// SignalBindings are the configured conversation-to-channel bindings.
+	SignalBindings map[string]string
 	// AllowedHosts are extra host names (no port) accepted in the Host
 	// header of loopback requests, for a local reverse proxy such as
 	// tailscale serve. With LAN mode on, such requests need a session.
@@ -188,6 +190,8 @@ func (a *API) authenticated() http.Handler {
 	m.HandleFunc("POST /api/v1/runs/{id}/retry", a.retry)
 	m.HandleFunc("GET /api/v1/approvals", a.approvals)
 	m.HandleFunc("POST /api/v1/approvals/{id}/resolve", a.resolve)
+	m.HandleFunc("GET /api/v1/channels/{id}/bridge-bindings", a.bridgeBindings)
+	m.HandleFunc("PATCH /api/v1/channels/{id}/bridge-bindings/{conversation}", a.patchBridgeBinding)
 	m.HandleFunc("GET /api/v1/approval-rules", a.listApprovalRules)
 	m.HandleFunc("POST /api/v1/approval-rules", a.createApprovalRule)
 	m.HandleFunc("DELETE /api/v1/approval-rules/{id}", a.deleteApprovalRule)
@@ -1066,16 +1070,16 @@ func (e applyError) Unwrap() error { return e.error }
 
 // ResolveAs is the approval path shared by HTTP and trusted local bridges.
 func (a *API) ResolveAs(ctx context.Context, human domain.Member, approvalID, option, commitMessage string) (domain.Approval, error) {
-	return a.resolveAs(ctx, human, approvalID, option, commitMessage, false)
+	return a.resolveAs(ctx, human, approvalID, option, commitMessage, "", false)
 }
 
 // ResolveBridgeAs enforces the Signal policy even if its process forwards a
 // merge request. Signal transport and reply parsing arrive in a later step.
 func (a *API) ResolveBridgeAs(ctx context.Context, human domain.Member, approvalID, option string) (domain.Approval, error) {
-	return a.resolveAs(ctx, human, approvalID, option, "", true)
+	return a.resolveAs(ctx, human, approvalID, option, "", "", true)
 }
 
-func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, option, commitMessage string, bridge bool) (domain.Approval, error) {
+func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, option, commitMessage, editedText string, bridge bool) (domain.Approval, error) {
 	a.resolveMu.Lock()
 	defer a.resolveMu.Unlock()
 	if human.Kind != domain.MemberHuman {
@@ -1091,6 +1095,16 @@ func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, op
 	if v.State != domain.ApprovalPending {
 		return domain.Approval{}, store.ErrConflict
 	}
+	if v.SignalDraft != nil {
+		if bridge || human.ID != a.HumanID || option != "send" && option != "edit_send" && option != "dont_send" {
+			return domain.Approval{}, PostError{"forbidden", "Send drafts require the Director in the web app"}
+		}
+		if option == "edit_send" && (strings.TrimSpace(editedText) == "" || len(editedText) > MaxMessageBytes) {
+			return domain.Approval{}, PostError{"bad_request", "edited text is empty or too long"}
+		}
+	} else if editedText != "" {
+		return domain.Approval{}, PostError{"bad_request", "this approval has no message to edit"}
+	}
 	valid := false
 	for _, o := range v.Options {
 		if o.Key == option {
@@ -1101,6 +1115,9 @@ func (a *API) resolveAs(ctx context.Context, human domain.Member, approvalID, op
 		return domain.Approval{}, store.ErrInvalidOption
 	}
 	note := ""
+	if v.SignalDraft != nil && option == "edit_send" {
+		note = editedText
+	}
 	// A crash between the change and the resolution leaves the run done with
 	// its outcome while the approval is still pending. Finish the approval with
 	// what was really applied, even when this request asks for another option,
@@ -1144,17 +1161,22 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		Option        string `json:"option"`
 		Note          string `json:"note"`
 		CommitMessage string `json:"commit_message"`
+		Text          string `json:"text"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	v, err := a.ResolveAs(r.Context(), current(r), r.PathValue("id"), req.Option, req.CommitMessage)
+	v, err := a.resolveAs(r.Context(), current(r), r.PathValue("id"), req.Option, req.CommitMessage, req.Text, false)
 	if err != nil {
 		var postErr PostError
 		var userErr domain.UserError
 		switch {
 		case errors.As(err, &postErr):
-			fail(w, 403, postErr.Code, postErr.Message)
+			status := 403
+			if postErr.Code == "bad_request" {
+				status = 400
+			}
+			fail(w, status, postErr.Code, postErr.Message)
 		case errors.Is(err, store.ErrNotFound):
 			fail(w, 404, "not_found", "approval not found")
 		case errors.Is(err, store.ErrConflict):

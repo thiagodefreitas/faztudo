@@ -2,6 +2,7 @@ import type {
   Approval,
   ApprovalRule,
   ApprovalRuleInput,
+  BridgeBinding,
   Attachment,
   AssignBody,
   AssignKind,
@@ -74,6 +75,8 @@ export interface Api {
   channels: () => Promise<Channel[]>
   createChannel: (body: ChannelCreate) => Promise<Channel>
   patchChannel: (id: ID, body: ChannelPatch) => Promise<Channel>
+  bridgeBindings: (channelId: ID) => Promise<BridgeBinding[]>
+  patchBridgeBinding: (channelId: ID, conversation: string, policy: BridgeBinding["outbound_agents"]) => Promise<BridgeBinding>
   messages: (channelId: ID, query?: { before?: ID; limit?: number }) => Promise<Message[]>
   thread: (messageId: ID) => Promise<ThreadPage>
   postMessage: (channelId: ID, body: MessageCreate) => Promise<Message>
@@ -179,6 +182,8 @@ export function createApi(options: ApiOptions = {}): Api {
     channels: () => request("GET", "/channels"),
     createChannel: (body) => request("POST", "/channels", body),
     patchChannel: (id, body) => request("PATCH", `/channels/${encodeURIComponent(id)}`, body),
+    bridgeBindings: (channelId) => request("GET", `/channels/${encodeURIComponent(channelId)}/bridge-bindings`),
+    patchBridgeBinding: (channelId, conversation, policy) => request("PATCH", `/channels/${encodeURIComponent(channelId)}/bridge-bindings/${encodeURIComponent(conversation)}`, { outbound_agents: policy }),
     messages: (channelId, params = {}) =>
       request("GET", query(`/channels/${encodeURIComponent(channelId)}/messages`, params)),
     thread: (messageId) => request("GET", `/messages/${encodeURIComponent(messageId)}/thread`),

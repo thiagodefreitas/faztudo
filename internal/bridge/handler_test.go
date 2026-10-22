@@ -173,7 +173,7 @@ func TestFakeBridgeProcess(t *testing.T) {
 			os.Exit(4)
 		}
 	}
-	if os.Getenv("FAZTUDO_BRIDGE_MODE") == "outbound" {
+	if os.Getenv("FAZTUDO_BRIDGE_MODE") == "outbound" || os.Getenv("FAZTUDO_BRIDGE_MODE") == "draft_outbound" {
 		scanner := bufio.NewScanner(os.Stdin)
 		if !scanner.Scan() {
 			os.Exit(6)
@@ -186,8 +186,19 @@ func TestFakeBridgeProcess(t *testing.T) {
 			Method string          `json:"method"`
 			Params Outbound        `json:"params"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &request) != nil || request.Method != "outbound.send" || request.Params.Text != "hello from agent" || len(request.Params.Attachments) != 1 || request.Params.Attachments[0].DataBase64 != base64.StdEncoding.EncodeToString([]byte("hi")) {
+		wantText := "hello from agent"
+		wantAttachments := 1
+		if os.Getenv("FAZTUDO_BRIDGE_MODE") == "draft_outbound" {
+			wantText, wantAttachments = os.Getenv("FAZTUDO_BRIDGE_WANT_TEXT"), 0
+		}
+		if json.Unmarshal(scanner.Bytes(), &request) != nil || request.Method != "outbound.send" || request.Params.Text != wantText || len(request.Params.Attachments) != wantAttachments {
 			os.Exit(8)
+		}
+		if wantAttachments == 1 && request.Params.Attachments[0].DataBase64 != base64.StdEncoding.EncodeToString([]byte("hi")) {
+			os.Exit(8)
+		}
+		if os.Getenv("FAZTUDO_BRIDGE_MODE") == "draft_outbound" {
+			_ = os.WriteFile(os.Getenv("FAZTUDO_BRIDGE_COUNT")+".sent", []byte(request.Params.Text), 0600)
 		}
 		_, _ = os.Stdout.WriteString(`{"jsonrpc":"2.0","id":` + string(request.ID) + `,"result":{"external_id":"sent-1"}}` + "\n")
 		time.Sleep(200 * time.Millisecond)

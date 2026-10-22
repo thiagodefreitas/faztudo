@@ -9,7 +9,7 @@ This is the short version, as of the current main branch.
 | M1 First dogfood | event log, API, chat, runs in worktrees, approvals, Claude and Codex | built |
 | M1b Team chat and Lanes | threads, DMs, palette, four more adapters, Lanes dashboard, MCP server, original avatars, Office page (v1) | mostly built (including the phone inbox, choice cards and collapsed agent activity); departments open |
 | M2 Usable alpha | LAN mode, write-run sandbox (bubblewrap, no root), search, pins, files, notifications, packages, security review, Chief of Staff and routines | LAN mode is built; the rest is open |
-| M3 Signal | bridge through `signal-cli` | planned |
+| M3 Signal | bridge through `signal-cli` | linking and message delivery built; Signal approval replies remain open |
 | M4 2D office | 2D office scene with approvals in the scene; agent computers (persistent sandboxes for one agent or a team, CLI logins stay on your machine) | the office room is built; approvals in the scene and agent computers planned |
 | M5 Discord and extensions | Discord bridge, bridge protocol, adapters from a config file | planned |
 | M6 3D office and desktop app | 3D view, Linux desktop app | planned |

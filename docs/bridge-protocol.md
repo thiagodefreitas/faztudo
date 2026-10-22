@@ -84,6 +84,25 @@ or `approval_id`. The bridge replies with `{"external_id":"..."}`. The
 daemon stores that mapping and advances its outbound event cursor after the
 reply. A newly enabled mirror starts at the current event, not old history.
 The daemon never echoes a message whose event actor is `bridge:signal`.
+Human messages in a bound channel, including thread replies, go to every
+bound Signal conversation for that channel. Agent messages, including run
+answers and MCP `post_message` calls, follow each binding's `outbound_agents`
+setting. `self` sends to the Director's Signal note-to-self; `group:<id>` sends
+to that group and `direct:<id>` sends to that person. A bound channel can have
+more than one recipient.
+
+`outbound_agents` is stored for each binding and edited by a human in the
+channel's Settings > Bridge tab. The choices are `send`, `draft`, and `off`.
+Note-to-self defaults to `send`; groups and direct recipients default to
+`draft`. With `draft`, the message stays in faztudo and the Director sees a
+card with the exact text and Signal recipient. Send sends that text; Edit and
+send records and sends the edited text; Don't send leaves it in faztudo.
+These cards cannot be decided by approval rules or Signal replies. A decided
+draft is claimed before delivery so it cannot be sent twice if the event
+cursor is replayed. A failed delivery attempt posts the usual channel notice.
+If the daemon stops after the claim, delivery may be unconfirmed and is not
+retried; the Director may need to check Signal to know whether it arrived.
+
 If one `outbound.send` fails (an error reply, a timeout, a missing
 attachment), the daemon retries a transport failure a few times, then skips
 that event, posts a notice in the channel, and carries on with the next one.
@@ -96,7 +115,6 @@ Read stdin on its own thread or task.
 On shutdown the daemon sends a `shutdown` notification, waits five seconds,
 then kills the bridge process group.
 
-Configured mirroring needs no per-message approval. An agent request to send
-outward still needs human approval. Signal approval replies will only support
+Human mirroring needs no per-message approval. Signal approval replies will only support
 `keep` and `discard`; `merge` remains a web action. The daemon's approval
 method enforces this even if a bridge forwards `merge`.

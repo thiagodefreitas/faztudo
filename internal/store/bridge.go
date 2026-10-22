@@ -77,3 +77,36 @@ func (s *Store) BridgeOutbound(ctx context.Context, bridge, externalID string) (
 	}
 	return v, err
 }
+
+// BridgeAgentPolicy returns the stored choice or the safe default for this
+// conversation. Only note-to-self has the Director as its sole reader.
+func (s *Store) BridgeAgentPolicy(ctx context.Context, bridge, conversation, channelID string) (string, error) {
+	var policy string
+	err := s.db.QueryRowContext(ctx, "SELECT outbound_agents FROM bridge_binding_policy WHERE bridge=? AND conversation=? AND channel_id=?", bridge, conversation, channelID).Scan(&policy)
+	if errors.Is(err, sql.ErrNoRows) {
+		if conversation == "self" {
+			return "send", nil
+		}
+		return "draft", nil
+	}
+	return policy, err
+}
+
+func (s *Store) SetBridgeAgentPolicy(ctx context.Context, bridge, conversation, channelID, policy string) error {
+	if policy != "send" && policy != "draft" && policy != "off" {
+		return ErrInvalidOption
+	}
+	_, err := s.db.ExecContext(ctx, "INSERT INTO bridge_binding_policy(bridge,conversation,channel_id,outbound_agents) VALUES(?,?,?,?) ON CONFLICT(bridge,conversation,channel_id) DO UPDATE SET outbound_agents=excluded.outbound_agents", bridge, conversation, channelID, policy)
+	return err
+}
+
+// ClaimBridgeDelivery makes an approved draft an at-most-once send. A crash
+// after claiming may leave it undelivered, but cannot publish it twice.
+func (s *Store) ClaimBridgeDelivery(ctx context.Context, bridge, key string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO bridge_delivery(bridge,delivery_key) VALUES(?,?)", bridge, key)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}

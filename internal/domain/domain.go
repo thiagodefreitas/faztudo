@@ -327,7 +327,16 @@ type Approval struct {
 	Resolution  *ApprovalResolution `json:"resolution,omitempty"`
 
 	// CommitMessage is the proposed message for a write run's Merge.
-	CommitMessage string `json:"commit_message,omitempty"`
+	CommitMessage string       `json:"commit_message,omitempty"`
+	SignalDraft   *SignalDraft `json:"signal_draft,omitempty"`
+}
+
+type SignalDraft struct {
+	Conversation string       `json:"conversation"`
+	MessageID    string       `json:"message_id"`
+	Text         string       `json:"text"`
+	Recipients   string       `json:"recipients"`
+	Attachments  []Attachment `json:"attachments,omitempty"`
 }
 
 type LaneHealth string

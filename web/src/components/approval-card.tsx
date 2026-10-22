@@ -12,6 +12,36 @@ import { Markdown } from "./markdown"
 
 const BUTTON = "min-h-11 rounded-md border px-4 text-[14px] md:min-h-9 md:px-3 md:text-[13px]"
 
+function SignalDraftCard({ approval, onResolve, decider }: { approval: Approval; onResolve: (option: string, text?: string) => void; decider?: string | undefined }) {
+  const draft = approval.signal_draft!
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(draft.text)
+  if (approval.state !== "pending") return <DecidedLine approval={approval} decider={decider} />
+  return (
+    <article aria-label={approval.title} className="fz-rise mt-3 rounded-lg border border-l-2 border-line border-l-warn bg-canvas p-3">
+      <h3 className="text-[14px] font-semibold">{approval.title}</h3>
+      <p className="mt-2 text-[12px] text-muted">Recipients: {draft.recipients}</p>
+      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-line bg-surface p-2 text-[13px]">{draft.text}</pre>
+      {draft.attachments?.map((item) => <p key={item.id} className="mt-1 text-[12px] text-muted">Attachment: {item.name}</p>)}
+      {editing && (
+        <label className="mt-3 block text-[12px]">
+          Edit message
+          <textarea aria-label="Edit message" className="mt-1 block min-h-28 w-full rounded border border-line bg-surface p-2 text-[13px]" value={text} onChange={(event) => setText(event.target.value)} />
+        </label>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className={cx(BUTTON, "border-accent bg-accent text-canvas")} onClick={() => onResolve("send")}>Send</button>
+        {editing ? (
+          <button type="button" className={BUTTON} disabled={!text.trim()} onClick={() => onResolve("edit_send", text)}>Send edited text</button>
+        ) : (
+          <button type="button" className={BUTTON} onClick={() => setEditing(true)}>Edit and send</button>
+        )}
+        <button type="button" className={BUTTON} onClick={() => onResolve("dont_send")}>Don't send</button>
+      </div>
+    </article>
+  )
+}
+
 // The folded card: what was decided, by whom and when.
 function DecidedLine({ approval, decider }: { approval: Approval; decider: string | undefined }) {
   const now = useNow()
@@ -109,6 +139,7 @@ export function ApprovalCard({
     else choose(shortcut.option)
   }
 
+  if (approval.signal_draft) return <SignalDraftCard approval={approval} onResolve={onResolve} decider={decider} />
   if (!pending) return <DecidedLine approval={approval} decider={decider} />
 
   const confirmLabel = approval.options.find((option) => option.key === confirming)?.label

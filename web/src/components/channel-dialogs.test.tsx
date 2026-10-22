@@ -34,6 +34,17 @@ afterEach(() => {
 })
 
 describe("ChannelSettingsDialog", () => {
+  it("edits the policy of a Signal binding", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, "bridgeBindings").mockResolvedValue([{ conversation: "group:people", recipients: "group:people", outbound_agents: "draft" }])
+    const patch = vi.spyOn(api, "patchBridgeBinding").mockResolvedValue({ conversation: "group:people", recipients: "group:people", outbound_agents: "off" })
+    wrap(<ChannelSettingsDialog channel={channel} agents={agents} open onOpenChange={() => undefined} />)
+    await user.click(screen.getByRole("tab", { name: "Bridge" }))
+    const select = await screen.findByRole("combobox", { name: "Agent messages to group:people" })
+    expect(select).toHaveValue("draft")
+    await user.selectOptions(select, "Do not send")
+    await waitFor(() => expect(patch).toHaveBeenCalledWith(channel.id, "group:people", "off"))
+  })
   it("saves topic, repo_path and test_command", async () => {
     const user = userEvent.setup()
     const next = { ...channel, topic: "new", repo_path: "/r", test_command: "go test ./..." }
