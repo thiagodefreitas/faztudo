@@ -11,6 +11,7 @@ import { sortMessages } from "../state/reduce"
 import { projectOfChannel } from "../lib/projects"
 import { useChannels, useMe, useMembers, useOrg, type PendingMessage } from "../state/queries"
 import { toggleChannelMute, useNotifyPrefs } from "../lib/notify-prefs"
+import { OPEN_TEST_COMMAND_EVENT } from "../lib/channel-settings"
 import type { Attachment, Channel, Message } from "../types"
 import { ActivityStrip } from "./activity-strip"
 import { Composer } from "./composer"
@@ -43,6 +44,10 @@ export function repoName(path: string): string {
   return parts[parts.length - 1] ?? path
 }
 
+export function ChannelNotFound() {
+  return <p className="p-4 text-[13px] text-muted">Channel not found. <Link to="/" className="text-accent underline">Go home</Link></p>
+}
+
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
@@ -60,6 +65,7 @@ export function ChannelPage() {
   const navigate = useNavigate()
   const channel = channels.data?.find((item) => item.id === channelId)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [focusTestCommand, setFocusTestCommand] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [pinsOpen, setPinsOpen] = useState(false)
   const [suggestion, setSuggestion] = useState<{ id: number; text: string; channelId: string } | undefined>()
@@ -95,13 +101,40 @@ export function ChannelPage() {
     function onPalette() {
       setSettingsOpen(true)
     }
+    function onTestCommand(event: Event) {
+      const request = event as CustomEvent<{ channelId: string; handled: boolean }>
+      if (request.detail.channelId !== channelId) return
+      request.detail.handled = true
+      setFocusTestCommand(true)
+      setSettingsOpen(true)
+    }
+    function fromHash() {
+      if (window.location.hash !== "#test-command") return
+      setFocusTestCommand(true)
+      setSettingsOpen(true)
+    }
+    fromHash()
     window.addEventListener("keydown", onKey)
     window.addEventListener(OPEN_SETTINGS_EVENT, onPalette)
+    window.addEventListener(OPEN_TEST_COMMAND_EVENT, onTestCommand)
+    window.addEventListener("hashchange", fromHash)
     return () => {
       window.removeEventListener("keydown", onKey)
       window.removeEventListener(OPEN_SETTINGS_EVENT, onPalette)
+      window.removeEventListener(OPEN_TEST_COMMAND_EVENT, onTestCommand)
+      window.removeEventListener("hashchange", fromHash)
     }
-  }, [])
+  }, [channelId])
+
+  useEffect(() => {
+    if (!channel || !settingsOpen || !focusTestCommand) return
+    const frame = requestAnimationFrame(() => {
+      const label = [...document.querySelectorAll<HTMLLabelElement>('label')].find((item) => item.textContent?.trim() === "Test command")
+      document.getElementById(label?.htmlFor ?? "")?.focus()
+      setFocusTestCommand(false)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [channel, settingsOpen, focusTestCommand])
 
   useEffect(() => {
     if (!channel || channel.unread <= 0 || !channel.last_seq) return
@@ -159,7 +192,7 @@ export function ChannelPage() {
   }
 
   if (channels.isPending) return <p className="p-4 text-[13px] text-muted">Loading channel</p>
-  if (!channel) return <p className="p-4 text-[13px] text-muted">Channel not found.</p>
+  if (!channel) return <ChannelNotFound />
 
   const peer = directPeer(channel, me.data?.id, members.data ?? [])
   const direct = isDirect(channel)
@@ -358,6 +391,11 @@ export function ChannelPage() {
         <Composer
           key={`composer-${channelId}`}
           members={members.data ?? []}
+          memberIds={channel.member_ids}
+          onAddMember={async (member) => {
+            const next = await api.patchChannel(channel.id, { member_ids: [...channel.member_ids, member.id] })
+            qc.setQueryData<Channel[]>(qk.channels, (list = []) => list.map((item) => item.id === next.id ? next : item))
+          }}
           channelName={channel.name}
           attach
           draftKey={channelId}

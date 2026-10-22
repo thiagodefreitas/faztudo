@@ -127,7 +127,7 @@ export function RunPanel({
         ) : view === "diff" ? (
           <div className="p-2">
             {diff.isPending && <p className="text-[13px] text-muted">Loading diff</p>}
-            {diff.isError && <p className="text-[13px] text-muted">The diff is not ready.</p>}
+            {diff.isError && <div className="flex items-center gap-2 text-[13px] text-muted"><span>The diff is not ready.</span><button type="button" onClick={() => void diff.refetch()} className="min-h-8 rounded border border-line px-2 text-accent">Retry</button></div>}
             {diff.data && <DiffView diff={diff.data.diff} />}
           </div>
         ) : (

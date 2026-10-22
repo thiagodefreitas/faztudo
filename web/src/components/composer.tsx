@@ -1,8 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react"
 import { ApiError, api } from "../api/client"
 import { formatSize } from "../lib/files"
 import { appendDictation } from "../lib/dictation"
-import { applyMention, filterMembers, mentionQuery } from "../lib/mentions"
+import { applyMention, filterMembers, mentionHandles, mentionQuery } from "../lib/mentions"
 import { parseTaskCommand } from "../lib/tasks"
 import type { Attachment, Member } from "../types"
 import { DictationButton } from "./dictation-button"
@@ -24,6 +24,19 @@ const DRAFT_PREFIX = "faztudo.draft."
 
 // A keystroke schedules the write; a long paste is not written on every key.
 const DRAFT_DELAY_MS = 300
+const COMMANDS = [
+  { name: "/status", description: "Show active runs and lane status" },
+  { name: "/lane", description: "Set an agent's preferred lane here" },
+  { name: "/task", description: "Open the task builder" },
+] as const
+
+function usePhoneWidth(): boolean {
+  return useSyncExternalStore(
+    (listen) => { window.addEventListener("resize", listen); return () => window.removeEventListener("resize", listen) },
+    () => window.innerWidth < 420,
+    () => false,
+  )
+}
 
 /** The unsent text kept for a composer, per browser. */
 export function readDraft(key: string | undefined): string {
@@ -61,6 +74,8 @@ export function Composer({
   suggestion,
   onSend,
   onTask,
+  memberIds,
+  onAddMember,
 }: {
   members: Member[]
   channelName: string
@@ -79,6 +94,8 @@ export function Composer({
   onSend: (body: string, attachments?: Attachment[]) => void
   /** Opens the task builder, with a title. Adds the Task button and the /task command. */
   onTask?: (title: string) => void
+  memberIds?: string[]
+  onAddMember?: (member: Member) => Promise<void>
 }) {
   const listId = useId()
   const [text, setText] = useState(() => readDraft(draftKey))
@@ -91,14 +108,21 @@ export function Composer({
   const [cursor, setCursor] = useState(0)
   const [active, setActive] = useState(0)
   const [suppressed, setSuppressed] = useState<string | null>(null)
+  const [addError, setAddError] = useState("")
+  const [addingId, setAddingId] = useState<string | null>(null)
+  const phone = usePhoneWidth()
   const boxRef = useRef<HTMLTextAreaElement>(null)
   const pendingCursor = useRef<number | null>(null)
   const draft = useRef({ key: draftKey, text })
   const query = mentionQuery(text, cursor)
   const matches = query ? filterMembers(members, query.query) : []
-  const queryKey = query ? `${query.start}:${query.query}` : null
-  const menuOpen = Boolean(query && matches.length > 0 && suppressed !== queryKey)
-  const selected = matches[Math.min(active, Math.max(0, matches.length - 1))]
+  const slash = /^\/([a-z]*)$/i.exec(text.slice(0, cursor))
+  const commands = slash ? COMMANDS.filter((command) => (onTask || command.name !== "/task") && command.name.startsWith(`/${slash[1]?.toLowerCase() ?? ""}`)) : []
+  const commandMenu = Boolean(slash && commands.length > 0)
+  const queryKey = query ? `${query.start}:${query.query}` : commandMenu ? `slash:${slash?.[1] ?? ""}` : null
+  const menuOpen = Boolean((query && matches.length > 0 || commandMenu) && suppressed !== queryKey)
+  const selected = commandMenu ? commands[Math.min(active, commands.length - 1)] : matches[Math.min(active, Math.max(0, matches.length - 1))]
+  const missingAgents = memberIds && !/^\/lane(?:\s|$)/i.test(text.trimStart()) ? [...new Set(mentionHandles(text))].map((handle) => members.find((member) => member.kind === "agent" && member.handle.toLowerCase() === handle)).filter((member): member is Member => !!member && !memberIds.includes(member.id)) : []
   const canSend = !uploading && (text.trim().length > 0 || ready.length > 0)
   const taskMode = !!onTask && /^\/task(?:\s|$)/i.test(text.trimStart())
 
@@ -163,7 +187,7 @@ export function Composer({
   // The arrow keys can move the choice past the visible part of the list.
   useEffect(() => {
     if (!menuOpen || !selected) return
-    document.getElementById(`${listId}-${selected.id}`)?.scrollIntoView({ block: "nearest" })
+    document.getElementById(`${listId}-${"id" in selected ? selected.id : selected.name}`)?.scrollIntoView({ block: "nearest" })
   }, [listId, menuOpen, selected])
 
   function sync(target: HTMLTextAreaElement) {
@@ -177,6 +201,21 @@ export function Composer({
     setCursor(next.cursor)
     setActive(0)
     setSuppressed(null)
+  }
+
+  function pickCommand(name: string) {
+    const next = `${name} ` + text.slice(cursor)
+    pendingCursor.current = name.length + 1
+    setText(next)
+    setCursor(name.length + 1)
+    setActive(0)
+    setSuppressed(null)
+  }
+
+  function pickSelected() {
+    if (!selected) return
+    if ("name" in selected) pickCommand(selected.name)
+    else pick(selected)
   }
 
   function addFiles(list: FileList | File[] | null | undefined) {
@@ -205,7 +244,7 @@ export function Composer({
 
   function send() {
     if (menuOpen && selected) {
-      pick(selected)
+      pickSelected()
       return
     }
     const body = text.trim()
@@ -237,12 +276,12 @@ export function Composer({
     if (menuOpen && selected) {
       if (event.key === "ArrowDown") {
         event.preventDefault()
-        setActive((index) => (index + 1) % matches.length)
+        setActive((index) => (index + 1) % (commandMenu ? commands.length : matches.length))
         return
       }
       if (event.key === "ArrowUp") {
         event.preventDefault()
-        setActive((index) => (index - 1 + matches.length) % matches.length)
+        setActive((index) => (index - 1 + (commandMenu ? commands.length : matches.length)) % (commandMenu ? commands.length : matches.length))
         return
       }
       if (event.key === "Escape") {
@@ -252,7 +291,7 @@ export function Composer({
       }
       if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
         event.preventDefault()
-        pick(selected)
+        pickSelected()
         return
       }
     }
@@ -279,28 +318,35 @@ export function Composer({
           <ul
             id={listId}
             role="listbox"
-            aria-label="Members"
+            aria-label={commandMenu ? "Commands" : "Members"}
             className="absolute bottom-full left-0 z-20 mb-1 max-h-56 w-full max-w-sm overflow-auto rounded-md border border-line bg-surface py-1 shadow-lg"
           >
-            {matches.map((member, index) => (
-              <li key={member.id} role="presentation">
+            {(commandMenu ? commands : matches).map((item, index) => (
+              <li key={"name" in item ? item.name : item.id} role="presentation">
                 <button
                   type="button"
                   role="option"
-                  aria-selected={member.id === selected?.id}
-                  id={`${listId}-${member.id}`}
+                  aria-selected={item === selected}
+                  id={`${listId}-${"name" in item ? item.name : item.id}`}
                   className="flex min-h-10 w-full items-baseline gap-2 px-2 py-1.5 text-left text-[13px] aria-selected:bg-accent-soft md:min-h-8"
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => pick(member)}
+                  onClick={() => { if ("name" in item) pickCommand(item.name); else pick(item) }}
                   onMouseEnter={() => setActive(index)}
                 >
-                  <span className="font-medium">{member.display_name}</span>
-                  <span className="text-muted">@{member.handle}</span>
+                  {"name" in item ? <><span className="font-medium">{item.name}</span><span className="text-muted">{item.description}</span></> : <><span className="font-medium">{item.display_name}</span><span className="text-muted">@{item.handle}</span></>}
                 </button>
               </li>
             ))}
+            {!commandMenu && selected && "id" in selected && selected.agent?.mode === "write" && <li className="border-t border-line px-2 py-1.5 text-[11px] text-muted">Add x2 after @{selected.handle} to compare two lanes.</li>}
           </ul>
         )}
+        {missingAgents.length > 0 && <div className="mb-2 rounded-md border border-warn bg-warn-soft px-2.5 py-2 text-[12px] text-ink" role="status">
+          {missingAgents.map((member) => <div key={member.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>@{member.handle} is not in this channel. The mention can start a run.</span>
+            {onAddMember && <button type="button" disabled={addingId !== null} className="font-medium text-accent underline disabled:opacity-50" onClick={() => { setAddingId(member.id); setAddError(""); void onAddMember(member).catch((error: unknown) => setAddError(error instanceof Error ? error.message : "Could not add agent")).finally(() => setAddingId(null)) }}>Add @{member.handle} to this channel</button>}
+          </div>)}
+          {addError && <p role="alert" className="mt-1 text-danger">{addError}</p>}
+        </div>}
         {uploads.length > 0 && (
           <ul className="mb-1.5 flex flex-wrap gap-1.5 px-1" aria-label="Files to send">
             {uploads.map((item) => (
@@ -325,7 +371,7 @@ export function Composer({
           </ul>
         )}
         {taskMode && <span className="mb-1 ml-2 inline-flex rounded-md bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">New task</span>}
-        <div className={`flex items-end gap-1 rounded-2xl border bg-surface p-1.5 pl-2 transition-colors duration-150 focus-within:border-accent max-md:rounded-3xl max-md:shadow-sm md:bg-canvas ${taskMode ? "border-accent" : "border-line"}`}>
+        <div className={`flex items-end gap-1 rounded-2xl border bg-surface p-1.5 pl-2 transition-colors duration-150 focus-within:border-accent max-[420px]:flex-wrap max-md:rounded-3xl max-md:shadow-sm md:bg-canvas ${taskMode ? "border-accent" : "border-line"}`}>
         {attach && (
           <>
             <input
@@ -363,18 +409,18 @@ export function Composer({
             <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="2" /><path d="M7 10h6M10 7v6" /></svg>
           </button>
         )}
-        <label className="block min-w-0 flex-1">
+        <label className="block min-w-0 flex-1 max-[420px]:order-first max-[420px]:basis-full">
           <span className="sr-only">{label}</span>
           <textarea
             ref={boxRef}
             value={text}
             rows={1}
-            placeholder={placeholder ?? `Message #${channelName}`}
+            placeholder={phone ? "Message" : placeholder ?? `Message #${channelName}`}
             aria-label={label}
             aria-autocomplete="list"
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? listId : undefined}
-            aria-activedescendant={menuOpen && selected ? `${listId}-${selected.id}` : undefined}
+            aria-activedescendant={menuOpen && selected ? `${listId}-${"name" in selected ? selected.name : selected.id}` : undefined}
             className="block max-h-[240px] min-h-10 w-full resize-none bg-transparent py-2 text-[16px] leading-6 text-ink outline-none placeholder:text-faint focus-visible:outline-none md:min-h-8 md:py-1.5 md:text-[14px] md:leading-5"
             onChange={(event) => {
               setText(event.target.value)
@@ -394,7 +440,7 @@ export function Composer({
           aria-label="Send"
           title={taskMode ? "Create task" : "Send message"}
           disabled={!canSend}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-sidebar disabled:text-faint disabled:opacity-100 md:h-8 md:w-auto md:px-3 md:text-[13px]"
+          className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-sidebar disabled:text-faint disabled:opacity-100 md:h-8 md:w-auto md:px-3 md:text-[13px]"
         >
           <svg viewBox="0 0 20 20" className="h-4 w-4 md:hidden" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 16V4M5 9l5-5 5 5" />

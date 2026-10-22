@@ -1,11 +1,14 @@
-import { type KeyboardEvent, useRef, useState } from "react"
+import { QueryClientContext } from "@tanstack/react-query"
+import { type KeyboardEvent, useContext, useRef, useState, useSyncExternalStore } from "react"
 import { api } from "../api/client"
 import { approvalShortcut, approvalSummary, needsConfirm, optionLetter, outcomeText } from "../lib/approval"
 import { suggestedApprovalRule } from "../lib/approval-rule"
 import { cx } from "../lib/cx"
 import { relativeTime } from "../lib/inbox"
+import { OPEN_TEST_COMMAND_EVENT } from "../lib/channel-settings"
+import { qk } from "../state/keys"
 import { useNow } from "../state/now"
-import type { Approval, Run } from "../types"
+import type { Approval, Channel, Run } from "../types"
 import { DiffPreview } from "./approvals/diff-preview"
 import { FoldedText } from "./folded-text"
 import { Markdown } from "./markdown"
@@ -67,6 +70,7 @@ export function ApprovalCard({
   approval,
   onResolve,
   run,
+  testCommand,
   agentName,
   agentHandle,
   diff,
@@ -75,6 +79,7 @@ export function ApprovalCard({
   approval: Approval
   onResolve: (option: string, commitMessage?: string) => void
   run?: Run | undefined
+  testCommand?: string | undefined
   agentName?: string | undefined
   agentHandle?: string | undefined
   /** The run's diff, when it is known. */
@@ -83,6 +88,15 @@ export function ApprovalCard({
   decider?: string | undefined
 }) {
   const [message, setMessage] = useState(approval.commit_message ?? "")
+  const queryClient = useContext(QueryClientContext)
+  const cachedChannels = useSyncExternalStore(
+    (listen) => queryClient?.getQueryCache().subscribe(listen) ?? (() => undefined),
+    () => queryClient?.getQueryData<Channel[]>(qk.channels),
+    () => undefined,
+  )
+  const cachedChannel = cachedChannels?.find((item) => item.id === approval.channel_id)
+  const commandKnown = testCommand !== undefined || cachedChannel !== undefined
+  const channelTestCommand = testCommand ?? cachedChannel?.test_command
   const [confirming, setConfirming] = useState<string | null>(null)
   const [ruleOpen, setRuleOpen] = useState(false)
   const [ruleAnyAgent, setRuleAnyAgent] = useState(false)
@@ -150,7 +164,7 @@ export function ApprovalCard({
       aria-label={approval.title}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      className="fz-rise mt-3 rounded-lg border border-l-2 border-line border-l-warn bg-canvas p-3 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="fz-rise mt-3 flex flex-col rounded-lg border border-l-2 border-line border-l-warn bg-canvas p-3 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       <h3 data-testid="approval-summary" className="text-[14px] font-semibold">
         {summary}
@@ -167,11 +181,11 @@ export function ApprovalCard({
           <Markdown text={approval.detail} />
         </div>
       )}
-      {diff ? <DiffPreview diff={diff} /> : write && run?.diff_stat && <p className="mt-2 text-[12px] text-muted">Loading the changed files...</p>}
+      <div className="max-md:order-2">{diff ? <DiffPreview diff={diff} /> : write && run?.diff_stat && <p className="mt-2 text-[12px] text-muted">Loading the changed files...</p>}</div>
       {run?.verification && (
         <div
           className={cx(
-            "mt-3 rounded-md border-l-2 px-2.5 py-1.5",
+            "mt-3 rounded-md border-l-2 px-2.5 py-1.5 max-md:order-2",
             run.verification.ok ? "border-ok bg-ok-soft" : "border-danger bg-danger-soft",
           )}
         >
@@ -183,8 +197,13 @@ export function ApprovalCard({
           </details>
         </div>
       )}
+      {write && run && !run.verification && commandKnown && !channelTestCommand?.trim() && <p className="mt-3 text-[12px] text-warn max-md:order-2">No checks ran. <a href={`/c/${encodeURIComponent(approval.channel_id)}#test-command`} className="text-accent underline" onClick={(click) => {
+        const event = new CustomEvent(OPEN_TEST_COMMAND_EVENT, { detail: { channelId: approval.channel_id, handled: false } })
+        window.dispatchEvent(event)
+        if (event.detail.handled) click.preventDefault()
+      }}>Set a test command in channel settings</a></p>}
       {write && (
-        <label className="mt-3 block text-[12px] text-muted">
+        <label className="mt-3 block text-[12px] text-muted max-md:order-2">
           Commit message
           <textarea
             ref={messageRef}
@@ -213,7 +232,7 @@ export function ApprovalCard({
             event.preventDefault()
             event.stopPropagation()
           }}
-          className="mt-3 rounded-md border border-danger bg-danger-soft p-2"
+          className="mt-3 rounded-md border border-danger bg-danger-soft p-2 max-md:order-1"
         >
           <p className="text-[13px]">
             {confirming === "discard" ? "Discard this change? The branch and its worktree are removed." : `${confirmLabel ?? "This choice"}? This cannot be undone.`}
@@ -229,7 +248,7 @@ export function ApprovalCard({
           </div>
         </div>
       ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2 max-md:order-1">
           {approval.options.map((option, index) => (
             <button
               key={option.key}
@@ -249,7 +268,7 @@ export function ApprovalCard({
           {write && run && diff && agentHandle && <button type="button" onClick={() => setRuleOpen(true)} className={cx(BUTTON, "border-line bg-surface")}>Always merge changes like this here</button>}
         </div>
       )}
-      {ruleOpen && run && <div role="dialog" aria-label="Create approval rule" className="mt-3 rounded-md border border-line bg-surface p-3">
+      {ruleOpen && run && <div role="dialog" aria-label="Create approval rule" className="mt-3 rounded-md border border-line bg-surface p-3 max-md:order-3">
         <p className="text-[13px] font-medium">Automatically merge future matching changes in this channel after checks pass.</p>
         <p className="mt-1 text-[12px] text-muted">Protected paths always require approval: .github/**, .gitlab-ci.yml, lefthook.yml, .pre-commit-config.yaml, Makefile, go.mod, go.sum, package.json, package-lock.json, *.lock, Dockerfile, scripts/**, .gitmodules, and .git/**. Executable changes and failed checks also require approval.</p>
         <label className="mt-2 flex items-center gap-2 text-[12px]"><input type="checkbox" checked={ruleAnyAgent} onChange={(event) => setRuleAnyAgent(event.target.checked)} />Any agent (otherwise {agentName ?? "this agent"})</label>
@@ -258,7 +277,7 @@ export function ApprovalCard({
         {ruleError && <p role="alert" className="mt-2 text-[12px] text-danger">{ruleError}</p>}
         <div className="mt-3 flex gap-2"><button type="button" disabled={ruleBusy} onClick={() => void saveRule()} className={cx(BUTTON, "border-accent bg-accent text-canvas")}>Save rule and merge</button><button type="button" onClick={() => setRuleOpen(false)} className={BUTTON}>Cancel</button></div>
       </div>}
-      <p className="mt-2 text-[12px] text-faint">
+      <p className="mt-2 hidden text-[12px] text-faint md:block">
         {write
           ? "With this card focused: m merges, k keeps, d discards, e edits the message."
           : `Keys 1-${Math.min(9, approval.options.length)} pick an option. Enter picks the first marked option.`}

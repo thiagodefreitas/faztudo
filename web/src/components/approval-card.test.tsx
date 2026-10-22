@@ -1,7 +1,10 @@
-import { render, screen, within } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { api } from "../api/client"
+import { OPEN_TEST_COMMAND_EVENT } from "../lib/channel-settings"
+import { qk } from "../state/keys"
 import type { Approval, Run } from "../types"
 import { ApprovalCard } from "./approval-card"
 
@@ -20,6 +23,33 @@ const approval: Approval = {
 }
 
 describe("ApprovalCard", () => {
+  it("uses the channel cache for the no-checks warning in the approvals inbox", () => {
+    const client = new QueryClient()
+    client.setQueryData(qk.channels, [{ id: approval.channel_id, test_command: "go test ./..." }])
+    const write: Approval = { ...approval, commit_message: "Fix thing" }
+    const view = render(<QueryClientProvider client={client}><ApprovalCard approval={write} run={{ id: "run" } as Run} onResolve={vi.fn()} /></QueryClientProvider>)
+    expect(screen.queryByText(/No checks ran/)).not.toBeInTheDocument()
+    act(() => client.setQueryData(qk.channels, [{ id: approval.channel_id, test_command: "" }]))
+    expect(view.container).toHaveTextContent("No checks ran")
+  })
+
+  it("puts decisions ahead of the commit box on narrow screens and links missing checks", async () => {
+    const user = userEvent.setup()
+    const openSettings = vi.fn((event: Event) => { (event as CustomEvent<{ handled: boolean }>).detail.handled = true })
+    window.addEventListener(OPEN_TEST_COMMAND_EVENT, openSettings)
+    const write: Approval = { ...approval, commit_message: "Fix thing", options: [{ key: "merge", label: "Merge", style: "primary" }] }
+    render(<ApprovalCard approval={write} run={{ id: "run" } as Run} testCommand="" onResolve={vi.fn()} />)
+    expect(screen.getByText(/No checks ran/)).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Commit message" }).closest("label")).toHaveClass("max-md:order-2")
+    expect(screen.getByRole("button", { name: /Merge/ }).parentElement).toHaveClass("max-md:order-1")
+    const settings = screen.getByRole("link", { name: /Set a test command/ })
+    expect(settings).toHaveAttribute("href", `/c/${approval.channel_id}#test-command`)
+    await user.click(settings)
+    expect(openSettings).toHaveBeenCalledOnce()
+    window.removeEventListener(OPEN_TEST_COMMAND_EVENT, openSettings)
+    expect(screen.queryByText(/With this card focused/)).toHaveClass("hidden")
+  })
+
   it("shows the exact Signal draft and sends either original or edited text", async () => {
     const user = userEvent.setup()
     const onResolve = vi.fn()

@@ -63,6 +63,47 @@ describe("Composer tasks", () => {
 })
 
 describe("Composer", () => {
+  it("offers only real slash commands and completes them with Tab or Enter", async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn()
+    render(<Composer members={members} channelName="dev" onSend={onSend} onTask={vi.fn()} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await user.type(box, "/")
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument()
+    expect(screen.getAllByRole("option")).toHaveLength(3)
+    await user.type(box, "st{Tab}")
+    expect(box).toHaveValue("/status ")
+    expect(onSend).not.toHaveBeenCalled()
+    await user.clear(box)
+    await user.type(box, "/la{Enter}")
+    expect(box).toHaveValue("/lane ")
+  })
+
+  it("hints at x2 for write agents and warns about an agent outside the channel", async () => {
+    const user = userEvent.setup()
+    const onAddMember = vi.fn().mockResolvedValue(undefined)
+    const onSend = vi.fn()
+    render(<Composer members={[{ ...members[0]!, agent: { lanes: ["codex/default"], mode: "write" } }, members[1]!]} memberIds={[members[1]!.id]} onAddMember={onAddMember} channelName="dev" onSend={onSend} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await user.type(box, "@co")
+    expect(screen.getByText(/x2 after @coder/)).toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    expect(screen.getByText(/is not in this channel/)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Add @coder to this channel" }))
+    expect(onAddMember).toHaveBeenCalledWith(expect.objectContaining({ handle: "coder" }))
+    await user.type(box, "fix it{Enter}")
+    expect(onSend).toHaveBeenCalledWith("@coder fix it")
+  })
+
+  it("uses the short placeholder on a phone", () => {
+    const old = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 })
+    render(<Composer members={members} channelName="dev" onSend={vi.fn()} attach onTask={vi.fn()} />)
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("placeholder", "Message")
+    expect(screen.getByRole("textbox", { name: "Message" }).closest("label")).toHaveClass("max-[420px]:basis-full")
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: old })
+  })
+
   it("completes a mention on Enter and sends on the next Enter", async () => {
     const user = userEvent.setup()
     const onSend = vi.fn()

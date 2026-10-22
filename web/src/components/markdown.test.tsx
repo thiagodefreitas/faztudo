@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { Markdown } from "./markdown"
 
@@ -14,8 +14,15 @@ describe("Markdown", () => {
     expect(view.container.querySelectorAll("button[aria-label='Copy code']")).toHaveLength(1)
   })
 
-  it("highlights a fenced code block", () => {
+  it("loads a fenced code block language after showing plain text", async () => {
     const view = render(<Markdown text={"```go\npackage main\n```"} />)
-    expect(view.container.querySelector(".token.keyword")?.textContent).toBe("package")
+    expect(view.container.querySelector("code")?.textContent).toContain("package main")
+    await waitFor(() => expect(view.container.querySelector(".token.keyword")?.textContent).toBe("package"))
+  })
+
+  it("loads an allow-listed language and leaves unknown languages plain", async () => {
+    const view = render(<Markdown text={"```python\nprint('hi')\n```\n\n```madeup\njust text\n```"} />)
+    await waitFor(() => expect(view.container.querySelector(".hl")?.textContent).toContain("print"))
+    expect(view.container.querySelector("code.language-madeup")?.textContent).toBe("just text")
   })
 })

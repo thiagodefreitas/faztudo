@@ -1,31 +1,31 @@
-import { refractor } from "refractor"
-import bash from "refractor/bash"
-import css from "refractor/css"
-import diff from "refractor/diff"
-import go from "refractor/go"
-import javascript from "refractor/javascript"
-import json from "refractor/json"
-import jsx from "refractor/jsx"
-import markdownLang from "refractor/markdown"
-import tsx from "refractor/tsx"
-import typescript from "refractor/typescript"
+import { refractor } from "refractor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Link } from "@tanstack/react-router"
-import { Children, isValidElement, useMemo, useState, type ReactNode } from "react"
+import { Children, isValidElement, useEffect, useMemo, useState, type ReactNode } from "react"
 import { channelIdOf, channelLinks, type ChannelRef } from "../lib/channel-links"
 import { cx } from "../lib/cx"
 
-refractor.register(bash)
-refractor.register(css)
-refractor.register(diff)
-refractor.register(go)
-refractor.register(javascript)
-refractor.register(json)
-refractor.register(jsx)
-refractor.register(markdownLang)
-refractor.register(tsx)
-refractor.register(typescript)
+const LOADERS = {
+  bash: () => import("refractor/bash"),
+  css: () => import("refractor/css"),
+  diff: () => import("refractor/diff"),
+  go: () => import("refractor/go"),
+  javascript: () => import("refractor/javascript"),
+  json: () => import("refractor/json"),
+  jsx: () => import("refractor/jsx"),
+  markdown: () => import("refractor/markdown"),
+  markup: () => import("refractor/markup"),
+  python: () => import("refractor/python"),
+  rust: () => import("refractor/rust"),
+  sql: () => import("refractor/sql"),
+  toml: () => import("refractor/toml"),
+  tsx: () => import("refractor/tsx"),
+  typescript: () => import("refractor/typescript"),
+  yaml: () => import("refractor/yaml"),
+} as const
+type Language = keyof typeof LOADERS
+const loading = new Map<Language, Promise<void>>()
 
 const ALIAS: Record<string, string> = {
   ts: "typescript",
@@ -43,6 +43,33 @@ const ALIAS: Record<string, string> = {
   markdown: "markdown",
   diff: "diff",
   css: "css",
+  py: "python",
+  python: "python",
+  yml: "yaml",
+  yaml: "yaml",
+  toml: "toml",
+  sql: "sql",
+  html: "markup",
+  htm: "markup",
+  rust: "rust",
+  rs: "rust",
+}
+
+function useLanguage(language: string | undefined): Language | undefined {
+  const name = language ? ALIAS[language.toLowerCase()] as Language | undefined : undefined
+  const [, loaded] = useState(0)
+  useEffect(() => {
+    if (!name || refractor.registered(name)) return
+    let pending = loading.get(name)
+    if (!pending) {
+      pending = LOADERS[name]().then((module) => { refractor.register(module.default) }).catch(() => { loading.delete(name) })
+      loading.set(name, pending)
+    }
+    let active = true
+    void pending.then(() => { if (active) loaded((count) => count + 1) })
+    return () => { active = false }
+  }, [name])
+  return name
 }
 
 interface HastNode {
@@ -65,8 +92,7 @@ function renderHast(node: HastNode, key: number): ReactNode {
   return node.children?.map((child, index) => renderHast(child, index)) ?? null
 }
 
-function highlight(source: string, language: string): HastNode | null {
-  const name = ALIAS[language]
+function highlight(source: string, name: Language | undefined): HastNode | null {
   if (!name || !refractor.registered(name)) return null
   return refractor.highlight(source, name) as unknown as HastNode
 }
@@ -79,7 +105,8 @@ export function languageOfPath(path: string): string | undefined {
 
 /** One line of source with syntax colors; plain text for an unknown language. */
 export function HighlightedLine({ source, language }: { source: string; language: string | undefined }) {
-  const tree = language ? highlight(source, language) : null
+  const name = useLanguage(language)
+  const tree = highlight(source, name)
   if (!tree) return <>{source}</>
   return <>{tree.children?.map((child, index) => renderHast(child, index))}</>
 }
@@ -87,8 +114,9 @@ export function HighlightedLine({ source, language }: { source: string; language
 function Code({ className, children }: { className?: string; children?: ReactNode }) {
   const source = String(children ?? "").replace(/\n$/, "")
   const language = /language-([\w-]+)/.exec(className ?? "")?.[1]
+  const name = useLanguage(language)
   if (!language) return <code className={className}>{children}</code>
-  const tree = highlight(source, language)
+  const tree = highlight(source, name)
   if (!tree) return <code className={className}>{source}</code>
   return <code className={cx(className, "hl")}>{tree.children?.map((child, index) => renderHast(child, index))}</code>
 }

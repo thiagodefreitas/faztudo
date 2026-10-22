@@ -11,7 +11,7 @@ import { formatElapsed } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
-import { approvalForRun, useApprovals, useLanes, useMembers, useNotices, useOutput, useRunDiff, useRuns } from "../state/queries"
+import { approvalForRun, useApprovals, useChannels, useLanes, useMembers, useNotices, useOutput, useRunDiff, useRuns } from "../state/queries"
 import type { Approval, Lane, Member, OutputLine, Run, RunState } from "../types"
 import { ApprovalCard } from "./approval-card"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
@@ -45,6 +45,7 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
   const [resolveError, setResolveError] = useState("")
   const now = useNow()
   const members = useMembers()
+  const channels = useChannels()
   const lanes = useLanes()
   const approvals = useApprovals()
   const output = useOutput(run.id)
@@ -70,6 +71,7 @@ export function RunCard({ run, channelId }: { run: Run; channelId: string }) {
       lane={lane}
       lines={output.data ?? []}
       approval={approval}
+      testCommand={channels.data?.find((item) => item.id === channelId)?.test_command}
       approvalDiff={approvalDiff.data?.diff}
       decider={decider}
       resolveError={resolveError}
@@ -122,6 +124,7 @@ export function RunCardView({
   lane,
   lines,
   approval,
+  testCommand,
   approvalDiff,
   decider,
   resolveError,
@@ -139,6 +142,7 @@ export function RunCardView({
   lane: Lane | undefined
   lines: OutputLine[]
   approval: Approval | null
+  testCommand?: string | undefined
   /** The diff behind a pending write approval, once loaded. */
   approvalDiff?: string | undefined
   /** Who decided the approval, once it is decided. */
@@ -234,7 +238,7 @@ export function RunCardView({
           )}
         </div>
         {approval && (
-          <ApprovalCard approval={approval} onResolve={onResolve} run={run} agentName={name} agentHandle={agent?.handle} diff={approvalDiff} decider={decider} />
+          <ApprovalCard approval={approval} onResolve={onResolve} run={run} testCommand={testCommand} agentName={name} agentHandle={agent?.handle} diff={approvalDiff} decider={decider} />
         )}
         {approval && resolveError && <p role="alert" className="mt-2 ml-7 rounded-md border border-danger bg-danger-soft p-2 text-[13px] text-danger">{resolveError}</p>}
         <details className="mt-2 pl-7">
