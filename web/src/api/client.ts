@@ -1,5 +1,7 @@
 import type {
   Approval,
+  ApprovalRule,
+  ApprovalRuleInput,
   Attachment,
   AssignBody,
   AssignKind,
@@ -89,6 +91,9 @@ export interface Api {
   retryRun: (id: ID, body?: RetryBody) => Promise<Run>
   approvals: (state?: Approval["state"]) => Promise<Approval[]>
   resolveApproval: (id: ID, body: ResolveBody) => Promise<Approval>
+  approvalRules: (channelId?: ID) => Promise<ApprovalRule[]>
+  createApprovalRule: (body: ApprovalRuleInput) => Promise<ApprovalRule>
+  deleteApprovalRule: (id: ID) => Promise<void>
   compares: (channelId: ID) => Promise<CompareGroup[]>
   decideCompare: (channelId: ID, id: ID, decision: "merge_a" | "merge_b" | "discard_both" | "combine") => Promise<CompareGroup>
   org: () => Promise<Org>
@@ -192,6 +197,9 @@ export function createApi(options: ApiOptions = {}): Api {
     retryRun: (id, body = {}) => request("POST", `/runs/${encodeURIComponent(id)}/retry`, body),
     approvals: (state) => request("GET", query("/approvals", { state })),
     resolveApproval: (id, body) => request("POST", `/approvals/${encodeURIComponent(id)}/resolve`, body),
+    approvalRules: (channelId) => request("GET", query("/approval-rules", { channel_id: channelId })),
+    createApprovalRule: (body) => request("POST", "/approval-rules", body),
+    deleteApprovalRule: (id) => request("DELETE", `/approval-rules/${encodeURIComponent(id)}`),
     compares: (channelId) => request("GET", `/channels/${encodeURIComponent(channelId)}/compares`),
     decideCompare: (channelId, id, decision) => request("POST", `/channels/${encodeURIComponent(channelId)}/compares/${encodeURIComponent(id)}/decide`, { decision }),
     org: () => request("GET", "/org"),

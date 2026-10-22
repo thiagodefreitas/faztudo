@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { api } from "../api/client"
 import type { Approval, Run } from "../types"
 import { ApprovalCard } from "./approval-card"
 
@@ -100,9 +101,23 @@ describe("ApprovalCard", () => {
     ].join("\n")
 
     function renderWrite(onResolve = vi.fn()) {
-      render(<ApprovalCard approval={write} run={run} agentName="Coder" diff={diff} onResolve={onResolve} />)
+      render(<ApprovalCard approval={write} run={run} agentName="Coder" agentHandle="coder" diff={diff} onResolve={onResolve} />)
       return onResolve
     }
+
+    it("saves a rule from the merge card and then merges", async () => {
+      const user = userEvent.setup()
+      const create = vi.spyOn(api, "createApprovalRule").mockResolvedValue({ id: "rule", channel_id: write.channel_id, persona: "coder", paths: ["a.go"], max_lines: 50, created_by: "human", created_at: new Date().toISOString() })
+      const onResolve = renderWrite()
+      await user.click(screen.getByRole("button", { name: "Always merge changes like this here" }))
+      expect(screen.getByRole("dialog", { name: "Create approval rule" })).toHaveTextContent("Protected paths")
+      expect(screen.getByRole("textbox", { name: "Allowed path globs" })).toHaveValue("a.go\nb.ts\nc.md")
+      expect(screen.getByRole("spinbutton", { name: "Maximum changed lines" })).toHaveValue(50)
+      await user.click(screen.getByRole("button", { name: "Save rule and merge" }))
+      expect(create).toHaveBeenCalledWith({ channel_id: write.channel_id, persona: "coder", paths: ["a.go", "b.ts", "c.md"], max_lines: 50 })
+      expect(onResolve).toHaveBeenCalledWith("merge", "Add the thing")
+      create.mockRestore()
+    })
 
     it("leads with one summary line, then files, checks and the options", () => {
       renderWrite()

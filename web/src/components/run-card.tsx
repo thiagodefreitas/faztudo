@@ -234,7 +234,7 @@ export function RunCardView({
           )}
         </div>
         {approval && (
-          <ApprovalCard approval={approval} onResolve={onResolve} run={run} agentName={name} diff={approvalDiff} decider={decider} />
+          <ApprovalCard approval={approval} onResolve={onResolve} run={run} agentName={name} agentHandle={agent?.handle} diff={approvalDiff} decider={decider} />
         )}
         {approval && resolveError && <p role="alert" className="mt-2 ml-7 rounded-md border border-danger bg-danger-soft p-2 text-[13px] text-danger">{resolveError}</p>}
         <details className="mt-2 pl-7">

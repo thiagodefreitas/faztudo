@@ -73,6 +73,7 @@ export function outcomeText(approval: Approval): string {
   const sha = shortSha(resolution.note)
   switch (resolution.option) {
     case "merge":
+      if (resolution.note?.startsWith("Merged by rule ")) return "Merged by rule"
       return sha ? `Merged as ${sha}` : "Merged"
     case "keep":
       return "Kept the branch"

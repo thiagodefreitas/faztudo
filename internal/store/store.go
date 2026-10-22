@@ -179,24 +179,28 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
-	if version < 12 {
-		migration, err = migrations.ReadFile("migrations/012.sql")
-		if err == nil {
-			_, err = db.Exec(string(migration))
+	// From 012 on, each migration runs once, in order, until the next file
+	// is missing; schema_version records which ones ran.
+	for n := 12; ; n++ {
+		name := fmt.Sprintf("migrations/%03d.sql", n)
+		migration, readErr := migrations.ReadFile(name)
+		if errors.Is(readErr, os.ErrNotExist) {
+			break
 		}
-		if err != nil {
+		if readErr != nil {
+			db.Close()
+			return nil, readErr
+		}
+		var present int
+		if err = db.QueryRow("SELECT count(*) FROM schema_version WHERE version=?", n).Scan(&present); err != nil {
 			db.Close()
 			return nil, err
 		}
-	}
-	if version < 13 {
-		migration, err = migrations.ReadFile("migrations/013.sql")
-		if err == nil {
-			_, err = db.Exec(string(migration))
-		}
-		if err != nil {
-			db.Close()
-			return nil, err
+		if present == 0 {
+			if _, err = db.Exec(string(migration)); err != nil {
+				db.Close()
+				return nil, err
+			}
 		}
 	}
 	// Search is optional: if this SQLite build has no FTS5 the table is not
@@ -442,7 +446,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org", "lane_usage_history", "channel_summaries", "pins", "tasks", "lessons", "app_routines"} {
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "approval_rules", "lanes", "org", "lane_usage_history", "channel_summaries", "pins", "tasks", "lessons", "app_routines"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -510,6 +514,24 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 			return errors.New("lesson id required")
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM lessons WHERE id=? AND channel_id=?", lesson.ID, lesson.ChannelID)
+		return err
+	case events.ApprovalRuleCreated:
+		var rule domain.ApprovalRule
+		if err := json.Unmarshal(e.Payload, &rule); err != nil {
+			return err
+		}
+		paths, err := json.Marshal(rule.Paths)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO approval_rules(id,channel_id,persona,paths,max_lines,created_by,created_at) VALUES(?,?,?,?,?,?,?)", rule.ID, rule.ChannelID, rule.Persona, string(paths), rule.MaxLines, rule.CreatedBy, rule.CreatedAt.Format(time.RFC3339Nano))
+		return err
+	case events.ApprovalRuleRemoved:
+		var rule domain.ApprovalRule
+		if err := json.Unmarshal(e.Payload, &rule); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM approval_rules WHERE id=?", rule.ID)
 		return err
 	case events.MemberUpdated:
 		var m domain.Member
@@ -883,6 +905,43 @@ func (s *Store) Approval(ctx context.Context, id string) (domain.Approval, error
 	return oneJSON[domain.Approval](ctx, s.db, "SELECT data FROM approvals WHERE id=?", id)
 }
 
+func (s *Store) ApprovalRules(ctx context.Context, channelID string) ([]domain.ApprovalRule, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT id,channel_id,persona,paths,max_lines,created_by,created_at FROM approval_rules WHERE (?='' OR channel_id=?) ORDER BY created_at DESC,id DESC", channelID, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	rules := []domain.ApprovalRule{}
+	for rows.Next() {
+		var rule domain.ApprovalRule
+		var paths, created string
+		if err := rows.Scan(&rule.ID, &rule.ChannelID, &rule.Persona, &paths, &rule.MaxLines, &rule.CreatedBy, &created); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(paths), &rule.Paths); err != nil {
+			return nil, err
+		}
+		if rule.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	return rules, rows.Err()
+}
+
+func (s *Store) ApprovalRule(ctx context.Context, id string) (domain.ApprovalRule, error) {
+	rules, err := s.ApprovalRules(ctx, "")
+	if err != nil {
+		return domain.ApprovalRule{}, err
+	}
+	for _, rule := range rules {
+		if rule.ID == id {
+			return rule, nil
+		}
+	}
+	return domain.ApprovalRule{}, ErrNotFound
+}
+
 // ResolveApproval checks pending state and appends its resolution in one transaction.
 func (s *Store) ResolveApproval(ctx context.Context, id, option, note, by string) (domain.Approval, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -917,7 +976,11 @@ func (s *Store) ResolveApproval(ctx context.Context, id, option, note, by string
 	if err != nil {
 		return domain.Approval{}, err
 	}
-	if _, err := appendTx(ctx, tx, events.Draft{Type: events.ApprovalResolved, Actor: events.Human(by), ChannelID: approval.ChannelID}, payload); err != nil {
+	actor := events.Human(by)
+	if by == "system" {
+		actor = events.System
+	}
+	if _, err := appendTx(ctx, tx, events.Draft{Type: events.ApprovalResolved, Actor: actor, ChannelID: approval.ChannelID}, payload); err != nil {
 		return domain.Approval{}, storeError(err)
 	}
 	if err := tx.Commit(); err != nil {

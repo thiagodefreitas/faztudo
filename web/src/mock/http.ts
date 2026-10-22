@@ -201,6 +201,18 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     return { status: 200, body: world.getApprovals(state ?? undefined) }
   }
 
+  if (parts[0] === "approval-rules") {
+    if (method === "GET" && parts.length === 1) return { status: 200, body: world.getApprovalRules(url.searchParams.get("channel_id") ?? undefined) }
+    if (method === "POST" && parts.length === 1) {
+      const channelId = text(body.channel_id)
+      const maxLines = body.max_lines
+      if (!channelId || typeof maxLines !== "number") return send(err(400, "bad_request", "channel_id and max_lines required"))
+      const paths = Array.isArray(body.paths) ? body.paths.filter((item): item is string => typeof item === "string") : []
+      return send(world.createApprovalRule({ channel_id: channelId, persona: text(body.persona) ?? "", paths, max_lines: maxLines }))
+    }
+    if (method === "DELETE" && parts.length === 2) return send(world.deleteApprovalRule(parts[1] ?? ""))
+  }
+
   if (parts[0] === "approvals" && parts[2] === "resolve" && method === "POST") {
     const id = parts[1]
     const option = text(body.option)

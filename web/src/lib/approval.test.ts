@@ -99,6 +99,7 @@ describe("outcomeText", () => {
   it("names the short sha of a merge", () => {
     expect(outcomeText(resolved("merge", "Fast-forwarded fz/run-demo into the current branch as 1a2b3c4."))).toBe("Merged as 1a2b3c4")
     expect(outcomeText(resolved("merge", "Merged fz/x on top of changes."))).toBe("Merged")
+    expect(outcomeText(resolved("merge", "Merged by rule abcdef12. Fast-forwarded."))).toBe("Merged by rule")
   })
   it("words keep, discard and other answers", () => {
     expect(outcomeText(resolved("keep"))).toBe("Kept the branch")

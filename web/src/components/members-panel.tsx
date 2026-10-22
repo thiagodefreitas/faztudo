@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { cx } from "../lib/cx"
 import { isAssigned, projectOfChannel } from "../lib/projects"
@@ -9,7 +9,7 @@ import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
 import { useApprovals, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
-import type { Channel, Member } from "../types"
+import type { ApprovalRule, Channel, Member } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { buttonClass, errorText, inputClass } from "./channel-dialogs"
 import { avatarState } from "./office/avatar"
@@ -52,10 +52,12 @@ function Panel({ channel }: { channel: Channel }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState("")
+  const [rules, setRules] = useState<ApprovalRule[]>([])
 
   const all = members.data ?? []
   const meId = me.data?.id
   const isHuman = me.data?.kind === "human"
+  useEffect(() => { if (isHuman) void api.approvalRules(channel.id).then(setRules).catch(() => setRules([])) }, [channel.id, isHuman])
   const project = org.data ? projectOfChannel(channel, org.data.projects) : undefined
   const inside = all.filter((member) => channel.member_ids.includes(member.id))
   const outside = all.filter((member) => !channel.member_ids.includes(member.id))
@@ -124,6 +126,10 @@ function Panel({ channel }: { channel: Channel }) {
           </Dialog.Close>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
+          {isHuman && <section className="border-b border-line px-3 py-3" aria-label="Approval rules">
+            <h3 className="text-[13px] font-semibold">Approval rules</h3>
+            {rules.length === 0 ? <p className="mt-1 text-[12px] text-muted">No automatic merge rules in this channel.</p> : <ul className="mt-2 space-y-2">{rules.map((rule) => <li key={rule.id} className="flex items-start gap-2 text-[12px]"><span className="min-w-0 flex-1 break-words">{rule.persona || "Any agent"}: {rule.paths.join(", ") || "any path"}, up to {rule.max_lines} lines</span><button type="button" className="text-danger hover:underline" onClick={() => void api.deleteApprovalRule(rule.id).then(() => setRules((items) => items.filter((item) => item.id !== rule.id)))}>Remove</button></li>)}</ul>}
+          </section>}
           {error && (
             <p role="alert" className="px-3 pt-2 text-[12px] text-danger">
               {error}

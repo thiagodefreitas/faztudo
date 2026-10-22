@@ -13,39 +13,41 @@ import (
 type Type string
 
 const (
-	MessagePosted     Type = "message.posted"
-	MessageEdited     Type = "message.edited"
-	MessagePinned     Type = "message.pinned"
-	MessageUnpinned   Type = "message.unpinned"
-	LessonAdded       Type = "lesson.added"
-	LessonUpdated     Type = "lesson.updated"
-	LessonRemoved     Type = "lesson.removed"
-	ChannelCreated    Type = "channel.created"
-	ChannelUpdated    Type = "channel.updated"
-	MemberUpdated     Type = "member.updated"
-	PresenceChanged   Type = "presence.changed"
-	RunCreated        Type = "run.created"
-	RunUpdated        Type = "run.updated"
-	RunOutput         Type = "run.output"
-	RunPrompt         Type = "run.prompt"
-	ApprovalRequested Type = "approval.requested"
-	ApprovalResolved  Type = "approval.resolved"
-	DepartmentUpdated Type = "department.updated"
-	ProjectUpdated    Type = "project.updated"
-	LaneUpdated       Type = "lane.updated"
-	LaneUsageRead     Type = "lane.usage_read"
-	LaneAlert         Type = "lane.alert"
-	ChannelSummarized Type = "channel.summarized"
-	LaneSwitched      Type = "lane.switched"
-	Notice            Type = "notice"
-	HandoffCreated    Type = "handoff.created"
-	HandoffCollected  Type = "handoff.collected"
-	RoutineUpdated    Type = "routine.updated"
-	RoutineRemoved    Type = "routine.removed"
-	TaskCreated       Type = "task.created"
-	TaskUpdated       Type = "task.updated"
-	CompareStarted    Type = "compare.started"
-	CompareDecided    Type = "compare.decided"
+	MessagePosted       Type = "message.posted"
+	MessageEdited       Type = "message.edited"
+	MessagePinned       Type = "message.pinned"
+	MessageUnpinned     Type = "message.unpinned"
+	LessonAdded         Type = "lesson.added"
+	LessonUpdated       Type = "lesson.updated"
+	LessonRemoved       Type = "lesson.removed"
+	ChannelCreated      Type = "channel.created"
+	ChannelUpdated      Type = "channel.updated"
+	MemberUpdated       Type = "member.updated"
+	PresenceChanged     Type = "presence.changed"
+	RunCreated          Type = "run.created"
+	RunUpdated          Type = "run.updated"
+	RunOutput           Type = "run.output"
+	RunPrompt           Type = "run.prompt"
+	ApprovalRequested   Type = "approval.requested"
+	ApprovalResolved    Type = "approval.resolved"
+	ApprovalRuleCreated Type = "approval_rule.created"
+	ApprovalRuleRemoved Type = "approval_rule.removed"
+	DepartmentUpdated   Type = "department.updated"
+	ProjectUpdated      Type = "project.updated"
+	LaneUpdated         Type = "lane.updated"
+	LaneUsageRead       Type = "lane.usage_read"
+	LaneAlert           Type = "lane.alert"
+	ChannelSummarized   Type = "channel.summarized"
+	LaneSwitched        Type = "lane.switched"
+	Notice              Type = "notice"
+	HandoffCreated      Type = "handoff.created"
+	HandoffCollected    Type = "handoff.collected"
+	RoutineUpdated      Type = "routine.updated"
+	RoutineRemoved      Type = "routine.removed"
+	TaskCreated         Type = "task.created"
+	TaskUpdated         Type = "task.updated"
+	CompareStarted      Type = "compare.started"
+	CompareDecided      Type = "compare.decided"
 )
 
 // CompareStartedPayload identifies two runs by their trigger and lane. Run
@@ -160,13 +162,14 @@ type NoticePayload struct {
 	Action *NoticeAction `json:"action,omitempty"`
 }
 
-// NoticeAction is a button on a notice. Kind "assign" asks the Director to
-// assign the specialist Agent (a handle) to the project with handle Project.
+// NoticeAction is a button on a notice. Assign adds a specialist to a project;
+// approval_rule_remove removes the rule that merged a run.
 type NoticeAction struct {
 	Kind    string `json:"kind"`
 	Label   string `json:"label"`
 	Project string `json:"project"`
 	Agent   string `json:"agent"`
+	RuleID  string `json:"rule_id,omitempty"`
 }
 
 // Appender is the narrow interface the runner and lanes code use to record

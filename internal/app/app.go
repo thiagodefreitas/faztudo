@@ -4,6 +4,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1243,9 +1244,14 @@ func (a *App) postRunResult(ctx context.Context, run domain.Run, m domain.Messag
 	}
 	if !compare && run.Mode == domain.RunWrite && run.State == domain.RunWaitingApproval && run.DiffStat != nil && run.DiffStat.Files > 0 {
 		approval := domain.Approval{ID: store.NewID(), RunID: run.ID, ChannelID: run.ChannelID, RequestedBy: agent.ID, Title: "Choose what to do with branch fz/" + run.ID, Detail: "Merge records any uncommitted worktree changes using your Git identity, then fast-forwards the channel repo's current branch. The repo must be clean.", CommitMessage: buildCommitMessage(proposal, m.Body, run.ID), State: domain.ApprovalPending, Options: []domain.ApprovalOption{{Key: "merge", Label: "Merge", Style: "primary"}, {Key: "keep", Label: "Keep"}, {Key: "discard", Label: "Discard", Style: "danger"}}}
-		if _, err := a.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: run.ChannelID, IdempotencyKey: "run-approval:" + run.ID, Payload: approval}); err != nil {
+		event, err := a.Store.Append(ctx, events.Draft{Type: events.ApprovalRequested, Actor: events.System, ChannelID: run.ChannelID, IdempotencyKey: "run-approval:" + run.ID, Payload: approval})
+		if err != nil {
 			return err
 		}
+		if err := json.Unmarshal(event.Payload, &approval); err != nil {
+			return err
+		}
+		a.applyApprovalRule(ctx, run, agent.Handle, approval.ID)
 	}
 	return nil
 }

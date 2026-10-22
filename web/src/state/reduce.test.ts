@@ -57,6 +57,11 @@ describe("reduce", () => {
     expect(state.notices[1]?.action).toBeUndefined()
   })
 
+  it("keeps a remove-rule action on a notice", () => {
+    const state = reduce(emptySnapshot(), envelope(1, "notice", { level: "info", text: "Rule merged", action: { kind: "approval_rule_remove", label: "Remove rule", rule_id: "rule-1" } }))
+    expect(state.notices[0]?.action).toEqual({ kind: "approval_rule_remove", label: "Remove rule", rule_id: "rule-1" })
+  })
+
   it("upserts messages and edits them", () => {
     let state = reduce(emptySnapshot(), envelope(1, "message.posted", message))
     state = reduce(state, envelope(2, "message.posted", message))

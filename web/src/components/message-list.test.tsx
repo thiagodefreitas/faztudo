@@ -241,6 +241,16 @@ describe("MessageList", () => {
     expect(screen.getByText(/next healthy lane/)).toBeInTheDocument()
   })
 
+  it("removes a merge rule from its channel notice", async () => {
+    const user = userEvent.setup()
+    const remove = vi.spyOn(api, "deleteApprovalRule").mockResolvedValue(undefined)
+    renderList([], [], { notices: [{ id: "rule-notice", channel_id: "c1", ts: "2026-10-18T10:00:00.000Z", level: "info", text: "Rule merged this run.", action: { kind: "approval_rule_remove", label: "Remove rule", rule_id: "rule-1" } }] })
+    await user.click(screen.getByRole("button", { name: "Remove rule" }))
+    expect(remove).toHaveBeenCalledWith("rule-1")
+    expect(await screen.findByText("Rule removed")).toBeInTheDocument()
+    remove.mockRestore()
+  })
+
   it("flashes the message a search result pointed at", () => {
     const first = message("01CRZ3NDEKTSV4RRFFQ69G5CC1", ada, "2026-10-18T10:00:00.000Z", "plan A")
     const second = message("01CRZ3NDEKTSV4RRFFQ69G5CC2", ada, "2026-10-18T11:00:00.000Z", "plan B")

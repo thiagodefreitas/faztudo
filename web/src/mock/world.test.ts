@@ -12,6 +12,17 @@ function world() {
 }
 
 describe("mock world", () => {
+  it("creates and removes approval rules through the mock API", () => {
+    const { world: mock } = world()
+    const url = new URL("http://localhost/api/v1/approval-rules")
+    const created = handleMock(mock, "POST", url, JSON.stringify({ channel_id: IDS.dev, persona: "coder", paths: ["web/src/**"], max_lines: 100 }))
+    expect(created.status).toBe(201)
+    const listed = handleMock(mock, "GET", url)
+    expect(listed.body).toHaveLength(1)
+    const id = (listed.body as Array<{ id: string }>)[0]?.id
+    expect(handleMock(mock, "DELETE", new URL(`http://localhost/api/v1/approval-rules/${id}`)).status).toBe(204)
+    expect(handleMock(mock, "GET", url).body).toEqual([])
+  })
   it("serves prompt context for a run", () => {
     const { world: mock } = world()
     const posted = mock.postMessage(IDS.dev, { body: "@coder explain café" })

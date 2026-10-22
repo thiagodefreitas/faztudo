@@ -1,5 +1,7 @@
 import { type KeyboardEvent, useRef, useState } from "react"
+import { api } from "../api/client"
 import { approvalShortcut, approvalSummary, needsConfirm, optionLetter, outcomeText } from "../lib/approval"
+import { suggestedApprovalRule } from "../lib/approval-rule"
 import { cx } from "../lib/cx"
 import { relativeTime } from "../lib/inbox"
 import { useNow } from "../state/now"
@@ -36,6 +38,7 @@ export function ApprovalCard({
   onResolve,
   run,
   agentName,
+  agentHandle,
   diff,
   decider,
 }: {
@@ -43,6 +46,7 @@ export function ApprovalCard({
   onResolve: (option: string, commitMessage?: string) => void
   run?: Run | undefined
   agentName?: string | undefined
+  agentHandle?: string | undefined
   /** The run's diff, when it is known. */
   diff?: string | undefined
   /** Who decided, for a decided card. */
@@ -50,6 +54,13 @@ export function ApprovalCard({
 }) {
   const [message, setMessage] = useState(approval.commit_message ?? "")
   const [confirming, setConfirming] = useState<string | null>(null)
+  const [ruleOpen, setRuleOpen] = useState(false)
+  const [ruleAnyAgent, setRuleAnyAgent] = useState(false)
+  const [ruleError, setRuleError] = useState("")
+  const [ruleBusy, setRuleBusy] = useState(false)
+  const suggested = suggestedApprovalRule(diff ?? "", run?.diff_stat?.insertions ?? 0, run?.diff_stat?.deletions ?? 0)
+  const [rulePaths, setRulePaths] = useState<string | null>(null)
+  const [ruleMaxLines, setRuleMaxLines] = useState<number | null>(null)
   const cardRef = useRef<HTMLElement>(null)
   const messageRef = useRef<HTMLTextAreaElement>(null)
   const pending = approval.state === "pending"
@@ -66,6 +77,21 @@ export function ApprovalCard({
   function cancelConfirm() {
     setConfirming(null)
     cardRef.current?.focus()
+  }
+
+  async function saveRule() {
+    if (!run || ruleBusy) return
+    setRuleBusy(true)
+    setRuleError("")
+    try {
+      await api.createApprovalRule({ channel_id: approval.channel_id, persona: ruleAnyAgent ? "" : (agentHandle ?? ""), paths: (rulePaths ?? suggested.paths.join("\n")).split("\n").map((value) => value.trim()).filter(Boolean), max_lines: ruleMaxLines ?? suggested.maxLines })
+      setRuleOpen(false)
+      onResolve("merge", message)
+    } catch (error) {
+      setRuleError(error instanceof Error ? error.message : "Could not save rule")
+    } finally {
+      setRuleBusy(false)
+    }
   }
 
   // A danger option asks once more; its key again confirms it.
@@ -189,8 +215,18 @@ export function ApprovalCard({
               {option.label}
             </button>
           ))}
+          {write && run && diff && agentHandle && <button type="button" onClick={() => setRuleOpen(true)} className={cx(BUTTON, "border-line bg-surface")}>Always merge changes like this here</button>}
         </div>
       )}
+      {ruleOpen && run && <div role="dialog" aria-label="Create approval rule" className="mt-3 rounded-md border border-line bg-surface p-3">
+        <p className="text-[13px] font-medium">Automatically merge future matching changes in this channel after checks pass.</p>
+        <p className="mt-1 text-[12px] text-muted">Protected paths always require approval: .github/**, .gitlab-ci.yml, lefthook.yml, .pre-commit-config.yaml, Makefile, go.mod, go.sum, package.json, package-lock.json, *.lock, Dockerfile, scripts/**, .gitmodules, and .git/**. Executable changes and failed checks also require approval.</p>
+        <label className="mt-2 flex items-center gap-2 text-[12px]"><input type="checkbox" checked={ruleAnyAgent} onChange={(event) => setRuleAnyAgent(event.target.checked)} />Any agent (otherwise {agentName ?? "this agent"})</label>
+        <label className="mt-2 block text-[12px]">Allowed path globs, one per line<textarea aria-label="Allowed path globs" className="mt-1 w-full rounded border border-line bg-canvas p-2 font-mono" rows={3} value={rulePaths ?? suggested.paths.join("\n")} onChange={(event) => setRulePaths(event.target.value)} /></label>
+        <label className="mt-2 block text-[12px]">Maximum changed lines<input aria-label="Maximum changed lines" type="number" min={1} max={2000} className="ml-2 w-24 rounded border border-line bg-canvas p-1" value={ruleMaxLines ?? suggested.maxLines} onChange={(event) => setRuleMaxLines(Number(event.target.value))} /></label>
+        {ruleError && <p role="alert" className="mt-2 text-[12px] text-danger">{ruleError}</p>}
+        <div className="mt-3 flex gap-2"><button type="button" disabled={ruleBusy} onClick={() => void saveRule()} className={cx(BUTTON, "border-accent bg-accent text-canvas")}>Save rule and merge</button><button type="button" onClick={() => setRuleOpen(false)} className={BUTTON}>Cancel</button></div>
+      </div>}
       <p className="mt-2 text-[12px] text-faint">
         {write
           ? "With this card focused: m merges, k keeps, d discards, e edits the message."

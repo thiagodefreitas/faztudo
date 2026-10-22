@@ -34,6 +34,7 @@ export function ConnectedApproval({ approval }: { approval: Approval }) {
         approval={approval}
         run={run}
         agentName={agent?.display_name}
+        agentHandle={agent?.handle}
         diff={diff.data?.diff}
         decider={deciderName(approval, members.data ?? [])}
         onResolve={(option, commitMessage) => {

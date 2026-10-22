@@ -253,6 +253,16 @@ interface Approval {
   resolution?: { option: string; by: ID; at: string; note?: string };
 }
 
+interface ApprovalRule {
+  id: ID;
+  channel_id: ID;
+  persona: string;       // empty means any agent
+  paths: string[];       // empty means any path, except protected paths
+  max_lines: number;
+  created_by: ID;
+  created_at: string;
+}
+
 type LaneHealth = "available" | "conserve" | "exhausted" | "unavailable" | "unknown";
 
 interface Lane {
@@ -376,6 +386,9 @@ interface NoticeAction {
 | POST | `/api/v1/runs/{id}/retry` | retry `{lane_id?}` on the same or another lane |
 | GET | `/api/v1/approvals?state=pending` | approvals |
 | POST | `/api/v1/approvals/{id}/resolve` | `{option, commit_message?}`; humans only. An unknown approval is 404. For a write run, `commit_message` replaces the approval's proposed `commit_message` as the Merge commit message. A merge stores the short id of the new commit in `resolution.note`, which the approvals inbox shows as "Merged as <id>" |
+| GET | `/api/v1/approval-rules?channel_id=` | list visible approval rules, newest first; humans only, agents get 403; private channel rules are hidden from nonmembers |
+| POST | `/api/v1/approval-rules` | create `{channel_id, persona?, paths?, max_lines}`; humans only; `max_lines` is 1 to 2000, paths use `path.Match` globs or a trailing `/**` directory glob; 201 with the rule, 400 for invalid input, 404 for an unseen channel; emits `approval_rule.created` |
+| DELETE | `/api/v1/approval-rules/{id}` | remove a visible rule; humans only; 204, or 404 for an unknown or unseen rule; emits `approval_rule.removed` |
 | GET | `/api/v1/channels/{id}/compares` | comparisons for a visible channel; each has `id`, `message_id`, `agent_id`, two `candidates` with `lane_id`, optional `run` and `output_tail`, optional `decision` and `winner_lane` |
 | POST | `/api/v1/channels/{id}/compares/{compare}/decide` | humans only; `{decision}` is `merge_a`, `merge_b`, `discard_both`, or `combine`; a merge records the winner lane in a `compare.decided` event |
 | GET | `/api/v1/lanes` | configured lanes (a detected-only default is hidden once lanes.toml configures that CLI) |

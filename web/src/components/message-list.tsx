@@ -649,7 +649,8 @@ function NoticeRow({ notice }: { notice: NoticeItem }) {
         )}
       >
         <p>{notice.text}</p>
-        {notice.action && <AssignButton action={notice.action} />}
+        {notice.action?.kind === "assign" && <AssignButton action={notice.action} />}
+        {notice.action?.kind === "approval_rule_remove" && <RemoveRuleButton action={notice.action} />}
         {why && (
           <button
             type="button"
@@ -667,7 +668,7 @@ function NoticeRow({ notice }: { notice: NoticeItem }) {
 }
 
 // The Director's button on a "not assigned to this project" notice.
-function AssignButton({ action }: { action: NoticeAction }) {
+function AssignButton({ action }: { action: Extract<NoticeAction, { kind: "assign" }> }) {
   const qc = useQueryClient()
   const org = useOrg()
   const [busy, setBusy] = useState(false)
@@ -701,6 +702,13 @@ function AssignButton({ action }: { action: NoticeAction }) {
       {failed && <span role="alert">Could not assign. Try again.</span>}
     </>
   )
+}
+
+function RemoveRuleButton({ action }: { action: Extract<NoticeAction, { kind: "approval_rule_remove" }> }) {
+  const [removed, setRemoved] = useState(false)
+  const [error, setError] = useState(false)
+  if (removed) return <span>Rule removed</span>
+  return <><button type="button" className="min-h-8 rounded border border-line bg-surface px-2 text-[12px]" onClick={() => void api.deleteApprovalRule(action.rule_id).then(() => setRemoved(true)).catch(() => setError(true))}>{action.label}</button>{error && <span role="alert">Could not remove rule</span>}</>
 }
 
 function PendingRow({ item, onRetry }: { item: PendingMessage; onRetry: (item: PendingMessage) => void }) {

@@ -3,6 +3,8 @@ import { iso } from "../lib/time"
 import { ulid } from "../lib/id"
 import type {
   Approval,
+  ApprovalRule,
+  ApprovalRuleInput,
   AssignBody,
   AssignKind,
   CAInfo,
@@ -86,6 +88,7 @@ export class MockWorld {
   private pinned = new Map<ID, string>()
   private runs: Run[] = []
   private approvals: Approval[] = []
+  private approvalRules: ApprovalRule[] = []
   private compares: CompareGroup[] = []
   private lanes: Lane[]
   private outputs = new Map<string, OutputLine[]>()
@@ -366,6 +369,7 @@ export class MockWorld {
   seedShowcase(): void {
     const minute = 60_000
     const now = this.clock.now()
+    this.approvalRules.push({ id: ulid(now), channel_id: IDS.dev, persona: "coder", paths: ["web/src/**"], max_lines: 100, created_by: this.me.id, created_at: iso(now - 2 * minute) })
     const agent = (handle: string, name: string, lanes: string[], role: string, presence: Member["presence"] = "offline"): Member => ({
       id: ulid(now),
       kind: "agent",
@@ -832,6 +836,27 @@ export class MockWorld {
   getApprovals(state?: Approval["state"]): Approval[] {
     const list = state ? this.approvals.filter((item) => item.state === state) : this.approvals
     return structuredClone(list)
+  }
+
+  getApprovalRules(channelId?: ID): ApprovalRule[] {
+    return structuredClone(this.approvalRules.filter((rule) => !channelId || rule.channel_id === channelId))
+  }
+
+  createApprovalRule(input: ApprovalRuleInput): Result<ApprovalRule> {
+    if (!this.channels.some((channel) => channel.id === input.channel_id)) return err(404, "not_found", "channel not found")
+    if (input.max_lines < 1 || input.max_lines > 2000) return err(400, "bad_request", "invalid max_lines")
+    const rule: ApprovalRule = { ...input, id: ulid(), created_by: this.me.id, created_at: new Date().toISOString() }
+    this.approvalRules.push(rule)
+    this.emit("approval_rule.created", rule.channel_id, rule, `human:${this.me.id}`)
+    return ok(structuredClone(rule), 201)
+  }
+
+  deleteApprovalRule(id: ID): Result<null> {
+    const index = this.approvalRules.findIndex((rule) => rule.id === id)
+    if (index < 0) return err(404, "not_found", "rule not found")
+    const [rule] = this.approvalRules.splice(index, 1)
+    if (rule) this.emit("approval_rule.removed", rule.channel_id, rule, `human:${this.me.id}`)
+    return ok(null, 204)
   }
 
   postMessage(channelId: ID, body: MessageCreate): Result<Message> {

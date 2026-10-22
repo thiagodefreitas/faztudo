@@ -275,6 +275,16 @@ type ApprovalResolution struct {
 	Note   string    `json:"note,omitempty"`
 }
 
+type ApprovalRule struct {
+	ID        string    `json:"id"`
+	ChannelID string    `json:"channel_id"`
+	Persona   string    `json:"persona"`
+	Paths     []string  `json:"paths"`
+	MaxLines  int       `json:"max_lines"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type Approval struct {
 	ID          ID                  `json:"id"`
 	RunID       ID                  `json:"run_id,omitempty"`

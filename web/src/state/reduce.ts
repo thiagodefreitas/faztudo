@@ -50,6 +50,10 @@ function text(value: unknown): string | null {
 function noticeAction(value: unknown): NoticeAction | null {
   const action = record(value)
   const label = text(action?.label)
+  if (action?.kind === "approval_rule_remove" && label) {
+    const ruleId = text(action.rule_id)
+    return ruleId ? { kind: "approval_rule_remove", label, rule_id: ruleId } : null
+  }
   const project = text(action?.project)
   const agent = text(action?.agent)
   if (action?.kind !== "assign" || !label || !project || !agent) return null

@@ -248,6 +248,18 @@ export interface Approval {
   resolution?: ApprovalResolution
 }
 
+export interface ApprovalRule {
+  id: ID
+  channel_id: ID
+  persona: string
+  paths: string[]
+  max_lines: number
+  created_by: ID
+  created_at: string
+}
+
+export type ApprovalRuleInput = Pick<ApprovalRule, "channel_id" | "persona" | "paths" | "max_lines">
+
 export type LaneHealth = "available" | "conserve" | "exhausted" | "unavailable" | "unknown"
 export type LaneCLI = "claude" | "codex" | "grok" | "kimi" | "agy" | "opencode" | "custom"
 export type CostClass = "premium" | "standard" | "cheap" | "local"
@@ -446,12 +458,9 @@ export interface LanePatch {
 
 // A button on a notice: "assign" lets the Director put `agent` (a handle)
 // into `project` (a handle).
-export interface NoticeAction {
-  kind: "assign"
-  label: string
-  project: string
-  agent: string
-}
+export type NoticeAction =
+  | { kind: "assign"; label: string; project: string; agent: string }
+  | { kind: "approval_rule_remove"; label: string; rule_id: ID }
 
 export interface NoticeItem {
   id: ID

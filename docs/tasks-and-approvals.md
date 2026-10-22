@@ -82,3 +82,22 @@ The card stays pending and says why, so you can fix it and try again:
 
 See also [Using faztudo](https://github.com/thiagodefreitas/faztudo/blob/main/docs/wiki/Using-faztudo.md)
 and the [API](api.md) for the task and approval endpoints.
+
+## Approval rules
+
+On a write run's merge card, **Always merge changes like this here** saves a
+channel rule and merges the current card. Choose the agent (or any agent), path
+globs, and a maximum number of changed lines. The channel's Members panel lists
+rules and lets you remove them. Only a human can manage rules.
+
+A rule applies only to a write run whose checks passed. All changed paths must
+match its globs, and added plus removed lines must be within the limit. An empty
+glob list allows any path, subject to the protected paths below. A trailing
+`/**` matches a directory and its contents. A notice names the rule when it
+merges, or explains why a merge failed and left the card pending.
+
+Rules never merge changes to `.github/**`, `.gitlab-ci.yml`, `lefthook.yml`,
+`.pre-commit-config.yaml`, `Makefile`, `go.mod`, `go.sum`, `package.json`,
+`package-lock.json`, `*.lock`, `Dockerfile`, `scripts/**`, `.gitmodules`, or
+anything under `.git`. Changing a file to executable also requires a human.
+Rules do not push, discard, or answer questions.
