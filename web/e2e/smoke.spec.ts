@@ -27,7 +27,10 @@ test("posts a mention, streams a run, and answers the approval", async ({ page }
   await expect(approval).toBeVisible()
 
   await page.screenshot({ path: "docs-shots/channel-light.png" })
-  await page.getByRole("button", { name: "Use dark theme" }).click()
+  // The theme button cycles System, Light, Dark.
+  const theme = page.getByRole("button", { name: /^Theme:/ })
+  for (let i = 0; i < 3 && !(await page.locator("html.dark").count()); i++) await theme.click()
+  await expect(page.locator("html.dark")).toHaveCount(1)
   await page.screenshot({ path: "docs-shots/channel-dark.png" })
 
   await approval.focus()
