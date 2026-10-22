@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react"
+import { cx } from "../lib/cx"
 import { activateUpdate, dismissInstallHint, installHintVisible, type InstallPromptEvent, updateAvailable } from "../lib/pwa"
 
 declare const __FAZTUDO_BUILD_ID__: string
+
+const BAR = "flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-2 text-[13px] shadow-sm"
+const PRIMARY = "min-h-9 rounded-md bg-accent px-3 py-1.5 font-medium text-white transition-opacity hover:opacity-90 dark:text-canvas"
 
 export function PwaStatus() {
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null)
@@ -61,9 +65,12 @@ export function PwaStatus() {
 
   if (showUpdate && registration) {
     return (
-      <div role="status" className="flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-2 text-[13px]">
-        <span>New version available</span>
-        <button type="button" className="rounded bg-accent px-3 py-1.5 font-medium text-white dark:text-canvas" onClick={() => activateUpdate(registration)}>
+      <div role="status" className={BAR}>
+        <span className="flex items-center gap-2">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+          New version available
+        </span>
+        <button type="button" className={PRIMARY} onClick={() => activateUpdate(registration)}>
           Reload
         </button>
       </div>
@@ -72,17 +79,17 @@ export function PwaStatus() {
 
   if (!showInstall) return null
   return (
-    <div role="status" className="flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-2 text-[13px] md:hidden">
+    <div role="status" className={cx(BAR, "md:hidden")}>
       <span>Install faztudo for quick access. {installPrompt ? "" : "Use your browser's Add to Home Screen menu."}</span>
       <div className="flex shrink-0 gap-2">
-        {installPrompt && <button type="button" className="rounded bg-accent px-3 py-1.5 font-medium text-white dark:text-canvas" onClick={() => {
+        {installPrompt && <button type="button" className={PRIMARY} onClick={() => {
           void installPrompt.prompt().then(() => installPrompt.userChoice).then(() => {
             dismissInstallHint()
             setShowInstall(false)
             setInstallPrompt(null)
           })
         }}>Install</button>}
-        <button type="button" aria-label="Dismiss install hint" className="rounded px-2 py-1.5 text-muted hover:bg-canvas" onClick={() => {
+        <button type="button" aria-label="Dismiss install hint" className="min-h-9 rounded-md px-2 py-1.5 text-muted transition-colors hover:bg-canvas hover:text-ink" onClick={() => {
           dismissInstallHint()
           setShowInstall(false)
         }}>Dismiss</button>

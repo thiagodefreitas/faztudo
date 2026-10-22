@@ -48,4 +48,16 @@ describe("BottomTabs", () => {
       expect(await screen.findByRole("menuitem", { name })).toBeInTheDocument()
     }
   })
+
+  it("cycles the theme from More without closing the menu", async () => {
+    localStorage.clear()
+    const user = userEvent.setup()
+    await renderTabs("/")
+    await user.click(await screen.findByRole("button", { name: "More" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Theme: System. Switch to Light." }))
+    expect(await screen.findByRole("menuitem", { name: "Theme: Light. Switch to Dark." })).toBeInTheDocument()
+    await user.click(screen.getByRole("menuitem", { name: "Theme: Light. Switch to Dark." }))
+    await user.click(screen.getByRole("menuitem", { name: "Theme: Dark. Switch to System." }))
+    expect(screen.getByRole("menuitem", { name: "Theme: System. Switch to Light." })).toBeInTheDocument()
+  })
 })

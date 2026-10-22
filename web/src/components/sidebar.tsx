@@ -4,9 +4,10 @@ import { useState } from "react"
 import { identityOf } from "../lib/avatar"
 import { cx } from "../lib/cx"
 import { directPeer, findDirect, isDirect } from "../lib/direct"
+import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
 import { primaryWindow } from "../lib/lanes"
 import { groupChannels, pendingApprovals, projectCounts } from "../lib/projects"
-import { useTheme } from "../lib/theme"
+import { THEME_LABEL, nextTheme, useTheme, type ThemePreference } from "../lib/theme"
 import { formatAge } from "../lib/time"
 import { useNow } from "../state/now"
 import { useOpenDirect } from "../state/direct"
@@ -20,7 +21,7 @@ import { TeamIcon } from "./team-icon"
 import { healthDotClass } from "./lane-chip"
 import { AgentAvatar, type AvatarState } from "./agent-avatar"
 import { laneBorrower } from "./office/state"
-import { LanesGauge } from "./lanes"
+import { useLanesShortcut } from "./lanes"
 
 const PRESENCE: Record<Presence, string> = {
   online: "bg-ok",
@@ -29,28 +30,64 @@ const PRESENCE: Record<Presence, string> = {
   offline: "bg-faint",
 }
 
-// An agent with no run is "offline", which is its normal resting state, so
-// it stays in color; the lane dot next to it says whether it can run.
-const AGENT_STATE: Record<Presence, AvatarState | undefined> = {
-  online: undefined,
-  idle: undefined,
-  busy: "working",
-  offline: undefined,
+// What a member list row says about an agent, in one word.
+export type AgentActivity = "working" | "waiting" | "out of quota" | "idle"
+
+const ACTIVITY_LABEL: Record<AgentActivity, string> = {
+  working: "Working",
+  waiting: "Waiting",
+  "out of quota": "Out of quota",
+  idle: "Idle",
 }
 
+const ACTIVITY_AVATAR: Record<AgentActivity, AvatarState | undefined> = {
+  working: "working",
+  waiting: "waiting",
+  "out of quota": "off",
+  idle: undefined,
+}
+
+// Working beats waiting beats out of quota: the row says what matters most now.
+export function agentActivity(member: Member, runs: Run[], approvals: Approval[], lane: Lane | undefined): AgentActivity {
+  const mine = runs.filter((run) => run.agent_id === member.id)
+  if (member.presence === "busy" || mine.some((run) => run.state === "running" || run.state === "verifying")) return "working"
+  if (mine.some((run) => run.state === "waiting_approval") || approvals.some((a) => a.state === "pending" && a.requested_by === member.id)) return "waiting"
+  if (lane && (lane.health === "exhausted" || lane.health === "unavailable")) return "out of quota"
+  return "idle"
+}
+
+// What the lane dot means, for its tooltip.
+const LANE_MEANING: Record<LaneHealth, string> = {
+  available: "Has room to start runs.",
+  conserve: "Close to its limit. Runs may be held back.",
+  exhausted: "Out of quota. No runs until it resets.",
+  unavailable: "Cannot run right now.",
+  unknown: "No usage reading yet, so it may still run.",
+}
+
+// More agents than this and the idle ones fold under "Show all".
+export const AGENT_FOLD_AT = 8
+
 const STATUS_LABEL = {
-  open: "Live",
-  connecting: "Connecting",
+  open: "",
+  connecting: "Reconnecting...",
   closed: "Offline",
 } as const
 
-const ROW = "flex min-h-10 items-center gap-2 rounded-md px-2 text-[13px] transition-colors duration-150 md:min-h-7"
-// The open row is tinted and bold; a row with unread messages is bold too.
-const ACTIVE_ROW = "bg-accent-soft font-medium text-ink"
-const IDLE_ROW = "text-ink hover:bg-canvas"
+const ROW = "relative flex min-h-10 items-center gap-2 rounded-md px-2 text-[13px] transition-colors md:min-h-7"
+// The open row is tinted with a left accent; a row with unread messages is
+// ink and semibold, a read one is muted.
+const ACTIVE_ROW =
+  "bg-accent-soft font-medium text-ink before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-accent"
+const IDLE_ROW = "text-muted hover:bg-canvas hover:text-ink"
+const UNREAD_ROW = "font-semibold text-ink"
 const HEADING = "px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-faint"
-const PLUS = "inline-flex h-10 w-10 items-center justify-center rounded text-[16px] text-muted hover:bg-canvas md:h-7 md:w-7"
+const PLUS = "inline-flex h-10 w-10 items-center justify-center rounded text-[16px] text-muted transition-colors hover:bg-canvas hover:text-ink md:h-7 md:w-7"
 const BADGE = "min-w-5 rounded-full px-1.5 text-center text-[11px] font-medium leading-[18px] tabular-nums text-canvas"
+
+function rowClass(active: boolean, unread: number): string {
+  return active ? ACTIVE_ROW : cx(IDLE_ROW, unread > 0 && UNREAD_ROW)
+}
 
 const COLLAPSED_KEY = "faztudo-rail-collapsed"
 
@@ -93,11 +130,11 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const openDirect = useOpenDirect()
   const now = useNow()
   const status = useStreamStatus()
-  const theme = useTheme()
   const navigate = useNavigate()
   const [creating, setCreating] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
+  const [showAllAgents, setShowAllAgents] = useState(false)
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const meId = me.data?.id
   const all = channels.data ?? []
@@ -107,6 +144,25 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
   const others = (members.data ?? []).filter((member) => member.id !== meId)
   const people = others.filter((member) => member.kind === "human")
   const agents = others.filter((member) => member.kind === "agent")
+  // Agents with a run first, then the rest. With many agents the idle ones fold,
+  // except the one whose chat is open.
+  const laneList = lanes.data ?? []
+  const runList = runs.data ?? []
+  const activity = new Map(
+    agents.map((member) => [
+      member.id,
+      agentActivity(member, runList, approvals.data ?? [], laneList.find((lane) => lane.id === member.agent?.lanes[0])),
+    ]),
+  )
+  const busyRank = (member: Member) => (activity.get(member.id) === "working" ? 0 : activity.get(member.id) === "waiting" ? 1 : 2)
+  const orderedAgents = agents.map((member, index) => ({ member, index })).sort((a, b) => busyRank(a.member) - busyRank(b.member) || a.index - b.index).map((item) => item.member)
+  const foldAgents = orderedAgents.length > AGENT_FOLD_AT
+  const isOpenChat = (member: Member) => {
+    const dm = meId ? findDirect(all, meId, member.id) : undefined
+    return dm ? pathname === `/c/${dm.id}` : false
+  }
+  const hiddenAgents = foldAgents && !showAllAgents ? orderedAgents.filter((member) => activity.get(member.id) === "idle" && !isOpenChat(member)) : []
+  const visibleAgents = orderedAgents.filter((member) => !hiddenAgents.includes(member))
   // A DM whose peer is no longer a member still deserves a row.
   const orphans = all.filter((channel) => isDirect(channel) && !directPeer(channel, meId, members.data ?? []))
   function startDirect(member: Member) {
@@ -218,7 +274,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
                     params={{ channelId: channel.id }}
                     onClick={onNavigate}
                     aria-current={pathname === `/c/${channel.id}` ? "page" : undefined}
-                    className={cx(ROW, pathname === `/c/${channel.id}` ? ACTIVE_ROW : IDLE_ROW, channel.unread > 0 && "font-medium")}
+                    className={cx(ROW, rowClass(pathname === `/c/${channel.id}`, channel.unread))}
                   >
                     <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE.offline)} aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate">{channel.name}</span>
@@ -233,26 +289,37 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
           <div className="mt-4">
             <p className={HEADING}>Agents</p>
             <ul className="flex flex-col gap-px">
-              {agents.map((member) => (
+              {visibleAgents.map((member) => (
                 <PeerRow
                   key={member.id}
                   member={member}
                   channel={directOf(member)}
                   pathname={pathname}
-                  lanes={lanes.data ?? []}
+                  lanes={laneList}
                   now={now}
                   members={members.data ?? []}
-                  runs={runs.data ?? []}
+                  runs={runList}
+                  activity={activity.get(member.id)}
                   onNavigate={onNavigate}
                   onOpen={startDirect}
                 />
               ))}
             </ul>
+            {foldAgents && (hiddenAgents.length > 0 || showAllAgents) && (
+              <button
+                type="button"
+                aria-expanded={showAllAgents}
+                onClick={() => setShowAllAgents((value) => !value)}
+                className="mt-1 min-h-10 w-full rounded-md px-2 text-left text-[12px] text-muted transition-colors hover:bg-canvas hover:text-ink md:min-h-7"
+              >
+                {showAllAgents ? "Show fewer" : `Show all (${hiddenAgents.length})`}
+              </button>
+            )}
           </div>
         )}
       </div>
       <div className="border-t border-line px-2 py-2">
-        <LanesGauge lanes={lanes.data ?? []} />
+        <LanesLink lanes={laneList} active={pathname === "/lanes"} onNavigate={onNavigate} />
         <Link
           to="/tasks"
           onClick={onNavigate}
@@ -276,7 +343,7 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
           className={cx(ROW, "justify-between", pathname === "/office" ? ACTIVE_ROW : IDLE_ROW)}
         >
           <span>Office</span>
-          <span className="font-mono text-[11px] text-faint">2D</span>
+          <span className="text-[11px] text-faint">2D</span>
         </Link>
         <Link
           to="/settings/devices"
@@ -285,22 +352,101 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
           className={cx(ROW, "justify-between", pathname === "/settings/devices" ? ACTIVE_ROW : IDLE_ROW)}
         >
           <span>Devices</span>
-          <span className="font-mono text-[11px] text-faint">LAN</span>
+          <span className="text-[11px] text-faint">LAN</span>
         </Link>
         <div className="mt-1 flex items-center justify-between gap-2 px-2">
-          <p className="text-[12px] text-muted" role="status">
+          <p className="flex items-center gap-1.5 text-[12px] text-muted" role="status">
+            {status !== "open" && <span className={cx("h-1.5 w-1.5 rounded-full", status === "closed" ? "bg-danger" : "bg-warn motion-safe:animate-pulse")} aria-hidden />}
             {STATUS_LABEL[status]}
           </p>
-          <button
-            type="button"
-            onClick={theme.toggle}
-            className="min-h-10 rounded px-2 text-[12px] text-ink hover:bg-canvas md:min-h-7"
-          >
-            {theme.choice === "dark" ? "Use light theme" : "Use dark theme"}
-          </button>
+          <ThemeButton />
         </div>
       </div>
     </div>
+  )
+}
+
+const THEME_ICON_PROPS = {
+  viewBox: "0 0 16 16",
+  className: "h-4 w-4",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.5,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const
+
+export function ThemeIcon({ choice }: { choice: ThemePreference }) {
+  if (choice === "light") {
+    return (
+      <svg {...THEME_ICON_PROPS}>
+        <circle cx="8" cy="8" r="3" />
+        <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" />
+      </svg>
+    )
+  }
+  if (choice === "dark") {
+    return (
+      <svg {...THEME_ICON_PROPS}>
+        <path d="M13.2 9.6A5.4 5.4 0 0 1 6.4 2.8a5.4 5.4 0 1 0 6.8 6.8Z" />
+      </svg>
+    )
+  }
+  return (
+    <svg {...THEME_ICON_PROPS}>
+      <rect x="2" y="3" width="12" height="8" rx="1.5" />
+      <path d="M5.5 13.5h5M8 11v2.5" />
+    </svg>
+  )
+}
+
+// One icon button that cycles System, Light, Dark. The tooltip names the
+// current choice and the next one.
+function ThemeButton() {
+  const theme = useTheme()
+  const label = `Theme: ${THEME_LABEL[theme.preference]}. Switch to ${THEME_LABEL[nextTheme(theme.preference)]}.`
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <button
+          type="button"
+          onClick={theme.cycle}
+          aria-label={label}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted transition-colors hover:bg-canvas hover:text-ink md:h-7 md:w-7"
+        >
+          <ThemeIcon choice={theme.preference} />
+        </button>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content sideOffset={6} className="z-50 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-ink shadow-md">
+          {label}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  )
+}
+
+// The Lanes link in the footer: the worst lane health as a dot (shape and
+// text come along for those who cannot tell colors apart) and the lane count.
+function LanesLink({ lanes, active, onNavigate }: { lanes: Lane[]; active: boolean; onNavigate: (() => void) | undefined }) {
+  useLanesShortcut()
+  const summary = summarizeLanes(lanes)
+  const meta = HEALTH_META[summary.health]
+  return (
+    <Link
+      to="/lanes"
+      onClick={onNavigate}
+      title="Lanes (Alt+L)"
+      aria-label={`Lane health: ${meta.label}, ${summary.total} lanes`}
+      aria-current={active ? "page" : undefined}
+      className={cx(ROW, active ? ACTIVE_ROW : IDLE_ROW)}
+    >
+      <span className={cx("h-2 w-2 shrink-0 rounded-full", healthDotClass(summary.health))} aria-hidden="true" />
+      <span>Lanes</span>
+      <span className="sr-only">{meta.label}</span>
+      <span className="ml-auto text-[12px] tabular-nums text-faint">{summary.total}</span>
+    </Link>
   )
 }
 
@@ -395,7 +541,7 @@ function ChannelRow({
         params={{ channelId: channel.id }}
         onClick={onNavigate}
         aria-current={active ? "page" : undefined}
-        className={cx(ROW, active ? ACTIVE_ROW : IDLE_ROW, channel.unread > 0 && "font-medium")}
+        className={cx(ROW, rowClass(active, channel.unread))}
       >
         {team ? (
           <TeamIcon channel={channel} members={members} excludeId={meId} size={20} layout="cluster" className="shrink-0" />
@@ -428,6 +574,7 @@ function PeerRow({
   now,
   members,
   runs,
+  activity,
   onNavigate,
   onOpen,
 }: {
@@ -438,6 +585,7 @@ function PeerRow({
   now: number
   members: Member[]
   runs: Run[]
+  activity?: AgentActivity
   onNavigate: (() => void) | undefined
   onOpen: (member: Member) => void
 }) {
@@ -445,7 +593,10 @@ function PeerRow({
   // A quiet "busy for @persona" only when the CLI is not busy itself.
   const busyFor = member.presence === "busy" ? null : laneBorrower(member, runs, members)
   const active = channel ? pathname === `/c/${channel.id}` : false
-  const className = cx(ROW, "min-w-0 flex-1 text-left", active ? ACTIVE_ROW : IDLE_ROW, (channel?.unread ?? 0) > 0 && "font-medium")
+  const className = cx(ROW, "min-w-0 flex-1 text-left", rowClass(active, channel?.unread ?? 0))
+  const state: AgentActivity | undefined = member.kind === "agent" ? activity ?? "idle" : undefined
+  const stateWord = state ? (busyFor && state === "idle" ? "Busy" : ACTIVITY_LABEL[state]) : null
+  const quiet = state === "idle" && !busyFor
   const inner = (
     <>
       {member.kind === "agent" ? (
@@ -461,17 +612,29 @@ function PeerRow({
             <AgentAvatar member={member} size={20} decorative />
           </span>
         ) : (
-          <AgentAvatar member={member} size={20} state={AGENT_STATE[member.presence]} decorative />
+          <AgentAvatar member={member} size={20} state={state ? ACTIVITY_AVATAR[state] : undefined} decorative />
         )
       ) : (
         <span className={cx("h-2 w-2 shrink-0 rounded-full", PRESENCE[member.presence])} aria-label={member.presence} />
       )}
       <span className="min-w-0 flex-1 truncate">{member.display_name}</span>
+      {stateWord && (
+        <span
+          data-activity={state}
+          className={cx(
+            "shrink-0 text-[11px] font-normal transition-opacity",
+            state === "working" ? "text-accent" : "text-muted",
+            quiet && "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 max-md:hidden",
+          )}
+        >
+          {stateWord}
+        </span>
+      )}
       {channel && <Unread count={channel.unread} />}
     </>
   )
   return (
-    <li className="flex items-center gap-1" data-member={member.id}>
+    <li className="group flex items-center gap-1" data-member={member.id}>
       {channel ? (
         <Link to="/c/$channelId" params={{ channelId: channel.id }} onClick={onNavigate} aria-current={active ? "page" : undefined} className={className}>
           {inner}
@@ -501,9 +664,10 @@ function LaneDot({ lane, now }: { lane: Lane | undefined; now: number }) {
       <Tooltip.Portal>
         <Tooltip.Content
           sideOffset={6}
-          className="z-50 max-w-56 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-ink shadow-lg"
+          className="z-50 max-w-56 rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-ink shadow-md"
         >
-          <p>{label}</p>
+          <p className="font-medium">{label}</p>
+          <p>{LANE_MEANING[health]}</p>
           {lane?.health_reason && <p>{lane.health_reason}</p>}
           <p className="text-muted">
             {window?.source ?? "unknown"}, {age}

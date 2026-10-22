@@ -5,7 +5,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { qk } from "../state/keys"
 import type { Lane } from "../types"
-import { LaneGauges } from "./lane-gauges"
+import { LaneGauges, MAX_VISIBLE_LANES, orderLanes } from "./lane-gauges"
 
 const lanes: Lane[] = [
   {
@@ -70,6 +70,33 @@ describe("LaneGauges", () => {
     await setup("/lanes", lanes)
     await screen.findByRole("list", { name: "Lane gauges", hidden: true })
     expect(screen.queryByRole("link", { name: /Lanes 1\/2/ })).not.toBeInTheDocument()
+  })
+
+  it("puts lanes that need attention first, worst first, then the healthy ones", () => {
+    const make = (id: string, health: Lane["health"]): Lane => ({ ...lanes[1], id, health })
+    const order = orderLanes([make("a/ok", "available"), make("b/unknown", "unknown"), make("c/low", "conserve"), make("d/out", "exhausted"), make("0/ok", "available")])
+    expect(order.map((lane) => lane.id)).toEqual(["d/out", "c/low", "b/unknown", "0/ok", "a/ok"])
+  })
+
+  it("highlights a lane that needs attention and names its health in words", async () => {
+    await setup("/", lanes)
+    const claude = await screen.findByRole("link", { name: "claude/sonnet: conserve, 83%" })
+    expect(claude).toHaveTextContent("Conserve")
+    expect(claude).toHaveClass("bg-warn-soft")
+    const grok = screen.getByRole("link", { name: "grok/default: available, 48k tok" })
+    expect(grok).not.toHaveTextContent("Available")
+    expect(grok).not.toHaveClass("bg-warn-soft")
+    const items = screen.getAllByRole("listitem", { hidden: true })
+    expect(items[0]).toContainElement(claude)
+  })
+
+  it("folds lanes past the limit into +N", async () => {
+    const many: Lane[] = Array.from({ length: MAX_VISIBLE_LANES + 2 }, (_, i) => ({ ...lanes[1], id: `cli/lane${i}` }))
+    await setup("/", many)
+    const more = await screen.findByRole("link", { name: "2 more lanes" })
+    expect(more).toHaveTextContent("+2")
+    expect(more).toHaveAttribute("href", "/lanes")
+    expect(screen.queryByRole("link", { name: /cli\/lane7/ })).not.toBeInTheDocument()
   })
 
   it("renders nothing without lanes", async () => {

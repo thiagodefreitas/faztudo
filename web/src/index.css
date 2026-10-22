@@ -17,8 +17,8 @@
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --color-canvas: #f7f9fa;
   --color-surface: #ffffff;
-  --color-sidebar: #eef2f5;
-  --color-line: #dfe6eb;
+  --color-sidebar: #f1f5f7;
+  --color-line: #e2e8ed;
   --color-ink: #11181c;
   --color-muted: #3f4d56;
   --color-faint: #576670;
@@ -49,14 +49,28 @@
   --color-agent-4-fg: #63204c;
   --color-agent-5-fg: #074d6b;
   --color-agent-6-fg: #7d2610;
+
+  /* Shape, depth and motion. Components use the rounded-*, shadow-* and
+     transition utilities; these are the values behind them. */
+  --radius-sm: 0.3rem;
+  --radius-md: 0.45rem;
+  --radius-lg: 0.7rem;
+  --shadow-sm: 0 1px 2px 0 rgb(17 24 28 / 0.06);
+  --shadow-md: 0 2px 6px -1px rgb(17 24 28 / 0.08), 0 1px 3px -1px rgb(17 24 28 / 0.06);
+  --shadow-lg: 0 10px 24px -6px rgb(17 24 28 / 0.14), 0 3px 8px -3px rgb(17 24 28 / 0.08);
+  --default-transition-duration: 160ms;
+  --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-duration: 160ms;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 }
 
 /* html.dark beats :root so the same utilities follow the toggle. */
 html.dark {
   --color-canvas: #0f1417;
   --color-surface: #151c21;
-  --color-sidebar: #0b0f12;
-  --color-line: #222c33;
+  --color-sidebar: #0c1115;
+  --color-line: #232d34;
   --color-ink: #edf2f4;
   --color-muted: #a8b6bf;
   --color-faint: #84949e;
@@ -87,10 +101,42 @@ html.dark {
   --color-agent-4-fg: #f0b6dc;
   --color-agent-5-fg: #95dcf7;
   --color-agent-6-fg: #f7b5a3;
+
+  /* Shadows barely show on dark surfaces, so they are softer and the edge
+     comes from the line color. */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 2px 8px -1px rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 12px 28px -6px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.03);
 }
 
 html {
   color-scheme: light;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Thin scrollbars that stay out of the way. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-faint) 45%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-faint) 45%, transparent);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 html.dark {
@@ -116,6 +162,10 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.45;
+  /* Inter's single-storey a, and figures that line up in times and counts. */
+  font-feature-settings: "cv11";
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top);
@@ -143,8 +193,8 @@ textarea,
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--color-accent);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .markdown {
@@ -300,7 +350,7 @@ textarea,
 }
 
 .fz-rise {
-  animation: fz-rise 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: fz-rise calc(var(--motion-duration) + 20ms) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Agent avatar while working: the character bobs, its eyes scan as if

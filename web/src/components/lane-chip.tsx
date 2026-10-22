@@ -16,6 +16,19 @@ export function healthDotClass(health: LaneHealth): string {
   return DOT[health]
 }
 
+const BAR: Record<LaneHealth, string> = {
+  available: "bg-ok",
+  conserve: "bg-warn",
+  exhausted: "bg-danger",
+  unavailable: "bg-faint",
+  unknown: "bg-faint",
+}
+
+// The fill of a small usage bar, by health.
+export function healthBarClass(health: LaneHealth): string {
+  return BAR[health]
+}
+
 export function LaneChip({ lane, now }: { lane: Lane | undefined; now: number }) {
   const health = lane?.health ?? "unknown"
   const window = lane ? primaryWindow(lane) : undefined
@@ -25,7 +38,7 @@ export function LaneChip({ lane, now }: { lane: Lane | undefined; now: number })
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas px-2 py-0.5 text-[12px] text-muted">
+        <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-canvas px-2 py-0.5 text-[12px] tabular-nums text-muted">
           <span className={cx("h-1.5 w-1.5 shrink-0 rounded-full", healthDotClass(health))} aria-hidden />
           <span className="truncate">{label}</span>
         </span>
@@ -33,7 +46,7 @@ export function LaneChip({ lane, now }: { lane: Lane | undefined; now: number })
       <Tooltip.Portal>
         <Tooltip.Content
           sideOffset={6}
-          className="z-50 max-w-64 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] leading-5 text-ink shadow-lg"
+          className="z-50 max-w-64 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] leading-5 text-ink shadow-md"
         >
           <p className="font-medium">{lane?.id ?? "No lane"}</p>
           {lane?.health_reason && <p>{lane.health_reason}</p>}
