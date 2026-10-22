@@ -62,6 +62,13 @@ export function TaskBuilder({
   )
 }
 
+/** The channel's default agent, else its first agent member, else the first agent. */
+export function defaultAssignee(channel: Channel | undefined, agents: Member[]): string {
+  const inChannel = channel ? agents.filter((agent) => channel.member_ids.includes(agent.id)) : []
+  const preferred = channel?.default_agent_id ? agents.find((agent) => agent.id === channel.default_agent_id) : undefined
+  return (preferred ?? inChannel[0] ?? agents[0])?.handle ?? ""
+}
+
 function BuilderForm({
   channels,
   channelId,
@@ -89,7 +96,7 @@ function BuilderForm({
   const [acceptance, setAcceptance] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const selected = assignee ?? agents[0]?.handle ?? ""
+  const selected = assignee ?? defaultAssignee(channels.find((item) => item.id === channel), agents)
   const agent = agents.find((item) => item.handle === selected)
   const laneChoices = agent?.agent?.lanes ?? []
 

@@ -6,11 +6,12 @@ import { cx } from "../lib/cx"
 import { compactTokens, displayPct, formatCountdown, formatTokens, sparklinePath } from "../lib/lane-format"
 import { HEALTH_META, summarizeLanes } from "../lib/lane-health"
 import { laneRunUsage, runsTodayOf } from "../lib/lanes"
+import { laneAdvice } from "../lib/lane-advice"
 import { formatAge } from "../lib/time"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
-import { useLanes, useRuns } from "../state/queries"
+import { useLanes, useMembers, useRuns } from "../state/queries"
 import type { Lane, LaneHealth, LaneUsageReading, LaneWindow, Run } from "../types"
 import { CARD, EmptyState, Kbd, PageHeader } from "./page-header"
 
@@ -184,6 +185,7 @@ export function LaneCardView({
   onProbe,
   history = [],
   runs = [],
+  advice,
 }: {
   lane: Lane
   now: number
@@ -192,6 +194,8 @@ export function LaneCardView({
   onProbe: () => void
   history?: LaneUsageReading[]
   runs?: Run[]
+  /** One next-step line shown with the error or exhausted state. */
+  advice?: string | undefined
 }) {
   const usage = laneRunUsage(runs, lane.id, now)
   return (
@@ -244,6 +248,11 @@ export function LaneCardView({
           <p className="font-mono text-[11px] text-muted">{formatAge(lane.last_error.at, now)}</p>
         </div>
       )}
+      {advice && (
+        <p data-testid="lane-advice" className="mt-2 text-[12px] text-ink">
+          {advice}
+        </p>
+      )}
       <div className="mt-3 flex items-center gap-2">
         <button
           type="button"
@@ -263,7 +272,7 @@ export function LaneCardView({
   )
 }
 
-function LaneCard({ lane, now, focused, runs }: { lane: Lane; now: number; focused: boolean; runs: Run[] }) {
+function LaneCard({ lane, now, focused, runs, advice }: { lane: Lane; now: number; focused: boolean; runs: Run[]; advice?: string | undefined }) {
   const qc = useQueryClient()
   const [probing, setProbing] = useState(false)
   const [probeError, setProbeError] = useState<string | undefined>(undefined)
@@ -300,7 +309,7 @@ function LaneCard({ lane, now, focused, runs }: { lane: Lane; now: number; focus
       data-focused={focused || undefined}
       className={cx("rounded-xl", focused && "ring-2 ring-accent")}
     >
-      <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} runs={runs} />
+      <LaneCardView lane={lane} now={now} probing={probing} probeError={probeError} onProbe={probe} history={history.data} runs={runs} advice={advice} />
     </div>
   )
 }
@@ -308,6 +317,7 @@ function LaneCard({ lane, now, focused, runs }: { lane: Lane; now: number; focus
 export function LanesPage() {
   const lanes = useLanes()
   const runs = useRuns()
+  const members = useMembers()
   const focus = useSearch({ strict: false }).lane
   const now = useNow()
   useLanesShortcut()
@@ -346,12 +356,12 @@ export function LanesPage() {
           <p className="text-[13px] text-muted">Loading lanes</p>
         ) : list.length === 0 ? (
           <EmptyState>
-            No lanes configured. Add a <code className="font-mono">[[lane]]</code> entry to lanes.toml and restart the daemon; the lane shows up here with its windows.
+            No lanes configured. Run <code className="font-mono">faztudo agents detect</code> in a terminal to find the installed CLIs, or add a <code className="font-mono">[[lane]]</code> entry to <code className="font-mono">~/.config/faztudo/lanes.toml</code> and restart the daemon.
           </EmptyState>
         ) : (
           <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {list.map((lane) => (
-              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} runs={runs.data ?? []} />
+              <LaneCard key={lane.id} lane={lane} now={now} focused={lane.id === focus} runs={runs.data ?? []} advice={laneAdvice(lane, list, members.data ?? [], now)} />
             ))}
           </div>
         )}

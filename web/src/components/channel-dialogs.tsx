@@ -5,6 +5,7 @@ import { ApiError, api } from "../api/client"
 import { cx } from "../lib/cx"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
+import { useMembers } from "../state/queries"
 import type { BridgeBinding, Channel, ChannelPatch, Member } from "../types"
 import { DevicesPanel } from "./auth"
 
@@ -408,6 +409,28 @@ function CreateForm({ onCreated, onDone }: { onCreated: (channel: Channel) => vo
   const [nameError, setNameError] = useState<string | null>(null)
   const [repoError, setRepoError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const members = useMembers()
+  const agents = (members.data ?? []).filter((member) => member.kind === "agent")
+  // Track the unticked ones so every agent starts ticked, even when the list loads late.
+  const [unticked, setUnticked] = useState<Set<string>>(new Set())
+  const [chosenDefault, setChosenDefault] = useState("")
+  const ticked = agents.filter((agent) => !unticked.has(agent.id))
+  const defaultId = ticked.some((agent) => agent.id === chosenDefault) ? chosenDefault : (ticked[0]?.id ?? "")
+
+  function toggleAgent(id: string) {
+    setUnticked((current) => {
+      const next = new Set(current)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+  }
+
+  async function submitMembers(): Promise<{ member_ids?: string[] }> {
+    if (ticked.length === 0 && agents.length === 0) return {}
+    // The server keeps member_ids as given, so the creator has to be in the list.
+    const meId = (await qc.fetchQuery({ queryKey: qk.me, queryFn: () => api.me(), staleTime: 60_000 })).id
+    return { member_ids: [meId, ...ticked.map((agent) => agent.id)] }
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -421,13 +444,26 @@ function CreateForm({ onCreated, onDone }: { onCreated: (channel: Channel) => vo
       return
     }
     setBusy(true)
-    api
-      .createChannel({
-        name: trimmed,
-        kind: "team",
-        visibility: "public",
-        ...(topic.trim() ? { topic: topic.trim() } : {}),
-        ...(repoPath.trim() ? { repo_path: repoPath.trim() } : {}),
+    void submitMembers()
+      .then((ids) =>
+        api.createChannel({
+          name: trimmed,
+          kind: "team",
+          visibility: "public",
+          ...(topic.trim() ? { topic: topic.trim() } : {}),
+          ...(repoPath.trim() ? { repo_path: repoPath.trim() } : {}),
+          ...ids,
+        }),
+      )
+      .then(async (created) => {
+        // Creation does not take a default agent; set it right after. A failure here
+        // leaves a working channel, and the settings dialog can still set it.
+        if (!defaultId) return created
+        try {
+          return await api.patchChannel(created.id, { default_agent_id: defaultId })
+        } catch {
+          return created
+        }
       })
       .then(
         (channel) => {
@@ -480,6 +516,52 @@ function CreateForm({ onCreated, onDone }: { onCreated: (channel: Channel) => vo
           />
         )}
       </Field>
+      {agents.length > 0 && (
+        <>
+          <fieldset className="mt-3">
+            <div className="flex items-center gap-2">
+              <legend className="flex-1 text-[13px] font-medium">Agents</legend>
+              <button type="button" onClick={() => setUnticked(new Set())} className="min-h-8 rounded-md px-2 text-[12px] text-muted hover:bg-sidebar hover:text-ink">
+                All
+              </button>
+              <button type="button" onClick={() => setUnticked(new Set(agents.map((agent) => agent.id)))} className="min-h-8 rounded-md px-2 text-[12px] text-muted hover:bg-sidebar hover:text-ink">
+                None
+              </button>
+            </div>
+            <ul className="mt-1 grid max-h-40 gap-0.5 overflow-y-auto sm:grid-cols-2">
+              {agents.map((agent) => (
+                <li key={agent.id}>
+                  <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] hover:bg-sidebar">
+                    <input type="checkbox" checked={!unticked.has(agent.id)} onChange={() => toggleAgent(agent.id)} className="h-4 w-4" />
+                    <span className="min-w-0 truncate">{agent.display_name}</span>
+                    <span className="min-w-0 truncate text-[12px] text-faint">@{agent.handle}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-[12px] text-muted">Only members can be mentioned and answer here.</p>
+          </fieldset>
+          <Field label="Default agent" help="Answers messages that mention nobody.">
+            {({ id, describedBy }) => (
+              <select
+                id={id}
+                aria-describedby={describedBy || undefined}
+                value={defaultId}
+                onChange={(event) => setChosenDefault(event.target.value)}
+                disabled={ticked.length === 0}
+                className={inputClass}
+              >
+                {ticked.length === 0 && <option value="">None</option>}
+                {ticked.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.display_name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        </>
+      )}
       <Field
         label="Repository path (optional)"
         help="Local git repository that write runs in this channel work on."

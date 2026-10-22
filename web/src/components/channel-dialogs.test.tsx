@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError, api } from "../api/client"
@@ -144,6 +144,47 @@ describe("CreateChannelDialog", () => {
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(created))
     expect(spy).toHaveBeenCalledWith({ name: "new-room", kind: "team", visibility: "public", topic: "hello" })
     expect(qc.getQueryData<Channel[]>(qk.channels)).toHaveLength(2)
+  })
+
+  it("sends the creator and every ticked agent, then sets the default agent", async () => {
+    const user = userEvent.setup()
+    const me: Member = { id: "01BRZ3NDEKTSV4RRFFQ69G5BH1", kind: "human", handle: "ada", display_name: "Ada", presence: "online" }
+    const created = { ...channel, id: "01BRZ3NDEKTSV4RRFFQ69G5BB3", name: "room", member_ids: [] }
+    const spy = vi.spyOn(api, "createChannel").mockResolvedValue(created)
+    const patch = vi.spyOn(api, "patchChannel").mockResolvedValue({ ...created, default_agent_id: agents[1]!.id })
+    const onCreated = vi.fn()
+    const qc = wrap(<CreateChannelDialog open onOpenChange={() => undefined} onCreated={onCreated} />)
+    qc.setQueryData(qk.members, agents)
+    qc.setQueryData(qk.me, me)
+    const coder = await screen.findByRole("checkbox", { name: /Coder/ })
+    expect(coder).toBeChecked()
+    expect(screen.getByRole("checkbox", { name: /Reviewer/ })).toBeChecked()
+    await user.click(coder)
+    const select = screen.getByLabelText("Default agent")
+    expect(within(select).getAllByRole("option")).toHaveLength(1)
+    await user.type(screen.getByLabelText("Name"), "room")
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(spy).toHaveBeenCalledWith({ name: "room", kind: "team", visibility: "public", member_ids: [me.id, agents[1]!.id] })
+    expect(patch).toHaveBeenCalledWith(created.id, { default_agent_id: agents[1]!.id })
+    expect(onCreated.mock.calls[0]![0].default_agent_id).toBe(agents[1]!.id)
+  })
+
+  it("None and All change the ticked agents and the default select follows", async () => {
+    const user = userEvent.setup()
+    const created = { ...channel, id: "01BRZ3NDEKTSV4RRFFQ69G5BB4", name: "room" }
+    const spy = vi.spyOn(api, "createChannel").mockResolvedValue(created)
+    const patch = vi.spyOn(api, "patchChannel")
+    const qc = wrap(<CreateChannelDialog open onOpenChange={() => undefined} onCreated={() => undefined} />)
+    qc.setQueryData(qk.members, agents)
+    qc.setQueryData(qk.me, { id: "h", kind: "human", handle: "ada", display_name: "Ada", presence: "online" })
+    await user.click(await screen.findByRole("button", { name: "None" }))
+    expect(screen.getByRole("checkbox", { name: /Coder/ })).not.toBeChecked()
+    expect(screen.getByLabelText("Default agent")).toBeDisabled()
+    await user.type(screen.getByLabelText("Name"), "room")
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ name: "room", kind: "team", visibility: "public", member_ids: ["h"] }))
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("shows a server error for a bad repo path", async () => {

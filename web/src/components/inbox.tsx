@@ -7,7 +7,7 @@ import { offscreenUnread, plainPreview, relativeTime, sortInbox, type InboxItem 
 import { usePins } from "../lib/pins"
 import { useOpenDirect } from "../state/direct"
 import { useNow } from "../state/now"
-import { useChannels, useLastMessages, useMe, useMembers } from "../state/queries"
+import { useChannels, useLanes, useLastMessages, useMe, useMembers } from "../state/queries"
 import type { Member } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
@@ -28,6 +28,8 @@ export function InboxPage() {
   const now = useNow()
   const { pins, toggle } = usePins()
   const [creating, setCreating] = useState(false)
+  const lanes = useLanes()
+  const lanesUnknown = lanes.isSuccess && lanes.data.every((lane) => lane.health === "unknown")
   const list = channels.data ?? []
   const people = members.data ?? []
   const last = useLastMessages(list.map((channel) => channel.id))
@@ -168,8 +170,26 @@ export function InboxPage() {
                 )}
             </div>
             {channels.isPending && <p className="px-4 py-6 text-[13px] text-muted">Loading chats</p>}
-            {!channels.isPending && items.length === 0 && <p className="px-4 py-6 text-[13px] text-muted">No channels yet.</p>}
-            <ul className="pb-3">
+            {!channels.isPending && items.length === 0 && (
+              <div data-testid="inbox-empty" className="mx-4 my-4 rounded-xl border border-dashed border-line px-4 py-6 text-center">
+                <p className="text-[14px] font-medium">No channels yet</p>
+                <p className="mt-1 text-[13px] text-muted">A channel is a shared room for you and your agents.</p>
+                <button
+                  type="button"
+                  onClick={() => setCreating(true)}
+                  className="mt-3 min-h-10 rounded-lg bg-accent px-4 text-[13px] font-medium text-canvas transition-colors duration-150 hover:opacity-90"
+                >
+                  Create your first channel
+                </button>
+                {lanesUnknown && (
+                  <p data-testid="inbox-doctor" className="mt-3 text-[12px] text-muted">
+                    No lane has reported yet. Run <code className="font-mono">faztudo doctor</code> in a terminal to check your agent CLIs.
+                  </p>
+                )}
+              </div>
+            )}
+            {/* The floating unread pill is 40px high and sits 16px above the bottom. */}
+            <ul className={hidden.length > 0 ? "pb-16" : "pb-3"} data-padded={hidden.length > 0 || undefined}>
               {items.map((item) => (
                 <InboxRow key={item.channel.id} item={item} members={people} meId={me.data?.id} now={now} />
               ))}

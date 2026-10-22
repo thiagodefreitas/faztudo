@@ -91,6 +91,18 @@ describe("runs today", () => {
   })
 })
 
+describe("LaneCardView advice", () => {
+  it("shows the next-step line under the error", () => {
+    renderCard(availableLane, { advice: 'Run "codex login" in a terminal, then press Probe now.' })
+    expect(screen.getByTestId("lane-advice")).toHaveTextContent('Run "codex login"')
+  })
+
+  it("shows no advice line without advice", () => {
+    renderCard(availableLane)
+    expect(screen.queryByTestId("lane-advice")).not.toBeInTheDocument()
+  })
+})
+
 describe("LaneCardView", () => {
   it("shows percent, source and age, capacity and runs for a healthy lane", () => {
     renderCard(availableLane)

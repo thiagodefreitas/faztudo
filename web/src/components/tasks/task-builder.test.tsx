@@ -21,6 +21,24 @@ describe("TaskBuilder", () => {
     expect(within(group).getByRole("radio", { name: /Coder/ })).toBeChecked()
   })
 
+  it("defaults to the channel's default agent, then its first agent member", async () => {
+    const withDefault = { ...channel, default_agent_id: "a2" }
+    const view = await open({ channels: [withDefault] })
+    expect(screen.getByRole("radio", { name: /Reviewer/ })).toBeChecked()
+    view.unmount()
+    await open({ channels: [{ ...channel, member_ids: ["h1", "a2"] }] })
+    expect(screen.getByRole("radio", { name: /Reviewer/ })).toBeChecked()
+  })
+
+  it("re-picks the assignee when another channel is chosen, keeping a template", async () => {
+    const other = { ...channel, id: "c2", name: "ops", member_ids: ["h1", "a2"] }
+    await open({ channels: [channel, other], channelId: undefined })
+    await userEvent.selectOptions(screen.getByLabelText("Channel"), "c2")
+    expect(screen.getByRole("radio", { name: /Reviewer/ })).toBeChecked()
+    await userEvent.click(screen.getByRole("button", { name: "Implement" }))
+    expect(screen.getByLabelText("Channel")).toHaveValue("c2")
+  })
+
   it("fills the form from a template", async () => {
     await open()
     await userEvent.click(screen.getByRole("button", { name: "Implement" }))
