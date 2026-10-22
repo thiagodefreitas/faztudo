@@ -422,9 +422,133 @@ func (e *routineEngine) List(ctx context.Context) ([]domain.Routine, error) {
 		list = []domain.Routine{}
 	}
 	for i := range list {
+		if list[i].Source == "" {
+			list[i].Source = "config" // recorded before app routines existed
+		}
 		list[i].NextRun = e.nextRun(list[i])
 	}
 	return list, nil
+}
+
+// routineConflict is a refusal because the routine already exists. It matches
+// store.ErrConflict.
+type routineConflict struct{ msg string }
+
+func (c routineConflict) Error() string        { return c.msg }
+func (c routineConflict) Is(target error) bool { return target == store.ErrConflict }
+
+// Create makes a routine in the app. Its handle comes from the name. A handle
+// that lanes.toml already uses is refused; one used by another app routine
+// gets a number added.
+func (e *routineEngine) Create(ctx context.Context, in domain.RoutineInput, by string) (domain.Routine, error) {
+	name := strings.TrimSpace(in.Name)
+	prompt := strings.TrimSpace(in.Prompt)
+	switch {
+	case name == "" || len([]rune(name)) > 80:
+		return domain.Routine{}, domain.UserError{Message: "name must be 1 to 80 characters"}
+	case prompt == "" || len([]rune(prompt)) > 8000:
+		return domain.Routine{}, domain.UserError{Message: "prompt must be 1 to 8000 characters"}
+	}
+	schedule := strings.Join(strings.Fields(in.Schedule), " ")
+	if schedule == "" {
+		return domain.Routine{}, domain.UserError{Message: "schedule required"}
+	}
+	if _, err := cron.Parse(schedule); err != nil {
+		return domain.Routine{}, domain.UserError{Message: "schedule: " + err.Error()}
+	}
+	persona := strings.TrimPrefix(strings.TrimSpace(in.Persona), "@")
+	agent, err := e.app.Store.MemberByHandle(ctx, persona)
+	if err != nil || agent.Kind != domain.MemberAgent || agent.Agent == nil {
+		return domain.Routine{}, domain.UserError{Message: "agent @" + persona + " does not exist"}
+	}
+	channels, err := e.app.Store.Channels(ctx)
+	if err != nil {
+		return domain.Routine{}, err
+	}
+	channel := strings.TrimPrefix(strings.TrimSpace(in.Channel), "#")
+	found := false
+	for _, c := range channels {
+		if strings.EqualFold(c.Name, channel) {
+			channel, found = c.Name, true
+			break
+		}
+	}
+	if !found {
+		return domain.Routine{}, domain.UserError{Message: "channel #" + channel + " does not exist"}
+	}
+	existing, err := e.app.Store.Routines(ctx)
+	if err != nil {
+		return domain.Routine{}, err
+	}
+	taken := map[string]string{} // lower-case handle to its source
+	for _, r := range existing {
+		source := r.Source
+		if source == "" {
+			source = "config"
+		}
+		taken[strings.ToLower(r.Handle)] = source
+	}
+	base := slugHandle(name)
+	handle := base
+	if taken[strings.ToLower(base)] == "config" {
+		return domain.Routine{}, routineConflict{"routine " + base + " is defined in lanes.toml; pick another name"}
+	}
+	for n := 2; taken[strings.ToLower(handle)] != ""; n++ {
+		handle = fmt.Sprintf("%s-%d", base, n)
+	}
+	now := e.now().UTC()
+	r := domain.Routine{Handle: handle, Name: name, Prompt: prompt, Persona: agent.Handle, Channel: channel, Schedule: schedule, Enabled: true, Source: "app", CreatedBy: by, CreatedAt: &now}
+	if _, err := e.app.Store.Append(ctx, events.Draft{Type: events.RoutineUpdated, Actor: events.Human(by), Payload: r}); err != nil {
+		return domain.Routine{}, err
+	}
+	r.NextRun = e.nextRun(r)
+	return r, nil
+}
+
+// Delete removes a routine made in the app. One from lanes.toml stays: the
+// file would bring it back at the next start.
+func (e *routineEngine) Delete(ctx context.Context, handle, by string) error {
+	r, err := e.app.Store.Routine(ctx, handle)
+	if err != nil {
+		return err
+	}
+	if r.Source != "app" {
+		return routineConflict{"routine " + r.Handle + " is defined in lanes.toml"}
+	}
+	if _, err := e.app.Store.Append(ctx, events.Draft{Type: events.RoutineRemoved, Actor: events.Human(by), Payload: map[string]string{"handle": r.Handle}}); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	delete(e.next, r.Handle)
+	e.mu.Unlock()
+	return nil
+}
+
+// slugHandle turns a name into a routine handle: lower-case letters and digits
+// joined by single dashes, at most 40 characters.
+func slugHandle(name string) string {
+	var b strings.Builder
+	dash := false
+	for _, c := range strings.ToLower(name) {
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = false
+			b.WriteRune(c)
+		default:
+			dash = true
+		}
+	}
+	slug := b.String()
+	if len(slug) > 40 {
+		slug = strings.TrimRight(slug[:40], "-")
+	}
+	if slug == "" {
+		slug = "routine"
+	}
+	return slug
 }
 
 // SetEnabled switches a routine on or off.

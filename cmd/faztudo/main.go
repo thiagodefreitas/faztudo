@@ -427,7 +427,7 @@ func seedRoutines(ctx context.Context, s *store.Store, c config.Config) error {
 		if name == "" {
 			name = r.Handle
 		}
-		routine := domain.Routine{Handle: r.Handle, Name: name, Prompt: r.Prompt, Persona: r.Persona, Channel: r.Channel, Schedule: r.Schedule, Trigger: r.Trigger, Template: r.Template, Enabled: r.Enabled == nil || *r.Enabled}
+		routine := domain.Routine{Handle: r.Handle, Name: name, Prompt: r.Prompt, Persona: r.Persona, Channel: r.Channel, Schedule: r.Schedule, Trigger: r.Trigger, Template: r.Template, Enabled: r.Enabled == nil || *r.Enabled, Source: "config"}
 		if cur, err := s.Routine(ctx, r.Handle); err == nil {
 			routine.Enabled, routine.Last = cur.Enabled, cur.Last
 		} else if !errors.Is(err, store.ErrNotFound) {

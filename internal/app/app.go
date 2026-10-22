@@ -1036,7 +1036,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	prompt := promptOverride
 	var sections []events.PromptSection
 	if prompt == "" {
-		prompt, sections, err = a.promptPartsForRun(ctx, m, queuedRun.ID, mode)
+		prompt, sections, err = a.promptPartsForRun(ctx, m, queuedRun.ID, mode, agent.Handle)
 		if err != nil {
 			return err
 		}
@@ -1496,11 +1496,19 @@ func (a *App) prompt(ctx context.Context, m domain.Message) (string, error) {
 }
 
 func (a *App) promptForRun(ctx context.Context, m domain.Message, runID string, mode domain.RunMode) (string, error) {
-	prompt, _, err := a.promptPartsForRun(ctx, m, runID, mode)
+	persona := ""
+	if runID != "" {
+		if run, err := a.Store.Run(ctx, runID); err == nil {
+			if member, err := a.Store.Member(ctx, run.AgentID); err == nil {
+				persona = member.Handle
+			}
+		}
+	}
+	prompt, _, err := a.promptPartsForRun(ctx, m, runID, mode, persona)
 	return prompt, err
 }
 
-func (a *App) promptPartsForRun(ctx context.Context, m domain.Message, runID string, mode domain.RunMode) (string, []events.PromptSection, error) {
+func (a *App) promptPartsForRun(ctx context.Context, m domain.Message, runID string, mode domain.RunMode, persona string) (string, []events.PromptSection, error) {
 	n := a.Config.Runs.ContextMessages
 	if n < 1 {
 		n = 1
@@ -1536,11 +1544,17 @@ func (a *App) promptPartsForRun(ctx context.Context, m domain.Message, runID str
 	for _, member := range members {
 		handles[member.ID] = member.Handle
 	}
-	working, pins := "", ""
+	working, pins, lessons := "", "", ""
 	if m.CollectForRunID == "" {
 		working, err = a.workingPrompt(ctx, m.ChannelID, runID, mode, handles)
 		if err != nil {
 			return "", nil, err
+		}
+		if persona != "" {
+			lessons, err = a.lessonsPrompt(ctx, persona, m.ChannelID)
+			if err != nil {
+				return "", nil, err
+			}
 		}
 		pins, err = a.pinnedPrompt(ctx, m.ChannelID, handles)
 		if err != nil {
@@ -1573,7 +1587,10 @@ func (a *App) promptPartsForRun(ctx context.Context, m domain.Message, runID str
 	if pins != "" {
 		add("pinned", pins)
 	}
-	messages = rolloverMessages(messages, summary.Text+pins, a.Config.Runs.ContextLimitTokens)
+	if lessons != "" {
+		add("lessons", lessons)
+	}
+	messages = rolloverMessages(messages, summary.Text+pins+lessons, a.Config.Runs.ContextLimitTokens)
 	var transcript strings.Builder
 	transcript.WriteString("Recent channel messages (oldest first):\n")
 	for _, msg := range messages {

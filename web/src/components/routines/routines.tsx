@@ -65,7 +65,7 @@ export function RoutinesList() {
   if (list.length === 0) {
     return (
       <p className="text-[13px] text-muted">
-        No routines yet. Add <code className="font-mono">[[routine]]</code> entries to lanes.toml, or start from{" "}
+        No routines yet. Use Repeat this on a finished answer, add <code className="font-mono">[[routine]]</code> entries to lanes.toml, or start from{" "}
         <code className="font-mono">faztudo init --template solo</code>.
       </p>
     )
@@ -94,6 +94,9 @@ export function RoutinesList() {
                   <h3 className="flex items-baseline gap-2 text-[14px] font-semibold">
                     {routine.name}
                     <span className="font-mono text-[11px] font-normal text-faint">{routine.handle}</span>
+                    <span className="rounded-full bg-canvas px-2 py-0.5 text-[11px] font-normal text-muted">
+                      {routine.source === "app" ? "Made in the app" : "From lanes.toml"}
+                    </span>
                   </h3>
                   <p className="text-[13px] text-ink">{whenText(routine)}</p>
                   <p className="mt-1 flex items-center gap-2 text-[12px] text-muted">
@@ -132,6 +135,16 @@ export function RoutinesList() {
                 >
                   Run now
                 </button>
+                {routine.source === "app" && (
+                  <button
+                    type="button"
+                    aria-label={`Delete ${routine.name}`}
+                    onClick={() => void act(() => api.deleteRoutine(routine.handle), `Deleted ${routine.name}.`)}
+                    className="min-h-10 rounded border border-line px-3 text-[13px] text-danger hover:bg-canvas md:min-h-8"
+                  >
+                    Delete
+                  </button>
+                )}
                 {routine.enabled && routine.next_run && <span className="text-[12px] text-muted">Next: {nextText(routine.next_run)}</span>}
                 {!routine.enabled && <span className="text-[12px] text-faint">Switched off</span>}
               </div>

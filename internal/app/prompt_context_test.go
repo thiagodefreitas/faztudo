@@ -217,7 +217,7 @@ func TestAttemptPreservesPrebuiltPromptSections(t *testing.T) {
 	if _, err := f.s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.Human(f.human.ID), ChannelID: m.ChannelID, Payload: m}); err != nil {
 		t.Fatal(err)
 	}
-	prompt, sections, err := f.app.promptPartsForRun(ctx, m, "", domain.RunRead)
+	prompt, sections, err := f.app.promptPartsForRun(ctx, m, "", domain.RunRead, "coder")
 	if err != nil {
 		t.Fatal(err)
 	}

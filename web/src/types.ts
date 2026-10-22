@@ -368,6 +368,7 @@ export type EventType =
   | "department.updated"
   | "project.updated"
   | "routine.updated"
+  | "routine.removed"
   | "task.created"
   | "task.updated"
   | "handoff.created"
@@ -511,8 +512,23 @@ export interface Routine {
   trigger?: "message"
   template?: "debrief"
   enabled: boolean
+  /** "config" for a routine in lanes.toml, "app" for one made in the app; only an app routine can be deleted. */
+  source: RoutineSource
+  created_by?: ID
+  created_at?: string
   next_run?: string
   last?: RoutineResult
+}
+
+export type RoutineSource = "config" | "app"
+
+/** POST /routines. The persona is an agent handle and the channel a channel name. */
+export interface RoutineCreate {
+  name: string
+  prompt: string
+  persona: string
+  channel: string
+  schedule: string
 }
 
 export type AssignKind = "department" | "specialist"

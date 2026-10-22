@@ -45,6 +45,17 @@ type Member struct {
 	Presence    Presence   `json:"presence"`
 }
 
+type Lesson struct {
+	ID              ID        `json:"id"`
+	Persona         string    `json:"persona"`
+	ChannelID       string    `json:"channel_id"`
+	Text            string    `json:"text"`
+	SourceMessageID string    `json:"source_message_id"`
+	CreatedBy       string    `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 // Department is a named team of specialists with a lead. Lead and Members are
 // agent handles.
 type Department struct {
@@ -375,20 +386,34 @@ type RoutineResult struct {
 	RunID  ID        `json:"run_id,omitempty"`
 }
 
+// RoutineInput is what a human gives to make a routine in the app.
+type RoutineInput struct {
+	Name     string `json:"name"`
+	Prompt   string `json:"prompt"`
+	Persona  string `json:"persona"`
+	Channel  string `json:"channel"`
+	Schedule string `json:"schedule"`
+}
+
 // Routine is a prompt that runs by itself: on a schedule (Schedule, a cron
 // expression) or when a human posts in the channel (Trigger "message"). It
 // runs as Persona in Channel, which is a channel name. Template names a
-// built-in that adds facts to the prompt, such as "debrief".
+// built-in that adds facts to the prompt, such as "debrief". Source is
+// "config" for a routine from lanes.toml and "app" for one a human made in
+// the app; only the second can be deleted.
 type Routine struct {
-	Handle   string         `json:"handle"`
-	Name     string         `json:"name"`
-	Prompt   string         `json:"prompt"`
-	Persona  string         `json:"persona"`
-	Channel  string         `json:"channel"`
-	Schedule string         `json:"schedule,omitempty"`
-	Trigger  string         `json:"trigger,omitempty"`
-	Template string         `json:"template,omitempty"`
-	Enabled  bool           `json:"enabled"`
-	NextRun  *time.Time     `json:"next_run,omitempty"`
-	Last     *RoutineResult `json:"last,omitempty"`
+	Handle    string         `json:"handle"`
+	Name      string         `json:"name"`
+	Prompt    string         `json:"prompt"`
+	Persona   string         `json:"persona"`
+	Channel   string         `json:"channel"`
+	Schedule  string         `json:"schedule,omitempty"`
+	Trigger   string         `json:"trigger,omitempty"`
+	Template  string         `json:"template,omitempty"`
+	Enabled   bool           `json:"enabled"`
+	Source    string         `json:"source"`
+	CreatedBy string         `json:"created_by,omitempty"` // set for an app routine
+	CreatedAt *time.Time     `json:"created_at,omitempty"`
+	NextRun   *time.Time     `json:"next_run,omitempty"`
+	Last      *RoutineResult `json:"last,omitempty"`
 }

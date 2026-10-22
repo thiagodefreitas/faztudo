@@ -179,6 +179,26 @@ func Open(path string) (*Store, error) {
 			return nil, err
 		}
 	}
+	if version < 12 {
+		migration, err = migrations.ReadFile("migrations/012.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if version < 13 {
+		migration, err = migrations.ReadFile("migrations/013.sql")
+		if err == nil {
+			_, err = db.Exec(string(migration))
+		}
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	// Search is optional: if this SQLite build has no FTS5 the table is not
 	// created and Search falls back to LIKE.
 	setupSearch(db)
@@ -422,7 +442,7 @@ func (s *Store) Rebuild(ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org", "lane_usage_history", "channel_summaries", "pins", "tasks"} {
+	for _, table := range []string{"unread", "messages", "channels", "members", "runs", "approvals", "lanes", "org", "lane_usage_history", "channel_summaries", "pins", "tasks", "lessons", "app_routines"} {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return err
 		}
@@ -457,6 +477,40 @@ func (s *Store) Rebuild(ctx context.Context) error {
 }
 func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 	switch e.Type {
+	case events.LessonAdded, events.LessonUpdated:
+		var lesson domain.Lesson
+		if err := json.Unmarshal(e.Payload, &lesson); err != nil {
+			return err
+		}
+		if lesson.ID == "" || lesson.Persona == "" || lesson.Text == "" || lesson.CreatedBy == "" {
+			return errors.New("lesson needs id, persona, text and creator")
+		}
+		if e.Type == events.LessonAdded {
+			_, err := tx.ExecContext(ctx, "INSERT INTO lessons(id,persona,channel_id,text,source_message_id,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", lesson.ID, lesson.Persona, lesson.ChannelID, lesson.Text, lesson.SourceMessageID, lesson.CreatedBy, lesson.CreatedAt.Format(time.RFC3339Nano), lesson.UpdatedAt.Format(time.RFC3339Nano))
+			return err
+		}
+		result, err := tx.ExecContext(ctx, "UPDATE lessons SET channel_id=?,text=?,source_message_id=?,updated_at=? WHERE id=?", lesson.ChannelID, lesson.Text, lesson.SourceMessageID, lesson.UpdatedAt.Format(time.RFC3339Nano), lesson.ID)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 0 {
+			return ErrNotFound
+		}
+		return nil
+	case events.LessonRemoved:
+		var lesson domain.Lesson
+		if err := json.Unmarshal(e.Payload, &lesson); err != nil {
+			return err
+		}
+		if lesson.ID == "" {
+			return errors.New("lesson id required")
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM lessons WHERE id=? AND channel_id=?", lesson.ID, lesson.ChannelID)
+		return err
 	case events.MemberUpdated:
 		var m domain.Member
 		if err := json.Unmarshal(e.Payload, &m); err != nil {
@@ -634,7 +688,34 @@ func project(ctx context.Context, tx *sql.Tx, e events.Event) error {
 		if r.Handle == "" {
 			return errors.New("routine handle required")
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('routine',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", r.Handle, e.Payload)
+		if _, err := tx.ExecContext(ctx, "INSERT INTO org(kind,handle,data) VALUES('routine',?,?) ON CONFLICT(kind,handle) DO UPDATE SET data=excluded.data", r.Handle, e.Payload); err != nil {
+			return err
+		}
+		if r.Source != "app" {
+			// A routine that lanes.toml now defines takes over from an app one.
+			_, err := tx.ExecContext(ctx, "DELETE FROM app_routines WHERE handle=?", r.Handle)
+			return err
+		}
+		created := e.TS
+		if r.CreatedAt != nil {
+			created = *r.CreatedAt
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO app_routines(handle,name,prompt,persona,channel,schedule,trigger,enabled,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(handle) DO UPDATE SET name=excluded.name,prompt=excluded.prompt,persona=excluded.persona,channel=excluded.channel,schedule=excluded.schedule,trigger=excluded.trigger,enabled=excluded.enabled", r.Handle, r.Name, r.Prompt, r.Persona, r.Channel, r.Schedule, r.Trigger, r.Enabled, r.CreatedBy, created.UTC().Format(time.RFC3339Nano))
+		return err
+	case events.RoutineRemoved:
+		var r struct {
+			Handle string `json:"handle"`
+		}
+		if err := json.Unmarshal(e.Payload, &r); err != nil {
+			return err
+		}
+		if r.Handle == "" {
+			return errors.New("routine handle required")
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM org WHERE kind='routine' AND handle=?", r.Handle); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "DELETE FROM app_routines WHERE handle=?", r.Handle)
 		return err
 	case events.TaskCreated, events.TaskUpdated:
 		var t domain.Task

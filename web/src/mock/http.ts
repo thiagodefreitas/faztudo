@@ -237,7 +237,19 @@ export function handleMock(world: MockWorld, method: string, url: URL, rawBody =
     return send(world.probeLane(id))
   }
 
+  if (parts[0] === "routines" && parts.length === 1 && method === "POST") {
+    return send(
+      world.createRoutine({
+        name: text(body.name) ?? "",
+        prompt: text(body.prompt) ?? "",
+        persona: text(body.persona) ?? "",
+        channel: text(body.channel) ?? "",
+        schedule: text(body.schedule) ?? "",
+      }),
+    )
+  }
   if (parts[0] === "routines" && parts[1]) {
+    if (parts.length === 2 && method === "DELETE") return send(world.deleteRoutine(parts[1]))
     if (parts.length === 2 && method === "PATCH") {
       if (typeof body.enabled !== "boolean") return send(err(400, "bad_request", "enabled required"))
       return send(world.setRoutineEnabled(parts[1], body.enabled))

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -217,6 +218,149 @@ func TestScheduledRoutineRunsWhenDueInTheUsersZone(t *testing.T) {
 	}
 	if want := time.Date(2026, time.October, 20, 16, 0, 0, 0, time.UTC); !list[0].NextRun.Equal(want) {
 		t.Fatalf("next run %s, want %s (18:00 UTC+2)", list[0].NextRun, want)
+	}
+}
+
+func TestCreateRoutineChecksTheInputAndNamesItFromTheName(t *testing.T) {
+	f := newRoutineFixture(t, config.Config{}, domain.LaneUnknown, "")
+	ctx := context.Background()
+	good := domain.RoutineInput{Name: "  Check the build!  ", Prompt: " Check the build. ", Persona: "@coder", Channel: "#General", Schedule: " 0  9 * * 1-5 "}
+	r, err := f.e.Create(ctx, good, f.human.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Handle != "check-the-build" || r.Name != "Check the build!" || r.Prompt != "Check the build." || r.Persona != "coder" || r.Channel != "general" || r.Schedule != "0 9 * * 1-5" {
+		t.Fatalf("routine %+v", r)
+	}
+	if !r.Enabled || r.Source != "app" || r.CreatedBy != f.human.ID || r.CreatedAt == nil || r.NextRun == nil {
+		t.Fatalf("routine state %+v", r)
+	}
+	if got := f.last(t, r.Handle); got.Source != "app" || got.Schedule != "0 9 * * 1-5" {
+		t.Fatalf("stored %+v", got)
+	}
+
+	// A second routine with the same name gets a number.
+	again, err := f.e.Create(ctx, good, f.human.ID)
+	if err != nil || again.Handle != "check-the-build-2" {
+		t.Fatalf("second routine %+v, %v", again, err)
+	}
+
+	for name, in := range map[string]domain.RoutineInput{
+		"no name":         {Prompt: "p", Persona: "coder", Channel: "general", Schedule: "0 9 * * *"},
+		"no prompt":       {Name: "n", Persona: "coder", Channel: "general", Schedule: "0 9 * * *"},
+		"no schedule":     {Name: "n", Prompt: "p", Persona: "coder", Channel: "general"},
+		"bad schedule":    {Name: "n", Prompt: "p", Persona: "coder", Channel: "general", Schedule: "99 9 * * *"},
+		"unknown persona": {Name: "n", Prompt: "p", Persona: "nobody", Channel: "general", Schedule: "0 9 * * *"},
+		"a human persona": {Name: "n", Prompt: "p", Persona: "ada", Channel: "general", Schedule: "0 9 * * *"},
+		"unknown channel": {Name: "n", Prompt: "p", Persona: "coder", Channel: "nowhere", Schedule: "0 9 * * *"},
+	} {
+		var user domain.UserError
+		if _, err := f.e.Create(ctx, in, f.human.ID); !errors.As(err, &user) {
+			t.Errorf("%s: want a user error, got %v", name, err)
+		}
+	}
+	if list, _ := f.e.List(ctx); len(list) != 2 {
+		t.Fatalf("%d routines after the refusals", len(list))
+	}
+}
+
+func TestCreateRoutineRefusesAHandleFromLanesToml(t *testing.T) {
+	f := newRoutineFixture(t, config.Config{}, domain.LaneUnknown, "")
+	ctx := context.Background()
+	f.save(t, domain.Routine{Handle: "daily-debrief", Name: "Daily debrief", Persona: "coder", Channel: "general", Schedule: "0 18 * * *", Enabled: true, Source: "config"})
+	// A routine recorded before sources existed counts as a lanes.toml one.
+	f.save(t, domain.Routine{Handle: "old", Name: "Old", Persona: "coder", Channel: "general", Schedule: "0 1 * * *", Enabled: true})
+	for _, name := range []string{"Daily debrief", "daily-DEBRIEF", "Old"} {
+		_, err := f.e.Create(ctx, domain.RoutineInput{Name: name, Prompt: "p", Persona: "coder", Channel: "general", Schedule: "0 9 * * *"}, f.human.ID)
+		if !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "lanes.toml") {
+			t.Errorf("%q: want a lanes.toml conflict, got %v", name, err)
+		}
+	}
+	if list, _ := f.e.List(ctx); len(list) != 2 {
+		t.Fatalf("%d routines after the clashes", len(list))
+	}
+	if list, _ := f.e.List(ctx); list[0].Source != "config" || list[1].Source != "config" {
+		t.Fatalf("sources %+v", list)
+	}
+}
+
+func TestDeleteRoutineOnlyRemovesAppRoutines(t *testing.T) {
+	f := newRoutineFixture(t, config.Config{}, domain.LaneUnknown, "")
+	ctx := context.Background()
+	f.save(t, domain.Routine{Handle: "daily-debrief", Name: "Daily debrief", Persona: "coder", Channel: "general", Schedule: "0 18 * * *", Enabled: true, Source: "config"})
+	r, err := f.e.Create(ctx, domain.RoutineInput{Name: "Mine", Prompt: "p", Persona: "coder", Channel: "general", Schedule: "0 9 * * *"}, f.human.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.Delete(ctx, "daily-debrief", f.human.ID); !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "lanes.toml") {
+		t.Fatalf("deleting a lanes.toml routine: %v", err)
+	}
+	if err := f.e.Delete(ctx, "missing", f.human.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleting a missing routine: %v", err)
+	}
+	if err := f.e.Delete(ctx, r.Handle, f.human.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := f.e.List(ctx)
+	if err != nil || len(list) != 1 || list[0].Handle != "daily-debrief" {
+		t.Fatalf("list %+v, %v", list, err)
+	}
+	if err := f.e.Delete(ctx, r.Handle, f.human.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleting twice: %v", err)
+	}
+}
+
+func TestEngineRunsAnAppRoutineOnItsSchedule(t *testing.T) {
+	f := newRoutineFixture(t, config.Config{}, domain.LaneUnknown, "")
+	ctx := context.Background()
+	f.e.loc = time.UTC
+	r, err := f.e.Create(ctx, domain.RoutineInput{Name: "Evening check", Prompt: "Check the build.", Persona: "coder", Channel: "general", Schedule: "0 18 * * *"}, f.human.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(hour, min, sec int) time.Time {
+		return time.Date(2026, time.October, 22, hour, min, sec, 0, time.UTC)
+	}
+	f.e.tick(ctx, at(17, 59, 0))
+	if f.count() != 0 {
+		t.Fatal("ran before it was due")
+	}
+	f.e.tick(ctx, at(18, 0, 30))
+	f.waitRan(t, 1)
+	if got := f.ran[0]; got.Routine != r.Handle || got.Body != "@coder Check the build." {
+		t.Fatalf("message %+v", got)
+	}
+	if got := f.last(t, r.Handle); got.Source != "app" || got.Last == nil || got.Last.Status != "ok" {
+		t.Fatalf("after the run %+v", got)
+	}
+
+	// Switched off, it stays quiet; deleted, it is gone for good.
+	if _, err := f.e.SetEnabled(ctx, r.Handle, false, f.human.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.e.tick(ctx, at(18, 5, 0))
+	if err := f.e.Delete(ctx, r.Handle, f.human.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.e.tick(ctx, time.Date(2026, time.October, 23, 18, 0, 30, 0, time.UTC))
+	time.Sleep(50 * time.Millisecond)
+	if f.count() != 1 {
+		t.Fatalf("%d runs", f.count())
+	}
+}
+
+func TestSlugHandle(t *testing.T) {
+	for _, c := range [][2]string{
+		{"Check the build!", "check-the-build"},
+		{"  --Weekly  report--  ", "weekly-report"},
+		{"!!!", "routine"},
+		{"Resumo da semana", "resumo-da-semana"},
+		{strings.Repeat("a", 60), strings.Repeat("a", 40)},
+		{strings.Repeat("ab ", 20), strings.Repeat("ab-", 13) + "a"},
+	} {
+		if got := slugHandle(c[0]); got != c[1] {
+			t.Errorf("slugHandle(%q) = %q, want %q", c[0], got, c[1])
+		}
 	}
 }
 

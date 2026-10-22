@@ -110,6 +110,7 @@ const routine: Routine = {
   channel: "release",
   schedule: "0 9 * * *",
   enabled: true,
+  source: "config",
 };
 
 async function renderHome(handle = "faztudo") {

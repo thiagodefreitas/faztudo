@@ -308,6 +308,9 @@ prompt = "Say hello to anyone new."
 - `enabled` in the file is the starting state. Afterwards the Director switches
   routines on and off in the app, and a restart keeps that. The prompt, schedule
   and persona follow the file. A routine removed from the file stays listed.
+- Routines made in the app with Repeat this are not in the file. They are
+  stored in the database and run on the same rules. See
+  [organization](organization.md#routines).
 
 ### Templates
 

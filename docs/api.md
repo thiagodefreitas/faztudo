@@ -80,6 +80,17 @@ interface Member {
   presence: "online" | "idle" | "busy" | "offline";
 }
 
+interface Lesson {
+  id: ID;
+  persona: string;          // agent handle
+  channel_id: ID | "";      // empty applies in every channel
+  text: string;             // trimmed, 1 to 500 Unicode characters
+  source_message_id: ID | "";
+  created_by: ID;           // server-assigned human member id
+  created_at: string;
+  updated_at: string;
+}
+
 interface Channel {
   id: ID;
   name: string;             // "faztudo-dev", lowercase, dashes
@@ -155,6 +166,9 @@ interface Routine {
   trigger?: "message";      // runs when a person posts in the channel
   template?: "debrief";
   enabled: boolean;
+  source: "config" | "app"; // lanes.toml, or made in the app with Repeat this
+  created_by?: ID;          // the human who made an app routine
+  created_at?: string;
   next_run?: string;        // scheduled routines that are on
   last?: { at: string; status: "ok" | "failed" | "skipped"; detail?: string; run_id?: ID };
 }
@@ -321,12 +335,18 @@ interface NoticeAction {
 | GET | `/ca.crt` | download the local CA certificate in PEM format (also served on the port 7459 plain-HTTP CA helper) |
 | GET | `/api/v1/me` | the signed-in member |
 | GET | `/api/v1/members` | all members, humans and agents |
+| GET | `/api/v1/lessons?persona=` | humans only (403 for an agent); `Lesson[]` newest first, optionally filtered by agent handle. Channel-bound lessons are omitted when the caller cannot see the channel |
+| POST | `/api/v1/lessons` | humans only. `{persona, text, channel_id?, source_message_id?}` creates a lesson (201 with `Lesson`); unknown persona or invalid text is 400; an inaccessible channel or source message is 404 |
+| PATCH | `/api/v1/lessons/{id}` | humans only. `{text?, channel_id?}` edits a lesson (200 with `Lesson`); `channel_id: ""` makes it global; an inaccessible lesson or target channel is 404 |
+| DELETE | `/api/v1/lessons/{id}` | humans only. Deletes a lesson (204); an inaccessible lesson is 404 |
 | GET | `/api/v1/org` | `Org`: the Director's member id, the departments and the projects with their assignments |
 | POST | `/api/v1/projects` | create `{handle, name?, repo_path?, lead?, channels?, departments?, specialists?}`; humans only (403 for an agent), 400 for a bad handle, an unknown lead, department or specialist, a channel another project lists or a `repo_path` that is not a git work tree, 409 when the handle exists; the name defaults to the handle; 201 with the `Project`, and a `project.updated` event; the project is stored like one from lanes.toml and survives a restart |
 | PATCH | `/api/v1/projects/{project}` | change `{name?, repo_path?, lead?, channels?, archived?}` of a project; humans only (403 for an agent), 400 for an empty name, unknown lead, invalid or duplicate channel, or repository that is not a git work tree; assignments stay; returns the `Project` and emits `project.updated`. Archiving persists across restarts, leaves channels readable, and refuses new agent routing in those channels. A project also in lanes.toml takes its name, repository, lead and channels from the file again on the next start |
 | POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/routines` | `Routine[]` with the time of the next run |
+| POST | `/api/v1/routines` | humans only (403 for an agent). `{name, prompt, persona, channel, schedule}` makes a scheduled routine kept in the database, switched on, with `source: "app"`; returns the `Routine` (201). The handle comes from the name; a second routine with the same name gets `-2`, `-3`. 400 with the reason for an empty name or prompt, an invalid five-field cron expression, a persona that is not an agent, or a channel that does not exist or that the caller cannot see. 409 when the handle is one that lanes.toml defines |
+| DELETE | `/api/v1/routines/{handle}` | humans only; removes a routine with `source: "app"` (204) and emits `routine.removed`. 409 `defined in lanes.toml` for a routine from the file, 404 for an unknown one |
 | PATCH | `/api/v1/routines/{handle}` | switch `{enabled}` on or off; humans only (403 for an agent), 404 for an unknown routine; returns the `Routine` |
 | GET | `/api/v1/tasks?channel_id=&project=` | `Task[]` by board order; `project` is a project handle (404 if unknown) and keeps the tasks of its channels |
 | POST | `/api/v1/tasks` | humans only. `{channel_id, title, assignee, body?, lane?, mode?, scope?, checks?, acceptance?, start?}` creates a task in Todo and returns it (201). With `start: true` it also starts it. 400 with the reason when the input is wrong or the assignee is not an agent |
@@ -374,6 +394,17 @@ episode; recovery re-arms it. A channel summary is stored as a
 `channel.summarized` event with `{channel_id, lane_id, text,
 through_message_id, updated_at}`.
 
+Lessons are included in normal persona run prompts after pinned context and
+before the transcript. The `lessons` prompt section has its own byte span in
+the stored run prompt. It contains at most 20 matching lessons and 4 KiB,
+newest first. Global lessons and lessons for the run's channel match. Collect
+and channel summary runs do not receive lessons.
+`source_message_id`, when given, must name a visible message in the lesson's
+channel; a global lesson can cite only a public-channel message. Changing a
+lesson's `channel_id` clears its source message id.
+Moving a lesson between scopes also emits `lesson.removed` on the old scope,
+so clients there can drop their stale copy.
+
 ## Event stream
 
 `GET /api/v1/stream/head` returns `{"seq": 1234}`, the `seq` of the newest
@@ -413,6 +444,7 @@ Event types in version 1:
 | `message.edited` | `{id, body, edited_at}` |
 | `message.pinned` | `{channel_id, message_id, pinned_by, pinned_at}` |
 | `message.unpinned` | `{channel_id, message_id, pinned_by, pinned_at}` |
+| `lesson.added`, `lesson.updated`, `lesson.removed` | `Lesson`; actor is the authenticated human. Channel-bound events carry `channel_id` and follow channel stream visibility |
 | `channel.created`, `channel.updated` | `Channel` |
 | `member.updated` | `Member` |
 | `presence.changed` | `{member_id, presence}` |
@@ -425,7 +457,8 @@ Event types in version 1:
 | `lane.switched` | `{run_id, from, to, reason}` |
 | `department.updated` | `Department` |
 | `project.updated` | `Project` (sent when the Director creates a project or changes its fields or assignments) |
-| `routine.updated` | `Routine` (sent when it is switched or has run) |
+| `routine.updated` | `Routine` (sent when it is made, switched or has run) |
+| `routine.removed` | `{handle}` (sent when an app routine is deleted) |
 | `task.created`, `task.updated` | `Task` (the whole task, sent when it is created, edited, started or reported on by a run or an approval) |
 | `handoff.created` | `Handoff` plus `message_id` |
 | `notice` | `{level: "info" or "warn" or "error", text, action?: NoticeAction}` |

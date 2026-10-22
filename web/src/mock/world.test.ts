@@ -218,4 +218,27 @@ describe("mock world", () => {
     expect(after.ok && after.data).toEqual([])
     expect(mock.setPin("missing", true).ok).toBe(false)
   })
+
+  it("makes and deletes app routines and keeps the ones from lanes.toml", () => {
+    const { world: mock } = world()
+    const input = { name: "Check the build", prompt: "Check the build.", persona: "coder", channel: "general", schedule: "0 9 * * 1-5" }
+    const made = mock.createRoutine(input)
+    expect(made.ok && made.status).toBe(201)
+    expect(made.ok && made.data).toMatchObject({ handle: "check-the-build", source: "app", enabled: true, persona: "coder", channel: "general" })
+    const again = mock.createRoutine(input)
+    expect(again.ok && again.data.handle).toBe("check-the-build-2")
+
+    expect(mock.createRoutine({ ...input, persona: "nobody" }).ok).toBe(false)
+    expect(mock.createRoutine({ ...input, channel: "nowhere" }).ok).toBe(false)
+    expect(mock.createRoutine({ ...input, schedule: "every day" }).ok).toBe(false)
+    const clash = mock.createRoutine({ ...input, name: "Daily debrief" })
+    expect(clash.ok).toBe(false)
+    expect(!clash.ok && clash.status).toBe(409)
+
+    const refused = mock.deleteRoutine("daily-debrief")
+    expect(!refused.ok && refused.status).toBe(409)
+    expect(mock.deleteRoutine("check-the-build").ok).toBe(true)
+    expect(mock.getRoutines().map((item) => item.handle)).toEqual(["daily-debrief", "check-the-build-2"])
+    expect(mock.deleteRoutine("check-the-build").ok).toBe(false)
+  })
 })

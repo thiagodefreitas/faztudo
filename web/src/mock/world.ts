@@ -36,6 +36,7 @@ import type {
   ResolveBody,
   RetryBody,
   Routine,
+  RoutineCreate,
   Run,
   RunMode,
   RunState,
@@ -110,6 +111,7 @@ export class MockWorld {
       schedule: "0 18 * * 1-5",
       template: "debrief",
       enabled: false,
+      source: "config",
     },
   ]
 
@@ -563,6 +565,53 @@ export class MockWorld {
     found.enabled = enabled
     this.emit("routine.updated", undefined, found, `human:${this.me.id}`)
     return ok(structuredClone(found))
+  }
+
+  // The mock names an app routine the way the daemon does: from the name, with
+  // a number added when another app routine has the handle. A lanes.toml
+  // handle is refused.
+  createRoutine(body: RoutineCreate): Result<Routine> {
+    const name = body.name.trim()
+    const prompt = body.prompt.trim()
+    const schedule = body.schedule.trim().replace(/\s+/g, " ")
+    if (!name || name.length > 80) return err(400, "bad_request", "name must be 1 to 80 characters")
+    if (!prompt) return err(400, "bad_request", "prompt must be 1 to 8000 characters")
+    if (schedule.split(" ").length !== 5) return err(400, "bad_request", "schedule: expected 5 fields")
+    const persona = this.members.find((item) => item.kind === "agent" && item.handle === body.persona.replace(/^@/, ""))
+    if (!persona) return err(400, "bad_request", `agent @${body.persona} does not exist`)
+    const channel = this.channels.find((item) => item.name.toLowerCase() === body.channel.replace(/^#/, "").toLowerCase())
+    if (!channel) return err(400, "bad_request", `channel #${body.channel} does not exist`)
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "routine"
+    if (this.routines.some((item) => item.handle === base && item.source === "config")) {
+      return err(409, "conflict", `routine ${base} is defined in lanes.toml; pick another name`)
+    }
+    let handle = base
+    for (let n = 2; this.routines.some((item) => item.handle === handle); n++) handle = `${base}-${n}`
+    const routine: Routine = {
+      handle,
+      name,
+      prompt,
+      persona: persona.handle,
+      channel: channel.name,
+      schedule,
+      enabled: true,
+      source: "app",
+      created_by: this.me.id,
+      created_at: iso(this.clock.now()),
+    }
+    this.routines.push(routine)
+    this.emit("routine.updated", undefined, routine, `human:${this.me.id}`)
+    return ok(structuredClone(routine), 201)
+  }
+
+  deleteRoutine(handle: string): Result<null> {
+    const index = this.routines.findIndex((item) => item.handle === handle)
+    const found = this.routines[index]
+    if (!found) return err(404, "not_found", "resource not found")
+    if (found.source !== "app") return err(409, "conflict", `routine ${handle} is defined in lanes.toml`)
+    this.routines.splice(index, 1)
+    this.emit("routine.removed", undefined, { handle }, `human:${this.me.id}`)
+    return ok(null, 204)
   }
 
   runRoutine(handle: string): Result<{ status: string }> {

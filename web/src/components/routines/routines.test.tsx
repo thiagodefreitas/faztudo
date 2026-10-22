@@ -25,6 +25,7 @@ const debrief: Routine = {
   schedule: "0 18 * * 1-5",
   template: "debrief",
   enabled: true,
+  source: "config",
   next_run: "2026-10-19T16:00:00Z",
   last: { at: new Date().toISOString(), status: "ok", detail: "Posted the summary." },
 }
@@ -37,6 +38,7 @@ const welcome: Routine = {
   channel: "general",
   trigger: "message",
   enabled: false,
+  source: "app",
   last: { at: new Date().toISOString(), status: "skipped", detail: "lane claude/opus is in conserve" },
 }
 
@@ -102,6 +104,19 @@ describe("RoutinesList", () => {
     setup([debrief])
     await user.click(screen.getByRole("button", { name: "Run now" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("in conserve")
+  })
+
+  it("shows where each routine comes from and deletes only app routines", async () => {
+    const user = userEvent.setup()
+    const remove = vi.spyOn(api, "deleteRoutine").mockResolvedValue(undefined)
+    setup([debrief, welcome])
+    const fromFile = screen.getByRole("article", { name: "Daily debrief" })
+    expect(within(fromFile).getByText("From lanes.toml")).toBeInTheDocument()
+    expect(within(fromFile).queryByRole("button", { name: /Delete/ })).not.toBeInTheDocument()
+    const fromApp = screen.getByRole("article", { name: "Welcome" })
+    expect(within(fromApp).getByText("Made in the app")).toBeInTheDocument()
+    await user.click(within(fromApp).getByRole("button", { name: "Delete Welcome" }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("welcome"))
   })
 
   it("explains how to add the first routine", () => {

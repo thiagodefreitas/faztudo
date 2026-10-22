@@ -33,6 +33,7 @@ import type {
   ResolveBody,
   RetryBody,
   Routine,
+  RoutineCreate,
   Run,
   RunState,
   SearchHit,
@@ -95,6 +96,8 @@ export interface Api {
   routines: () => Promise<Routine[]>
   setRoutineEnabled: (handle: string, enabled: boolean) => Promise<Routine>
   runRoutine: (handle: string) => Promise<{ status: string }>
+  createRoutine: (body: RoutineCreate) => Promise<Routine>
+  deleteRoutine: (handle: string) => Promise<void>
   tasks: (query?: { channel_id?: ID; project?: string }) => Promise<Task[]>
   createTask: (body: TaskInput) => Promise<Task>
   patchTask: (id: ID, body: TaskPatch) => Promise<Task>
@@ -193,6 +196,8 @@ export function createApi(options: ApiOptions = {}): Api {
     routines: () => request("GET", "/routines"),
     setRoutineEnabled: (handle, enabled) => request("PATCH", `/routines/${encodeURIComponent(handle)}`, { enabled }),
     runRoutine: (handle) => request("POST", `/routines/${encodeURIComponent(handle)}/run`),
+    createRoutine: (body) => request("POST", "/routines", body),
+    deleteRoutine: (handle) => request("DELETE", `/routines/${encodeURIComponent(handle)}`),
     tasks: (params = {}) => request("GET", query("/tasks", params)),
     createTask: (body) => request("POST", "/tasks", body),
     patchTask: (id, body) => request("PATCH", `/tasks/${encodeURIComponent(id)}`, body),

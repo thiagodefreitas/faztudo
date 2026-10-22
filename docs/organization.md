@@ -27,6 +27,7 @@ way to the right agent.
 | `delegate` MCP tool for the Chief of Staff and department leads: checked on the server, two levels deep at most, every handoff a thread message and a `handoff.created` event | built |
 | Run budget per request (total and premium); over it, the Director gets a choice card | built; committed run counts are rebuilt from handoff events after a restart; open cards and approved extra rounds are not restored |
 | Routines: cron schedule in your time zone or a trigger on new messages, a daily debrief template, a Routines page with switch, run now and last result | built; they skip when the lane is exhausted, unavailable or in conserve, and stop at a daily cap |
+| Repeat this: "Repeat this" on a finished answer opens a dialog (request, persona, channel, schedule presets or a cron expression with the next run time) and saves a routine in the database; the Routines page shows where each one comes from and deletes the ones made in the app | built |
 | `faztudo init --template solo\|team\|empty` | built |
 | A lead or the Chief of Staff collecting delegated results into one combined answer | built; a read-only follow-up starts when the parent and all pieces finish, including failed, refused and never-started pieces; the follow-up uses the request budget; none for all-refused, retried or pre-version requests |
 | Routines for a trigger other than a new message (an issue, a failing CI run) | not built |
@@ -131,6 +132,17 @@ Specialists and leads can have routines: a prompt that runs on a schedule
 (every weekday at 09:00) or on a trigger (a new issue, a failing CI run, a
 message in a channel). A typical one is a daily debrief, where each lead
 posts what its team did, what is blocked, and what needs the Director.
+
+Routines come from two places. `[[routine]]` entries in lanes.toml are
+"config" routines: the file owns them, and the app can switch them on and
+off but not delete them. A request that worked once can also become an "app"
+routine: choose **Repeat this** in the More menu of a finished answer, check
+the request, pick a schedule (every weekday at 09:00, every day at 18:00,
+every Monday at 09:00, or your own cron expression) and save. The dialog shows
+the next run in the time zone of your browser. App routines are stored in the
+database, run like the others, can be switched off, and can be deleted from the
+Routines page. A name that lanes.toml already uses is refused, and a routine
+added to the file later with the same handle replaces the app one.
 
 ## Templates
 
