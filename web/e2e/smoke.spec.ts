@@ -41,7 +41,7 @@ test("posts a mention, streams a run, and answers the approval", async ({ page }
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole("link", { name: "Back to chats" }).click()
-  await page.getByTestId("inbox-list").getByRole("link", { name: /general/ }).click()
+  await page.getByTestId("inbox-list").getByRole("link", { name: /^# general/ }).click()
   await expect(page.getByRole("heading", { name: "# general" })).toBeVisible()
 })
 

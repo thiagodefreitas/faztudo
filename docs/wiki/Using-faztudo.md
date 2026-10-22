@@ -41,10 +41,8 @@ between agents collapse into one line you can expand.
 The microphone button next to Send turns speech into text in the message box,
 using your browser's own speech recognition. Words appear as you speak and
 land in the draft when the browser settles on them; nothing is sent until you
-press Send. faztudo never receives the audio. Where it goes depends on the
-browser: when it offers recognition on the device the button says so, and
-otherwise the browser's speech service does the work (Chrome uses Google's,
-Safari uses Apple's). Browsers without speech recognition, such as Firefox,
+press Send. faztudo never receives the audio; the browser's speech service
+does the work (Chrome uses Google's, Safari uses Apple's). Browsers without speech recognition, such as Firefox,
 show no button. It needs a secure page: localhost or the LAN address with TLS.
 
 ## Mentions

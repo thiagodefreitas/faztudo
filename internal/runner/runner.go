@@ -157,6 +157,7 @@ type Runner struct {
 	active            map[string]bool
 	recovered         map[string]context.CancelFunc
 	recovering        sync.WaitGroup
+	monitors          sync.WaitGroup // reattached processes still being watched
 }
 
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -1045,7 +1046,11 @@ func (r *Runner) Recover(ctx context.Context) ([]domain.Run, error) {
 				}
 				r.recovered[m.Run.ID] = cancel
 				r.mu.Unlock()
-				go r.monitorRecovered(monitorCtx, m)
+				r.monitors.Add(1)
+				go func(m Metadata) {
+					defer r.monitors.Done()
+					r.monitorRecovered(monitorCtx, m)
+				}(m)
 			}
 		}
 		result = append(result, m.Run)
@@ -1134,6 +1139,10 @@ func (r *Runner) finishRecovered(m Metadata, code int) {
 // WaitRecovered returns once every recovery Recover started in the
 // background has finished.
 func (r *Runner) WaitRecovered() { r.recovering.Wait() }
+
+// WaitMonitors returns once every reattached process Recover watches has
+// been settled or its watch cancelled. Tests use it before removing RunDir.
+func (r *Runner) WaitMonitors() { r.monitors.Wait() }
 
 func (r *Runner) completeRecovered(ctx context.Context, run *domain.Run, code int) error {
 	state := domain.RunDone

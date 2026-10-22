@@ -58,6 +58,9 @@ async function shot(p, name) {
 
 {
   const { context, p } = await page(desktop)
+  await p.goto(base + "/")
+  await p.waitForTimeout(2000)
+  await shot(p, "today.png")
   await openChannel(p, "general")
   await shot(p, "chat.png")
   await p.goto(base + "/p/faztudo")

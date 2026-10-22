@@ -29,7 +29,7 @@ All notable changes are listed here. The format follows
   and the Lanes page sums today's tokens and cost per lane with how many
   runs were measured. Codex runs are now measured.
 - Dictation: a microphone button in the message box uses the browser's
-  speech recognition, on the device when the browser offers it.
+  speech recognition.
 - Routine triggers for GitHub: a failing CI run, a new issue or a new pull
   request, read with your signed-in gh. The item reaches the agent as
   labelled data.

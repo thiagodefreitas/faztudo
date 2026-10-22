@@ -1,7 +1,8 @@
 // Dictation uses the browser's own speech recognition. faztudo never sees the
 // audio; where it goes depends on the browser (Chrome sends it to Google's
-// speech service unless on-device recognition is available, Safari uses
-// Apple's). The button says which one it got.
+// speech service, Safari uses Apple's). The on-device check,
+// SpeechRecognition.available(), is not called: it crashed the page in
+// Chromium 2026 builds, so a whole channel would go blank for a mic button.
 
 export interface SpeechResultLike {
   isFinal: boolean
@@ -17,7 +18,6 @@ export interface SpeechRecognitionLike {
   lang: string
   continuous: boolean
   interimResults: boolean
-  processLocally?: boolean
   onresult: ((event: SpeechEventLike) => void) | null
   onerror: ((event: { error: string }) => void) | null
   onend: (() => void) | null
@@ -28,7 +28,6 @@ export interface SpeechRecognitionLike {
 
 export interface SpeechRecognitionCtor {
   new (): SpeechRecognitionLike
-  available?: (options: { langs: string[]; processLocally: boolean }) => Promise<string>
 }
 
 /** The browser's SpeechRecognition constructor, or null when it has none. */
@@ -36,16 +35,6 @@ export function speechRecognitionOf(win: unknown): SpeechRecognitionCtor | null 
   if (!win || typeof win !== "object") return null
   const w = win as { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor }
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
-}
-
-/** Whether recognition for lang can run on the device, when the browser says. */
-export async function onDevice(ctor: SpeechRecognitionCtor, lang: string): Promise<boolean> {
-  if (typeof ctor.available !== "function") return false
-  try {
-    return (await ctor.available({ langs: [lang], processLocally: true })) === "available"
-  } catch {
-    return false
-  }
 }
 
 /** Splits the results of one event into final text and the interim tail. */

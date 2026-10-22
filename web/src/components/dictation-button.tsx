@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { dictationError, onDevice, speechRecognitionOf, transcriptOf, type SpeechRecognitionLike } from "../lib/dictation"
+import { dictationError, speechRecognitionOf, transcriptOf, type SpeechRecognitionLike } from "../lib/dictation"
 
 /**
  * A microphone button for the composer. It renders nothing when the browser
@@ -12,21 +12,11 @@ export function DictationButton({ onText }: { onText: (words: string) => void })
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState("")
   const [error, setError] = useState("")
-  const [local, setLocal] = useState(false)
   const recognition = useRef<SpeechRecognitionLike | null>(null)
   const sink = useRef(onText)
   useEffect(() => {
     sink.current = onText
   }, [onText])
-
-  useEffect(() => {
-    if (!ctor) return
-    let live = true
-    void onDevice(ctor, lang).then((yes) => live && setLocal(yes))
-    return () => {
-      live = false
-    }
-  }, [ctor, lang])
 
   useEffect(() => () => recognition.current?.abort(), [])
 
@@ -40,7 +30,6 @@ export function DictationButton({ onText }: { onText: (words: string) => void })
     r.lang = lang
     r.continuous = true
     r.interimResults = true
-    if (local) r.processLocally = true
     r.onresult = (event) => {
       const { final, interim } = transcriptOf(event)
       if (final) sink.current(final)
@@ -62,8 +51,7 @@ export function DictationButton({ onText }: { onText: (words: string) => void })
     }
   }
 
-  const where = local ? "on this device" : "with your browser's speech service"
-  const title = listening ? "Stop dictation" : `Dictate (recognized ${where})`
+  const title = listening ? "Stop dictation" : "Dictate (your browser's speech service recognizes it)"
   return (
     <>
       <button

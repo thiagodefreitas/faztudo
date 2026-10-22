@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { appendDictation, dictationError, onDevice, speechRecognitionOf, transcriptOf, type SpeechRecognitionCtor } from "./dictation"
+import { appendDictation, dictationError, speechRecognitionOf, transcriptOf, type SpeechRecognitionCtor } from "./dictation"
 
 const result = (transcript: string, isFinal: boolean) => ({ isFinal, 0: { transcript } })
 
@@ -22,17 +22,6 @@ describe("dictation", () => {
     expect(appendDictation("@coder", "fix it")).toBe("@coder fix it")
     expect(appendDictation("@coder ", "fix it")).toBe("@coder fix it")
     expect(appendDictation("draft", "")).toBe("draft")
-  })
-
-  it("asks the browser about on-device recognition and survives errors", async () => {
-    const local = { available: async () => "available" } as unknown as SpeechRecognitionCtor
-    const remote = { available: async () => "unavailable" } as unknown as SpeechRecognitionCtor
-    const broken = { available: async () => { throw new Error("x") } } as unknown as SpeechRecognitionCtor
-    const old = {} as SpeechRecognitionCtor
-    expect(await onDevice(local, "en-US")).toBe(true)
-    expect(await onDevice(remote, "en-US")).toBe(false)
-    expect(await onDevice(broken, "en-US")).toBe(false)
-    expect(await onDevice(old, "en-US")).toBe(false)
   })
 
   it("explains errors and stays quiet on abort", () => {
