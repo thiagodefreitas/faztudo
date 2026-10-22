@@ -14,6 +14,8 @@ exhausted or in conserve, with their reset time. Mark as seen moves the
 "last here" point to now; the brief folds away and remembers that in this
 browser.
 
+![The Today brief: what needs you, what finished, what runs and which lanes are short](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/today.png)
+
 ## Channels
 
 A channel is a conversation. You can make public or private channels and

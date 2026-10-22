@@ -42,6 +42,10 @@ This is what you get:
 The full list is in the [changelog](CHANGELOG.md).
 
 <p align="center">
+  <img src="docs/images/today.png" alt="The Today brief at the top of the home page: what needs you, what finished since your last visit, what runs now and which lanes are short" width="860">
+</p>
+
+<p align="center">
   <img src="docs/images/chat.png" alt="A faztudo channel opened after time away: filter chips, a New divider, a catch-up card saying two new messages from Coder with Mark read, and a question with lettered answers" width="860">
 </p>
 <p align="center">
