@@ -43,6 +43,9 @@ func Handler() http.Handler {
 		if st, err := fs.Stat(root, name); err != nil || st.IsDir() {
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
+		} else if strings.HasSuffix(name, ".woff2") {
+			// Not in Go's built-in type table; /etc/mime.types may lack it too.
+			w.Header().Set("Content-Type", "font/woff2")
 		} else if strings.HasPrefix(name, "assets/") {
 			// Vite puts a content hash in asset names, so they never change.
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")

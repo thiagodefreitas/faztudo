@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Inter (SIL OFL 1.1, public/fonts/OFL-Inter.txt), latin subset, one variable file. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin-wght.woff2") format("woff2");
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Brand palette from docs/design.md and assets/brand/tokens.css. */
