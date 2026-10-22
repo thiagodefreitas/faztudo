@@ -68,6 +68,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # The browser install pulls system packages; a stuck mirror once held
+    # this job for over half an hour.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
