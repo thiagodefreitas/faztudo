@@ -22,6 +22,7 @@ import { AttachmentList } from "./attachments"
 import { ChoiceCard } from "./choice-card"
 import { buildCatchUp } from "./chat/catch-up"
 import { CatchUpCard } from "./chat/catch-up-card"
+import { HumanAvatar } from "./chat/human-avatar"
 import { filterContext, type ChatFilter } from "./chat/filters"
 import { buildRows, unreadIds } from "./chat/rows"
 import { CompareCard } from "./compare/compare-card"
@@ -49,6 +50,7 @@ export function MessageList({
   filter = "all",
   unread = 0,
   onMarkRead,
+  onSuggestion,
 }: {
   channelId: string
   /** A message to scroll to and flash, from a search result. */
@@ -59,6 +61,7 @@ export function MessageList({
   /** How many messages were unread when the channel was opened; 0 hides the markers. */
   unread?: number
   onMarkRead?: () => void
+  onSuggestion?: (text: string) => void
 }) {
   const qc = useQueryClient()
   const messagesQuery = useMessages(channelId)
@@ -79,7 +82,10 @@ export function MessageList({
   // Replies live in the thread panel; the cache also holds streamed replies.
   const allMessages = messagesQuery.data ?? EMPTY_MESSAGES
   const messages = useMemo(() => allMessages.filter((message) => !message.thread_id), [allMessages])
+  const messageCount = messages.length
+  const lastMessageId = messages.at(-1)?.id
   const memberList = members.data ?? EMPTY_MEMBERS
+  const channelMemberIds = channelList.data?.find((channel) => channel.id === channelId)?.member_ids ?? []
   const runList = runs.data ?? EMPTY_RUNS
   const noticeList = notices.data ?? EMPTY_NOTICES
   const pendingList = pending.data ?? EMPTY_PENDING
@@ -97,7 +103,17 @@ export function MessageList({
   const preserveRef = useRef<{ height: number; top: number } | null>(null)
   const anchorRef = useRef("")
   const [unstuck, setUnstuck] = useState(false)
+  const [newWhileAway, setNewWhileAway] = useState(0)
+  const seenMessages = useRef({ channelId, count: messageCount, lastId: lastMessageId })
   const [loadingEarlier, setLoadingEarlier] = useState(false)
+
+  useEffect(() => {
+    const previous = seenMessages.current
+    if (previous.channelId === channelId && unstuck && messageCount > previous.count && lastMessageId !== previous.lastId) {
+      setNewWhileAway((count) => count + messageCount - previous.count)
+    }
+    seenMessages.current = { channelId, count: messageCount, lastId: lastMessageId }
+  }, [channelId, messageCount, lastMessageId, unstuck])
 
   const visiblePending = useMemo(() => pendingList.filter((item) => {
     if (item.error) return true
@@ -252,6 +268,7 @@ export function MessageList({
     const el = parentRef.current
     stuckRef.current = true
     setUnstuck(false)
+    setNewWhileAway(0)
     if (el) el.scrollTop = el.scrollHeight
   }
 
@@ -293,7 +310,9 @@ export function MessageList({
         {messagesQuery.isPending ? (
           <p className="px-4 py-6 text-[13px] text-muted">Loading messages</p>
         ) : rows.length === 0 ? (
-          <p className="px-4 py-6 text-[13px] text-muted">No messages yet.</p>
+          filter === "all" && messages.length === 0 ?
+            <EmptyChannel agents={memberList.filter((member) => member.kind === "agent" && channelMemberIds.includes(member.id))} onSuggestion={onSuggestion} /> :
+            <p className="px-4 py-8 text-center text-[13px] text-muted">No messages match this filter.</p>
         ) : (
           <div ref={innerRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((item) => {
@@ -307,7 +326,7 @@ export function MessageList({
                   key={row.key}
                   data-index={item.index}
                   ref={virtualizer.measureElement}
-                  className={cx("absolute left-0 top-0 w-full px-3 md:px-4", grouped ? "py-0.5" : row.kind === "day" || row.kind === "new" ? "py-1" : "pb-0.5 pt-3")}
+                  className={cx("absolute left-0 top-0 w-full px-3 md:px-4", grouped ? "py-0.5" : row.kind === "day" || row.kind === "new" ? "py-1" : "pb-0.5 pt-1.5")}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
                   {row.kind === "message" && (
@@ -361,11 +380,28 @@ export function MessageList({
           onClick={jumpLatest}
           className="absolute bottom-3 left-1/2 z-10 min-h-8 -translate-x-1/2 rounded-full border border-line bg-surface px-3 text-[12px] shadow"
         >
-          Latest
+          {newWhileAway > 0 ? `Jump to latest (${newWhileAway} new)` : "Jump to latest"}
         </button>
       )}
     </div>
   )
+}
+
+function EmptyChannel({ agents, onSuggestion }: { agents: Member[]; onSuggestion?: (text: string) => void }) {
+  const suggestions = Array.from({ length: agents.length ? Math.min(3, Math.max(2, agents.length)) : 0 }, (_, index) => {
+    const handle = agents[index % agents.length]!.handle
+    if (index === 0) return `@${handle} What should we work on first?`
+    if (index === 1) return `@${handle} Review the current plan.`
+    return `@${handle} What needs attention today?`
+  })
+  return <div className="mx-auto flex max-w-md flex-col items-center px-5 py-12 text-center">
+    <div className="mb-3 flex -space-x-1.5">{agents.slice(0, 3).map((agent) => <AgentAvatar key={agent.id} member={agent} size={28} decorative className="rounded-full ring-2 ring-canvas" />)}</div>
+    <h2 className="text-[15px] font-semibold">No messages yet.</h2>
+    <p className="mt-1 text-[13px] text-muted">Start the conversation here.</p>
+    {suggestions.length > 0 && <div className="mt-4 flex w-full flex-col gap-2">{suggestions.map((suggestion) =>
+      <button key={suggestion} type="button" disabled={!onSuggestion} onClick={() => onSuggestion?.(suggestion)} className="min-h-10 rounded-lg border border-line bg-surface px-3 py-2 text-left text-[13px] text-ink hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default">{suggestion}</button>,
+    )}</div>}
+  </div>
 }
 
 function Divider({ label, tone }: { label: string; tone?: "accent" }) {
@@ -400,7 +436,7 @@ const MessageRow = memo(function MessageRow({
   grouped: boolean
   lastInGroup: boolean
   mine: boolean
-  /** Someone else mentioned me, so the row gets an accent rail. */
+  /** Someone else mentioned me, so the row gets an accent tint. */
   mentionsMe: boolean
   pinned: boolean
   flash: boolean
@@ -421,11 +457,12 @@ const MessageRow = memo(function MessageRow({
     <article
       id={`msg-${message.id}`}
       className={cx(
-        "group/msg flex gap-2.5 rounded-md transition-colors duration-500 max-sm:items-end",
+        "group/msg relative flex gap-2.5 rounded-lg px-1.5 py-1 transition-colors duration-200 max-sm:items-end",
         mine && "max-sm:flex-row-reverse",
         fresh && "fz-rise",
         flash && "bg-accent-soft",
-        mentionsMe && "border-l-2 border-accent pl-2",
+        mentionsMe && !flash && "bg-accent-soft",
+        author?.kind === "agent" && !mentionsMe && !flash && "bg-sidebar/40",
       )}
     >
       <div className={cx("w-8 shrink-0", mine && "max-sm:hidden")}>
@@ -433,19 +470,20 @@ const MessageRow = memo(function MessageRow({
           <time
             className="block pt-0.5 text-center font-mono text-[10px] leading-5 text-faint opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 max-sm:hidden"
             dateTime={message.created_at}
+            title={new Date(message.created_at).toLocaleString()}
           >
             {time}
           </time>
         ) : (
-          <AgentAvatar member={author} size={28} decorative className="mt-0.5 max-sm:hidden" />
+          author?.kind === "human" ? <HumanAvatar member={author} className="mt-0.5 max-sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="mt-0.5 max-sm:hidden" />
         )}
-        {lastInGroup && <AgentAvatar member={author} size={28} decorative className="sm:hidden" />}
+        {lastInGroup && (author?.kind === "human" ? <HumanAvatar member={author} className="sm:hidden" /> : <AgentAvatar member={author} size={28} decorative className="sm:hidden" />)}
       </div>
       <div className={cx("min-w-0 flex-1", mine && "max-sm:flex max-sm:flex-col max-sm:items-end")}>
         {!grouped && (
-          <header className={cx("flex items-baseline gap-2", mine && "max-sm:hidden")}>
+          <header className={cx("flex items-baseline gap-2 md:pr-40", mine && "max-sm:hidden")}>
             <p className="text-[13px] font-semibold">{authorName}</p>
-            <time className="font-mono text-[11px] text-faint" dateTime={message.created_at}>
+            <time className="font-mono text-[11px] text-faint" dateTime={message.created_at} title={new Date(message.created_at).toLocaleString()}>
               {time}
             </time>
             {message.edited_at && <span className="text-[11px] text-faint">edited</span>}
@@ -487,7 +525,7 @@ const MessageRow = memo(function MessageRow({
           </p>
         )}
         {onOpenThread && (
-          <p className="mt-0.5 flex items-center gap-3 text-[12px]">
+          <div className="mt-0.5 flex items-center gap-1 text-[12px]">
             {replies > 0 && (
               <button
                 type="button"
@@ -497,17 +535,15 @@ const MessageRow = memo(function MessageRow({
                 {replies} {replies === 1 ? "reply" : "replies"}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => onOpenThread(message)}
-              aria-label={`Reply in thread to ${authorName}`}
-              className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline md:min-h-6 md:opacity-0 md:transition-opacity md:duration-150 md:group-hover/msg:opacity-100 md:focus-visible:opacity-100"
-            >
-              Reply in thread
-            </button>
-            <PinButton message={message} pinned={pinned} />
-            {author?.kind === "agent" && <AnswerActions message={message} author={author} run={run} onOpenThread={onOpenThread} />}
-          </p>
+            <div role="group" aria-label={`Actions for ${authorName}'s message`} className="ml-auto flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5 opacity-100 shadow-sm transition-opacity duration-150 md:absolute md:right-1.5 md:top-1 md:opacity-0 md:group-hover/msg:opacity-100 md:group-focus-within/msg:opacity-100">
+              <button type="button" onClick={() => onOpenThread(message)} aria-label={`Reply in thread to ${authorName}`} title="Reply in thread" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+                <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h12v9H9l-4 3v-3H4z" /></svg>
+              </button>
+              <PinButton message={message} pinned={pinned} />
+              <CopyButton text={message.body} />
+              {author?.kind === "agent" && <AnswerActions message={message} author={author} run={run} onOpenThread={onOpenThread} />}
+            </div>
+          </div>
         )}
       </div>
     </article>
@@ -534,11 +570,29 @@ function PinButton({ message, pinned }: { message: Message; pinned: boolean }) {
       disabled={busy}
       onClick={() => void toggle()}
       aria-pressed={pinned}
-      className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline md:min-h-6 md:opacity-0 md:transition-opacity md:duration-150 md:group-hover/msg:opacity-100 md:focus-visible:opacity-100"
+      aria-label={pinned ? "Unpin" : "Pin"}
+      title={pinned ? "Unpin" : "Pin"}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
     >
-      {pinned ? "Unpin" : "Pin"}
+      <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 5 5-2 1-2.5 3.5.5 2.5-1 1-3-3-4.5 4.5M7 8l-1-1 1-1 1.5 1.5" /></svg>
     </button>
   )
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return <button type="button" onClick={() => void copy()} aria-label={copied ? "Copied" : "Copy message"} title={copied ? "Copied" : "Copy message"} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+    <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="6" width="9" height="11" rx="1.5" /><path d="M13 6V4.5A1.5 1.5 0 0 0 11.5 3h-6A1.5 1.5 0 0 0 4 4.5v8A1.5 1.5 0 0 0 5.5 14H7" /></svg>
+  </button>
 }
 
 // The options of an ask_human message. The answer is a thread reply from the

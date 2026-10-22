@@ -192,9 +192,13 @@ textarea,
   color: var(--color-ink);
 }
 
-:focus-visible {
-  outline: var(--focus-ring-width) solid var(--color-accent);
-  outline-offset: var(--focus-ring-offset);
+/* In the base layer so a component's outline-none (a text box whose frame
+   shows focus instead) can opt out; unlayered rules beat every utility. */
+@layer base {
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-accent);
+    outline-offset: var(--focus-ring-offset);
+  }
 }
 
 .markdown {

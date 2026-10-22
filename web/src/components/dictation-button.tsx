@@ -60,7 +60,7 @@ export function DictationButton({ onText }: { onText: (words: string) => void })
         aria-pressed={listening}
         title={title}
         onClick={listening ? stop : start}
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-150 md:h-8 md:w-8 ${
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent md:h-8 md:w-8 ${
           listening ? "bg-danger-soft text-danger" : "text-muted hover:bg-sidebar hover:text-ink"
         }`}
       >

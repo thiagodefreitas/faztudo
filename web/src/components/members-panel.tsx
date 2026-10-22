@@ -8,7 +8,7 @@ import { isAssigned, projectOfChannel } from "../lib/projects"
 import { qk } from "../state/keys"
 import { replaceById } from "../state/merge"
 import { useNow } from "../state/now"
-import { useApprovals, useLanes, useMe, useMembers, useOrg, useRuns } from "../state/queries"
+import { useApprovals, useLanes, useMe, useMembers, useMessages, useOrg, useRuns } from "../state/queries"
 import type { ApprovalRule, Channel, Member } from "../types"
 import { AgentAvatar } from "./agent-avatar"
 import { buttonClass, errorText, inputClass } from "./channel-dialogs"
@@ -16,6 +16,7 @@ import { avatarState } from "./office/avatar"
 import { deriveMemberDesk, type DeskState } from "./office/state"
 import { LessonsButton } from "./lessons/lessons-dialog"
 import { TeamIcon } from "./team-icon"
+import { HumanAvatar } from "./chat/human-avatar"
 
 const STATE_CLASS: Record<DeskState, string> = {
   idle: "bg-sidebar text-muted",
@@ -46,6 +47,7 @@ function Panel({ channel }: { channel: Channel }) {
   const members = useMembers()
   const org = useOrg()
   const runs = useRuns()
+  const messages = useMessages(channel.id)
   const approvals = useApprovals()
   const lanes = useLanes()
   const now = useNow()
@@ -61,11 +63,13 @@ function Panel({ channel }: { channel: Channel }) {
   const project = org.data ? projectOfChannel(channel, org.data.projects) : undefined
   const inside = all.filter((member) => channel.member_ids.includes(member.id))
   const outside = all.filter((member) => !channel.member_ids.includes(member.id))
-  // Agents first, the default agent at the top, then people.
+  const triggerMessages = new Map((messages.data ?? []).map((message) => [message.id, message.body]))
+  const deskById = new Map(inside.filter((member) => member.kind === "agent").map((member) => [member.id, deriveMemberDesk({ member, runs: runs.data ?? [], approvals: approvals.data ?? [], lanes: lanes.data ?? [], triggerMessages, now })]))
+  const priority: Record<DeskState, number> = { working: 0, waiting_approval: 1, queued: 2, failed: 3, out_of_quota: 4, idle: 5 }
   const sorted = inside.slice().sort((a, b) => {
-    if (a.id === channel.default_agent_id) return -1
-    if (b.id === channel.default_agent_id) return 1
-    return Number(b.kind === "agent") - Number(a.kind === "agent")
+    const rankA = a.kind === "agent" ? priority[deskById.get(a.id)?.state ?? "idle"] : 6
+    const rankB = b.kind === "agent" ? priority[deskById.get(b.id)?.state ?? "idle"] : 6
+    return rankA - rankB || Number(b.id === channel.default_agent_id) - Number(a.id === channel.default_agent_id) || a.display_name.localeCompare(b.display_name)
   })
   const agentsInside = inside.filter((member) => member.kind === "agent").length
 
@@ -137,17 +141,14 @@ function Panel({ channel }: { channel: Channel }) {
           )}
           <ul className="divide-y divide-line" aria-label="Members">
             {sorted.map((member) => {
-              const desk =
-                member.kind === "agent"
-                  ? deriveMemberDesk({ member, runs: runs.data ?? [], approvals: approvals.data ?? [], lanes: lanes.data ?? [], now })
-                  : undefined
+              const desk = deskById.get(member.id)
               const assigned = project && member.kind === "agent" ? isAssigned(project, org.data?.departments ?? [], member.handle) : undefined
               const isDefault = member.id === channel.default_agent_id
               const you = member.id === meId
               const director = member.id === org.data?.director_id
               return (
                 <li key={member.id} className="flex items-start gap-2.5 px-3 py-2" data-member={member.id} data-assigned={assigned}>
-                  <AgentAvatar member={member} size={36} state={desk ? avatarState(desk.state) : undefined} decorative className="mt-0.5" />
+                  {member.kind === "human" ? <HumanAvatar member={member} size={36} className="mt-0.5" /> : <AgentAvatar member={member} size={36} state={desk ? avatarState(desk.state) : undefined} decorative className="mt-0.5" />}
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px]">
                       <span className="font-medium">{member.display_name}</span>
@@ -160,11 +161,14 @@ function Panel({ channel }: { channel: Channel }) {
                       {member.kind === "human" ? (director ? "Director" : "Human") : (member.agent?.role ?? "Agent")}
                     </p>
                     {desk && (
-                      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-                        <span className={cx("rounded-full px-2 py-0.5", STATE_CLASS[desk.state])}>{desk.stateLabel}</span>
-                        {desk.laneId && <span className="font-mono text-faint">{desk.laneId}</span>}
-                        {desk.resetTimeText && <span className="text-faint">{desk.resetTimeText}</span>}
-                      </p>
+                      <>
+                        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className={cx("rounded-full px-2 py-0.5", STATE_CLASS[desk.state])}>{desk.stateLabel}</span>
+                          {desk.laneId && <span className="font-mono text-faint">{desk.laneId}</span>}
+                          {desk.state === "out_of_quota" && desk.resetTimeText && <span className="text-faint">Back at {desk.resetTimeText}</span>}
+                        </p>
+                        {(desk.runTitle || desk.currentRun) && <p className="mt-1 truncate text-[12px] text-muted" title={desk.runRequest ?? desk.runTitle}>{desk.runTitle ?? `Run ${desk.currentRun?.id}`}</p>}
+                      </>
                     )}
                     {isHuman && (
                       <p className="mt-1 flex flex-wrap gap-1">
@@ -184,6 +188,7 @@ function Panel({ channel }: { channel: Channel }) {
                           </button>
                         )}
                         {member.kind === "agent" && <LessonsButton persona={member.handle} className={SMALL} />}
+                        {member.kind === "agent" && <Dialog.Close asChild><button type="button" onClick={() => window.dispatchEvent(new CustomEvent("faztudo:compose-mention", { detail: `@${member.handle} ` }))} className={SMALL} title={`Message ${member.display_name}`}>Message</button></Dialog.Close>}
                         {!you && (
                           <button
                             type="button"

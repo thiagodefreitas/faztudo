@@ -44,6 +44,14 @@ describe("Composer tasks", () => {
     expect(box).toHaveValue("")
   })
 
+  it("shows task mode and changes the hint while typing /task", async () => {
+    render(<Composer members={members} channelName="dev" onSend={vi.fn()} onTask={vi.fn()} />)
+    expect(screen.getByText("Type @ to mention someone or /task to create a task")).toBeInTheDocument()
+    await userEvent.type(screen.getByRole("textbox", { name: "Message" }), "/task Review the patch")
+    expect(screen.getByText("New task")).toBeInTheDocument()
+    expect(screen.getByText("Enter to open the task builder")).toBeInTheDocument()
+  })
+
   it("sends /task as plain text when there is no builder", async () => {
     const user = userEvent.setup()
     const onSend = vi.fn()
@@ -168,6 +176,16 @@ describe("Composer", () => {
     await user.click(send)
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(send).toBeDisabled()
+  })
+
+  it("appends a suggested mention without replacing an unsent draft", async () => {
+    const onSend = vi.fn()
+    const view = render(<Composer members={members} channelName="dev" onSend={onSend} />)
+    const box = screen.getByRole("textbox", { name: "Message" })
+    await userEvent.type(box, "Keep this draft")
+    view.rerender(<Composer members={members} channelName="dev" onSend={onSend} suggestion={{ id: 1, text: "@coder " }} />)
+    expect(box).toHaveValue("Keep this draft @coder ")
+    expect(box).toHaveFocus()
   })
 })
 

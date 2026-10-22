@@ -9,13 +9,23 @@ function Candidate({ candidate, label, channelId }: { candidate: CompareCandidat
   const navigate = useNavigate()
   const stat = run?.diff_stat
   const tail = (candidate.output_tail ?? []).join("\n").slice(-1200)
-  return <section className="min-w-0 rounded-md border border-line p-3" aria-label={`Candidate ${label}`}>
+  return <section className="min-w-0 rounded-lg border border-line bg-canvas p-3" aria-label={`Candidate ${label}`}>
     <h4 className="text-[13px] font-semibold">{label}: {candidate.lane_id}</h4>
-    <p className="text-[12px] text-muted">{run ? `${run.state} | ${stat?.files ?? 0} files | +${stat?.insertions ?? 0}/-${stat?.deletions ?? 0}` : "Starting"}</p>
+    <p className="text-[12px] text-muted">{run ? `${RUN_STATE_LABEL[run.state] ?? run.state} | ${stat?.files ?? 0} files | +${stat?.insertions ?? 0}/-${stat?.deletions ?? 0}` : "Starting"}</p>
     <p className="text-[12px]">Verification: {run?.verification ? (run.verification.ok ? "passed" : "failed") : "not reported"}{run?.verification?.detail ? `, ${run.verification.detail}` : ""}</p>
     {tail && <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap break-all text-[11px] text-muted">{tail}</pre>}
     {run?.worktree && <button type="button" className="mt-2 min-h-8 text-[12px] text-accent hover:underline" onClick={() => void navigate({ to: "/c/$channelId", params: { channelId }, search: { run: run.id, view: "diff" } })}>View {label} diff</button>}
   </section>
+}
+
+const RUN_STATE_LABEL: Record<string, string> = {
+  queued: "Queued",
+  running: "Running",
+  verifying: "Checking",
+  waiting_approval: "Ready for review",
+  done: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
 }
 
 export function CompareCard({ group }: { group: CompareGroup }) {
@@ -41,7 +51,7 @@ export function CompareCard({ group }: { group: CompareGroup }) {
       setBusy(false)
     }
   }
-  return <div className="mt-3 rounded-lg border border-line bg-surface p-3" aria-label="Compare candidates">
+  return <div className="mt-3 rounded-xl border border-line bg-surface p-3" aria-label="Compare candidates">
     <h3 className="mb-2 text-[13px] font-semibold">Compare two candidates</h3>
     <div className="grid gap-2 sm:grid-cols-2"><Candidate candidate={a} label="A" channelId={group.channel_id} /><Candidate candidate={b} label="B" channelId={group.channel_id} /></div>
     {group.decision ? <p className="mt-2 text-[12px]">Decision: {group.decision.replaceAll("_", " ")}{group.winner_lane ? ` (${group.winner_lane})` : ""}</p> : <div className="mt-2 flex flex-wrap gap-2">

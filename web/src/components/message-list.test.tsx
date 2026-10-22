@@ -6,6 +6,7 @@ import { api } from "../api/client"
 import { qk } from "../state/keys"
 import type { CompareGroup, Member, Message, NoticeItem } from "../types"
 import type { PendingMessage } from "../state/queries"
+import type { ChatFilter } from "./chat/filters"
 import { comparePollInterval, MessageList } from "./message-list"
 
 // jsdom has no layout, so the virtualizer would render no rows.
@@ -50,7 +51,7 @@ const reviewer: Member = {
 function renderList(
   messages: Message[] = [],
   replies: Message[] = [],
-  extra: { pinned?: string[]; focusId?: string; onOpenThread?: (message: Message) => void; notices?: NoticeItem[] } = {},
+  extra: { pinned?: string[]; focusId?: string; onOpenThread?: (message: Message) => void; onSuggestion?: (text: string) => void; notices?: NoticeItem[]; filter?: ChatFilter } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -69,7 +70,7 @@ function renderList(
   for (const root of messages.filter((item) => item.options)) {
     client.setQueryData(qk.thread(root.id), { root, replies })
   }
-  client.setQueryData(qk.channels, [])
+  client.setQueryData(qk.channels, [{ id: "c1", name: "general", kind: "team", visibility: "public", member_ids: [ada.id, coder.id, reviewer.id], unread: 0 }])
   client.setQueryData(qk.members, [ada, coder, reviewer])
   client.setQueryData(qk.runs, [])
   client.setQueryData(qk.me, ada)
@@ -82,6 +83,8 @@ function renderList(
         onRetry={() => undefined}
         {...(extra.focusId ? { focusId: extra.focusId } : {})}
         {...(extra.onOpenThread ? { onOpenThread: extra.onOpenThread } : {})}
+        {...(extra.onSuggestion ? { onSuggestion: extra.onSuggestion } : {})}
+        {...(extra.filter ? { filter: extra.filter } : {})}
       />
     </QueryClientProvider>,
   )
@@ -103,6 +106,19 @@ describe("MessageList", () => {
   it("shows an empty channel", () => {
     renderList()
     expect(screen.getByText("No messages yet.")).toBeInTheDocument()
+  })
+
+  it("offers starter messages for the agents in an empty channel", async () => {
+    const onSuggestion = vi.fn()
+    renderList([], [], { onSuggestion })
+    await userEvent.click(screen.getByRole("button", { name: "@coder What should we work on first?" }))
+    expect(onSuggestion).toHaveBeenCalledWith("@coder What should we work on first?")
+  })
+
+  it("distinguishes an empty filter from an empty channel", () => {
+    renderList([message("plain", ada, "2026-10-18T10:00:00Z", "hello")], [], { filter: "files" })
+    expect(screen.getByText("No messages match this filter.")).toBeInTheDocument()
+    expect(screen.queryByText("No messages yet.")).not.toBeInTheDocument()
   })
 
   it("groups consecutive messages from one author within five minutes", () => {
@@ -203,6 +219,14 @@ describe("MessageList", () => {
     expect(unpin).toHaveBeenCalledWith(second.id)
   })
 
+  it("copies message text from the action toolbar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    renderList([message("copy", ada, "2026-10-18T10:00:00Z", "Copy this")], [], { onOpenThread: () => undefined })
+    await userEvent.click(screen.getByRole("button", { name: "Copy message" }))
+    expect(writeText).toHaveBeenCalledWith("Copy this")
+  })
+
   it("folds a long agent answer and shows a human message whole", async () => {
     const user = userEvent.setup()
     const body = Array.from({ length: 30 }, (_, i) => `step ${i + 1}`).join("\n")
@@ -216,12 +240,12 @@ describe("MessageList", () => {
     expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument()
   })
 
-  it("puts an accent rail on a message that mentions me", () => {
+  it("tints a message that mentions me", () => {
     const ask = { ...message("01CRZ3NDEKTSV4RRFFQ69G5CC1", coder, "2026-10-18T10:00:00.000Z", "@ada ready?"), mentions: [ada.id] }
     const plain = message("01CRZ3NDEKTSV4RRFFQ69G5CC2", coder, "2026-10-18T11:00:00.000Z", "done")
     renderList([ask, plain])
-    expect(document.getElementById(`msg-${ask.id}`)).toHaveClass("border-accent")
-    expect(document.getElementById(`msg-${plain.id}`)).not.toHaveClass("border-accent")
+    expect(document.getElementById(`msg-${ask.id}`)).toHaveClass("bg-accent-soft")
+    expect(document.getElementById(`msg-${plain.id}`)).not.toHaveClass("bg-accent-soft")
   })
 
   it("explains a notice on request with the rule that fired", async () => {
@@ -269,12 +293,12 @@ describe("MessageList", () => {
     transcript.scrollTop = 100
     fireEvent.wheel(transcript)
     fireEvent.scroll(transcript)
-    expect(screen.getByRole("button", { name: "Latest" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toBeInTheDocument()
     act(() => qc.setQueryData<PendingMessage[]>(qk.pending("c1"), [
       { key: "new", body: "sent", createdAt: "2026-10-18T10:01:00Z" },
     ]))
     await waitFor(() => expect(transcript.scrollTop).toBe(500))
-    expect(screen.queryByRole("button", { name: "Latest" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Jump to latest/ })).not.toBeInTheDocument()
   })
 
   it("jumps on a posted own message even if no pending row was rendered", async () => {
@@ -290,6 +314,23 @@ describe("MessageList", () => {
     fireEvent.scroll(transcript)
     act(() => qc.setQueryData(qk.messages("c1"), [first, message("second", ada, "2026-10-18T10:01:00Z", "sent")]))
     await waitFor(() => expect(transcript.scrollTop).toBe(500))
+  })
+
+  it("counts new incoming messages while scrolled up and clears the count on jump", async () => {
+    const first = message("first", ada, "2026-10-18T10:00:00Z", "first")
+    const qc = renderList([first])
+    const transcript = screen.getByTestId("transcript")
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 500 },
+      clientHeight: { configurable: true, value: 100 },
+    })
+    transcript.scrollTop = 100
+    fireEvent.wheel(transcript)
+    fireEvent.scroll(transcript)
+    act(() => qc.setQueryData(qk.messages("c1"), [first, message("incoming", coder, "2026-10-18T10:01:00Z", "hello")]))
+    const jump = await screen.findByRole("button", { name: "Jump to latest (1 new)" })
+    await userEvent.click(jump)
+    expect(screen.queryByRole("button", { name: /Jump to latest/ })).not.toBeInTheDocument()
   })
 
   it("pins growing rows at the bottom but leaves a scrolled-up reader alone", () => {

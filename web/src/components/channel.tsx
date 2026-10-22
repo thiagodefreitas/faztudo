@@ -26,6 +26,7 @@ import { PinsDialog } from "./pins-dialog"
 import { OPEN_SEARCH_EVENT } from "./search-dialog"
 import type { ChatFilter } from "./chat/filters"
 import { FilterChips } from "./chat/filter-chips"
+import { HumanAvatar } from "./chat/human-avatar"
 import { ThreadsPanel } from "./chat/threads-panel"
 
 const TaskBuilder = lazy(() => import("./tasks/task-builder").then((module) => ({ default: module.TaskBuilder })))
@@ -34,7 +35,7 @@ const channelApi = getRouteApi("/c/$channelId")
 
 const MENU_ITEM = "flex min-h-10 cursor-default items-center rounded px-2 text-[13px] text-ink outline-none data-[highlighted]:bg-accent-soft"
 
-const HEADER_ICON = "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink aria-pressed:text-accent"
+const HEADER_ICON = "inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent aria-pressed:text-accent"
 
 // The header shows the folder name only, so screenshots do not leak home paths.
 export function repoName(path: string): string {
@@ -61,6 +62,7 @@ export function ChannelPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [pinsOpen, setPinsOpen] = useState(false)
+  const [suggestion, setSuggestion] = useState<{ id: number; text: string; channelId: string } | undefined>()
   // The task builder is loaded when it is first opened; a title opens it filled in.
   const [taskTitle, setTaskTitle] = useState<string | null>(null)
   const notify = useNotifyPrefs()
@@ -73,6 +75,15 @@ export function ChannelPage() {
   const unreadAtOpen = seen?.id === channelId ? seen.unread : 0
   const [filterState, setFilterState] = useState<{ id: string; value: ChatFilter }>({ id: channelId, value: "all" })
   const filter = filterState.id === channelId ? filterState.value : "all"
+
+  useEffect(() => {
+    function composeMention(event: Event) {
+      const text = (event as CustomEvent<string>).detail
+      setSuggestion((current) => ({ id: (current?.id ?? 0) + 1, text, channelId }))
+    }
+    window.addEventListener("faztudo:compose-mention", composeMention)
+    return () => window.removeEventListener("faztudo:compose-mention", composeMention)
+  }, [channelId])
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -174,7 +185,7 @@ export function ChannelPage() {
           </Link>
           <div className="flex min-w-0 flex-1 items-center gap-2.5 max-md:h-10 max-md:rounded-full max-md:border max-md:border-line max-md:bg-surface max-md:px-3 max-md:shadow-sm">
             {direct && peer ? (
-              <AgentAvatar member={peer} size={28} decorative />
+              peer.kind === "human" ? <HumanAvatar member={peer} /> : <AgentAvatar member={peer} size={28} decorative />
             ) : (
               <button
                 type="button"
@@ -212,6 +223,7 @@ export function ChannelPage() {
               onClick={() => setMembersOpen(true)}
               className="hidden min-h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-muted hover:bg-sidebar hover:text-ink sm:flex"
               title="Members"
+            aria-label={`Members: ${membersLabel}`}
             >
               <span className="font-mono tabular-nums">{others}</span>
               <span>{others === 1 ? "member" : "members"}</span>
@@ -276,6 +288,7 @@ export function ChannelPage() {
           <Menu.Root>
             <Menu.Trigger
               aria-label="More"
+              title="More channel actions"
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-sm md:hidden"
             >
               <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true" fill="currentColor">
@@ -340,6 +353,7 @@ export function ChannelPage() {
           filter={filter}
           unread={unreadAtOpen}
           onMarkRead={markRead}
+          onSuggestion={(text) => setSuggestion((current) => ({ id: (current?.id ?? 0) + 1, text, channelId }))}
         />
         <Composer
           key={`composer-${channelId}`}
@@ -348,6 +362,7 @@ export function ChannelPage() {
           attach
           draftKey={channelId}
           autoFocus
+          suggestion={suggestion?.channelId === channelId ? suggestion : undefined}
           {...(direct ? { placeholder: `Message ${title}` } : {})}
           onSend={(body, attachments) => send(body, attachments)}
           onTask={(taskTitle) => setTaskTitle(taskTitle)}

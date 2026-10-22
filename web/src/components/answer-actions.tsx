@@ -89,9 +89,10 @@ export function AnswerActions({
       <Menu.Root>
         <Menu.Trigger
           aria-label="More actions"
-          className="min-h-8 rounded px-1 text-muted hover:text-ink hover:underline md:min-h-6 md:opacity-0 md:transition-opacity md:duration-150 md:group-hover/msg:opacity-100 md:focus-visible:opacity-100 md:data-[state=open]:opacity-100"
+          title="More answer actions"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         >
-          More
+          <svg viewBox="0 0 20 20" className="h-4 w-4" fill="currentColor" aria-hidden="true"><circle cx="4" cy="10" r="1.5" /><circle cx="10" cy="10" r="1.5" /><circle cx="16" cy="10" r="1.5" /></svg>
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Content align="start" sideOffset={4} className="z-50 min-w-52 rounded-md border border-line bg-surface p-1 shadow-lg">

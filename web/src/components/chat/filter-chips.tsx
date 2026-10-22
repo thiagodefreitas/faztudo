@@ -3,7 +3,7 @@ import { FILTERS, type ChatFilter } from "./filters"
 
 export function FilterChips({ value, onChange }: { value: ChatFilter; onChange: (filter: ChatFilter) => void }) {
   return (
-    <div role="group" aria-label="Filter messages" className="flex gap-1.5 overflow-x-auto px-3 pb-2 md:border-b md:border-line md:pt-1.5">
+    <div role="group" aria-label="Filter messages" className="flex gap-1 overflow-x-auto border-b border-line px-3 py-1.5 md:px-4">
       {FILTERS.map((filter) => (
         <button
           key={filter.id}
@@ -11,8 +11,8 @@ export function FilterChips({ value, onChange }: { value: ChatFilter; onChange: 
           aria-pressed={value === filter.id}
           onClick={() => onChange(filter.id)}
           className={cx(
-            "min-h-10 shrink-0 rounded-full border px-3 text-[12px] transition-colors duration-150 md:min-h-8",
-            value === filter.id ? "border-accent bg-accent-soft font-medium text-accent" : "border-line text-muted hover:bg-sidebar hover:text-ink",
+            "min-h-9 shrink-0 rounded-md px-2.5 text-[12px] transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent md:min-h-7",
+            value === filter.id ? "bg-accent-soft font-medium text-accent" : "text-muted hover:bg-sidebar hover:text-ink",
           )}
         >
           {filter.label}

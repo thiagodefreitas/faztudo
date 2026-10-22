@@ -58,6 +58,7 @@ export function Composer({
   attach = false,
   draftKey,
   autoFocus = false,
+  suggestion,
   onSend,
   onTask,
 }: {
@@ -74,12 +75,14 @@ export function Composer({
   draftKey?: string
   /** Focus the box on mount, on devices with a pointer only. */
   autoFocus?: boolean
+  suggestion?: { id: number; text: string }
   onSend: (body: string, attachments?: Attachment[]) => void
   /** Opens the task builder, with a title. Adds the Task button and the /task command. */
   onTask?: (title: string) => void
 }) {
   const listId = useId()
   const [text, setText] = useState(() => readDraft(draftKey))
+  const [seenSuggestion, setSeenSuggestion] = useState(suggestion?.id)
   const [uploads, setUploads] = useState<Upload[]>([])
   const fileInput = useRef<HTMLInputElement>(null)
   const counter = useRef(0)
@@ -97,6 +100,14 @@ export function Composer({
   const menuOpen = Boolean(query && matches.length > 0 && suppressed !== queryKey)
   const selected = matches[Math.min(active, Math.max(0, matches.length - 1))]
   const canSend = !uploading && (text.trim().length > 0 || ready.length > 0)
+  const taskMode = !!onTask && /^\/task(?:\s|$)/i.test(text.trimStart())
+
+  if (suggestion && suggestion.id !== seenSuggestion) {
+    const nextText = text.trim() ? `${text}${/\s$/.test(text) ? "" : " "}${suggestion.text}` : suggestion.text
+    setSeenSuggestion(suggestion.id)
+    setText(nextText)
+    setCursor(nextText.length)
+  }
 
   useLayoutEffect(() => {
     const el = boxRef.current
@@ -106,12 +117,12 @@ export function Composer({
     el.setSelectionRange(next, next)
   }, [text])
 
-  // Grow with the text up to about eight lines, then scroll.
+  // Grow with the text up to about ten lines, then scroll.
   useLayoutEffect(() => {
     const el = boxRef.current
     if (!el) return
     el.style.height = "auto"
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
   }, [text])
 
   useEffect(() => {
@@ -140,6 +151,14 @@ export function Composer({
     el.setSelectionRange(end, end)
     setCursor(end)
   }, [autoFocus])
+
+  useEffect(() => {
+    if (suggestion) {
+      boxRef.current?.focus()
+      const end = boxRef.current?.value.length ?? 0
+      boxRef.current?.setSelectionRange(end, end)
+    }
+  }, [suggestion])
 
   // The arrow keys can move the choice past the visible part of the list.
   useEffect(() => {
@@ -305,7 +324,8 @@ export function Composer({
             ))}
           </ul>
         )}
-        <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface p-1.5 pl-3 transition-colors duration-150 focus-within:border-accent max-md:rounded-3xl max-md:pl-1.5 max-md:shadow-lg md:bg-canvas">
+        {taskMode && <span className="mb-1 ml-2 inline-flex rounded-md bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">New task</span>}
+        <div className={`flex items-end gap-1 rounded-2xl border bg-surface p-1.5 pl-2 transition-colors duration-150 focus-within:border-accent max-md:rounded-3xl max-md:shadow-sm md:bg-canvas ${taskMode ? "border-accent" : "border-line"}`}>
         {attach && (
           <>
             <input
@@ -324,7 +344,7 @@ export function Composer({
               aria-label="Attach a file"
               title="Attach a file"
               onClick={() => fileInput.current?.click()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink md:h-8 md:w-8"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent md:h-8 md:w-8"
             >
               <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M16 9.5 9.6 15.9a3.7 3.7 0 0 1-5.2-5.2l7-7a2.5 2.5 0 0 1 3.5 3.5l-7 7a1.2 1.2 0 0 1-1.7-1.7l6.3-6.3" />
@@ -338,9 +358,9 @@ export function Composer({
             aria-label="New task"
             title="New task (or type /task)"
             onClick={() => onTask("")}
-            className="flex h-10 shrink-0 items-center justify-center rounded-full px-2.5 text-[12px] font-medium text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink md:h-8"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent md:h-8 md:w-8"
           >
-            Task
+            <svg viewBox="0 0 20 20" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="2" /><path d="M7 10h6M10 7v6" /></svg>
           </button>
         )}
         <label className="block min-w-0 flex-1">
@@ -355,7 +375,7 @@ export function Composer({
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? listId : undefined}
             aria-activedescendant={menuOpen && selected ? `${listId}-${selected.id}` : undefined}
-            className="block max-h-[180px] min-h-10 w-full resize-none bg-transparent py-2 text-[16px] leading-6 text-ink outline-none placeholder:text-faint focus-visible:outline-none md:min-h-8 md:py-1.5 md:text-[14px] md:leading-5"
+            className="block max-h-[240px] min-h-10 w-full resize-none bg-transparent py-2 text-[16px] leading-6 text-ink outline-none placeholder:text-faint focus-visible:outline-none md:min-h-8 md:py-1.5 md:text-[14px] md:leading-5"
             onChange={(event) => {
               setText(event.target.value)
               sync(event.target)
@@ -372,8 +392,9 @@ export function Composer({
         <button
           type="submit"
           aria-label="Send"
+          title={taskMode ? "Create task" : "Send message"}
           disabled={!canSend}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:opacity-40 disabled:hover:opacity-40 md:h-8 md:w-auto md:rounded-lg md:px-3 md:text-[13px]"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-sidebar disabled:text-faint disabled:opacity-100 md:h-8 md:w-auto md:px-3 md:text-[13px]"
         >
           <svg viewBox="0 0 20 20" className="h-4 w-4 md:hidden" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 16V4M5 9l5-5 5 5" />
@@ -384,7 +405,7 @@ export function Composer({
         </button>
         </div>
       </div>
-      <p className="mt-1 hidden px-3 text-[11px] text-faint md:block">Enter to send, Shift+Enter for a new line</p>
+      <p className="mt-1 truncate px-2 text-[11px] text-faint">{taskMode ? "Enter to open the task builder" : text.trim() ? "Enter to send, Shift+Enter for a new line" : "Type @ to mention someone or /task to create a task"}</p>
     </form>
   )
 }

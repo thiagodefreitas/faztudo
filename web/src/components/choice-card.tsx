@@ -26,7 +26,7 @@ export function ChoiceCard({
         event.preventDefault()
         onChoose(index)
       }}
-      className="fz-rise mt-2 flex max-w-md flex-col gap-1.5 rounded-lg border border-l-2 border-line border-l-accent bg-canvas p-2 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="fz-rise mt-2 flex max-w-md flex-col gap-1 rounded-xl border border-line bg-surface p-1.5 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       {options.map((option, index) => {
         const chosen = answered === index
@@ -38,9 +38,9 @@ export function ChoiceCard({
             aria-pressed={answered !== null ? chosen : undefined}
             onClick={() => onChoose(index)}
             className={cx(
-              "flex min-h-10 items-center gap-2 rounded-md border px-2 text-left text-[13px] transition-colors duration-150 md:min-h-8",
-              chosen ? "border-accent bg-accent-soft text-ink" : "border-line bg-surface text-ink",
-              answered === null ? "hover:border-accent" : !chosen && "opacity-50",
+              "flex min-h-10 items-center gap-2 rounded-lg border px-2.5 text-left text-[13px] transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent md:min-h-9",
+              chosen ? "border-accent bg-accent-soft text-ink" : "border-transparent bg-canvas text-ink",
+              answered === null ? "hover:border-line hover:bg-sidebar" : !chosen && "opacity-60",
             )}
           >
             <kbd className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded bg-line font-mono text-[11px] text-muted">

@@ -60,6 +60,7 @@ async function mount(channel: Channel = dev) {
   client.setQueryData(qk.org, org)
   client.setQueryData(qk.channels, [channel])
   client.setQueryData(qk.runs, [running])
+  client.setQueryData(qk.messages("c1"), [{ id: "m", channel_id: "c1", author_id: ada.id, body: "Fix the login flow", mentions: [coder.id], created_at: new Date().toISOString() }])
   client.setQueryData(qk.approvals, [])
   client.setQueryData(qk.lanes, [{ id: "codex/default", cli: "codex", cost_class: "standard", capacity: 1, running: 1, health: "available", windows: [], runs_today: 1 }])
   const rootRoute = createRootRoute({ component: () => <MembersPanel channel={channel} open onOpenChange={() => undefined} /> })
@@ -86,11 +87,23 @@ describe("MembersPanel", () => {
     expect(rows[0]).toHaveTextContent("Default")
     expect(rows[0]).toHaveTextContent("working")
     expect(rows[0]).toHaveTextContent("codex/default")
+    expect(rows[0]).toHaveTextContent("Fix the login flow")
     expect(rows[0]).toHaveAttribute("data-assigned", "true")
     expect(rows[1]).toHaveTextContent("Not assigned")
     expect(rows[2]).toHaveTextContent("Director")
     expect(rows[2]).toHaveTextContent("(you)")
     expect(screen.getByRole("link", { name: "Faztudo" })).toHaveAttribute("href", "/p/faztudo")
+  })
+
+  it("keeps a working agent above an idle default and starts a mention", async () => {
+    const onMention = vi.fn()
+    window.addEventListener("faztudo:compose-mention", onMention, { once: true })
+    await mount({ ...dev, default_agent_id: reviewer.id })
+    const rows = within(screen.getByRole("list", { name: "Members" })).getAllByRole("listitem")
+    expect(rows[0]).toHaveAttribute("data-member", coder.id)
+    await userEvent.click(within(rows[0]!).getByRole("button", { name: "Message" }))
+    expect(onMention).toHaveBeenCalled()
+    expect((onMention.mock.calls[0]?.[0] as CustomEvent<string>).detail).toBe("@coder ")
   })
 
   it("assigns an agent to the project, changes the default agent and removes a member", async () => {
