@@ -33,7 +33,7 @@ export function workColumn(run: Run): WorkColumn {
 }
 
 // The time a ULID run id was made, or undefined when it is not one.
-function ulidTime(id: string): number | undefined {
+export function ulidTime(id: string): number | undefined {
   if (id.length !== 26) return undefined
   let ms = 0
   for (const char of id.slice(0, 10)) {

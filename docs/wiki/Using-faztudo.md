@@ -3,6 +3,17 @@
 A short tour of the web app. For setup see the
 [getting started guide](https://thiagodefreitas.github.io/faztudo/getting-started/).
 
+## Today
+
+The top of the home page is a short brief for the start of the day. **Needs
+you** lists approvals and agent questions waiting for an answer, oldest
+first. **Finished since you were last here** groups the runs that ended since
+your last visit by channel, failures first with their reason. **Running now**
+shows active runs with their time, and **Lanes** lists lanes that are
+exhausted or in conserve, with their reset time. Mark as seen moves the
+"last here" point to now; the brief folds away and remembers that in this
+browser.
+
 ## Channels
 
 A channel is a conversation. You can make public or private channels and

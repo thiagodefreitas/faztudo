@@ -13,6 +13,7 @@ import { AgentAvatar } from "./agent-avatar"
 import { CreateChannelDialog } from "./channel-dialogs"
 import { OPEN_PALETTE_EVENT } from "./palette"
 import { TeamIcon } from "./team-icon"
+import { TodayBrief } from "./today-brief"
 
 const ICON_BUTTON =
   "inline-flex h-10 w-10 items-center justify-center rounded-full text-muted transition-colors duration-150 hover:bg-sidebar hover:text-ink"
@@ -136,6 +137,7 @@ export function InboxPage() {
       </section>
       <div className="relative min-h-0 flex-1">
         <div ref={scroller} className="h-full overflow-y-auto border-t border-line" data-testid="inbox-list">
+          <TodayBrief />
           {channels.isPending && <p className="px-4 py-6 text-[13px] text-muted">Loading chats</p>}
           {!channels.isPending && items.length === 0 && <p className="px-4 py-6 text-[13px] text-muted">No channels yet.</p>}
           <ul>

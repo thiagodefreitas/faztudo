@@ -165,6 +165,8 @@ export interface DiffStat {
 
 export interface Run {
   id: ID
+  /** For a decided write run: merge, keep or discard. */
+  approval_option?: string
   channel_id: ID
   trigger_message_id: ID
   /** Thread of the trigger message; absent for a root or for a run recorded before it was kept. */
