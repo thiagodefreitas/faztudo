@@ -7,13 +7,8 @@ import {
   redirect,
 } from "@tanstack/react-router";
 import { ApiError, api } from "./api/client";
-import { DevicesPage, LoginPage, PairPage } from "./components/auth";
-import { ChannelPage } from "./components/channel";
-import { InboxPage } from "./components/inbox";
-import { LanesPage } from "./components/lanes";
-import { OrganizationPage } from "./components/organization";
-import { RoutinesPage } from "./components/routines/routines";
 import { Shell } from "./components/shell";
+import { RouteError, RoutePending } from "./route-status";
 import { qk } from "./state/keys";
 import { queryClient } from "./state/query-client";
 import { sortMessages } from "./state/reduce";
@@ -59,13 +54,13 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
-  component: () => <LoginPage />,
+  component: lazyRouteComponent(() => import("./components/auth"), "LoginPage"),
 });
 
 const pairRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/pair",
-  component: () => <PairPage />,
+  component: lazyRouteComponent(() => import("./components/auth"), "PairPage"),
 });
 
 const devicesRoute = createRoute({
@@ -84,7 +79,7 @@ const devicesRoute = createRoute({
         }),
       ]),
     ),
-  component: DevicesPage,
+  component: lazyRouteComponent(() => import("./components/auth"), "DevicesPage"),
 });
 
 const indexRoute = createRoute({
@@ -107,7 +102,7 @@ const indexRoute = createRoute({
         }),
       ]),
     ),
-  component: InboxPage,
+  component: lazyRouteComponent(() => import("./components/inbox"), "InboxPage"),
 });
 
 const channelRoute = createRoute({
@@ -148,7 +143,7 @@ const channelRoute = createRoute({
         }),
       ]),
     ),
-  component: ChannelPage,
+  component: lazyRouteComponent(() => import("./components/channel"), "ChannelPage"),
 });
 
 const lanesRoute = createRoute({
@@ -163,7 +158,7 @@ const lanesRoute = createRoute({
         queryFn: () => api.lanes(),
       }),
     ),
-  component: LanesPage,
+  component: lazyRouteComponent(() => import("./components/lanes"), "LanesPage"),
 });
 
 const officeRoute = createRoute({
@@ -461,7 +456,7 @@ const organizationRoute = createRoute({
         }),
       ]),
     ),
-  component: OrganizationPage,
+  component: lazyRouteComponent(() => import("./components/organization"), "OrganizationPage"),
 });
 
 const routinesRoute = createRoute({
@@ -484,7 +479,7 @@ const routinesRoute = createRoute({
         }),
       ]),
     ),
-  component: RoutinesPage,
+  component: lazyRouteComponent(() => import("./components/routines/routines"), "RoutinesPage"),
 });
 
 const routeTree = rootRoute.addChildren([
@@ -510,6 +505,12 @@ const routeTree = rootRoute.addChildren([
 export const router = createRouter({
   routeTree,
   context: { queryClient },
+  defaultPreload: "intent",
+  defaultPreloadDelay: 50,
+  defaultPendingMs: 150,
+  defaultPendingMinMs: 0,
+  defaultPendingComponent: RoutePending,
+  defaultErrorComponent: RouteError,
 });
 
 declare module "@tanstack/react-router" {

@@ -1,10 +1,31 @@
-/* Cache only the app shell and known static assets. API, MCP, and auth exchange
- * requests always go directly to the server with the browser's credentials. */
+/* Keep each app shell with the assets from its own build. API and auth requests
+ * always go to the server with the browser's credentials. */
 const version = new URL(self.location.href).searchParams.get("v") || "dev"
 const cacheName = `faztudo-shell-${version}`
 
+try {
+  importScripts(`/precache-manifest.js?v=${encodeURIComponent(version)}`)
+} catch {
+  // The manifest is only emitted for production builds.
+}
+
 self.addEventListener("install", (event) => {
-  if (!self.registration.active) event.waitUntil(self.skipWaiting())
+  event.waitUntil((async () => {
+    const manifest = self.__FAZTUDO_PRECACHE__
+    if (version !== "dev" && manifest?.version !== version) {
+      throw new Error("Service worker and asset manifest builds differ")
+    }
+    if (manifest?.version === version) {
+      const page = await fetch("/", { cache: "no-store" })
+      if (!page.ok || !(await page.clone().text()).includes(`name="faztudo-build-id" content="${version}"`)) {
+        throw new Error("App shell and service worker builds differ")
+      }
+      const cache = await caches.open(cacheName)
+      await cache.put("/", page)
+      await cache.addAll(manifest.paths)
+    }
+    if (!self.registration.active) await self.skipWaiting()
+  })())
 })
 
 self.addEventListener("activate", (event) => {
@@ -23,12 +44,13 @@ function isExcluded(path) {
   return path === "/api" || path.startsWith("/api/") ||
     path === "/mcp" || path.startsWith("/mcp/") ||
     path === "/auth/local" || path === "/ca.crt" ||
-    path === "/sw.js"
+    path === "/sw.js" || path === "/precache-manifest.js"
 }
 
 function isStatic(path) {
-  return path.startsWith("/assets/") || path.startsWith("/icons/") ||
-    path === "/favicon.svg" || path === "/manifest.webmanifest"
+  return path.startsWith("/assets/") || path.startsWith("/fonts/") ||
+    path.startsWith("/icons/") || path === "/favicon.svg" ||
+    path === "/manifest.webmanifest"
 }
 
 self.addEventListener("fetch", (event) => {
@@ -38,28 +60,14 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith((async () => {
-      let response
       try {
-        response = await fetch(request)
+        // A live navigation always gets the current index after a deploy.
+        return await fetch(request)
       } catch (error) {
-        try {
-          const cache = await caches.open(cacheName)
-          const shell = await cache.match("/")
-          if (shell) return shell
-        } catch {
-          // There is no offline shell if storage is unavailable.
-        }
+        const shell = await (await caches.open(cacheName)).match("/")
+        if (shell) return shell
         throw error
       }
-      if (response.ok && response.headers.get("content-type")?.includes("text/html")) {
-        try {
-          const cache = await caches.open(cacheName)
-          await cache.put("/", response.clone())
-        } catch {
-          // A full or disabled cache must not break an online navigation.
-        }
-      }
-      return response
     })())
     return
   }
@@ -79,7 +87,7 @@ self.addEventListener("fetch", (event) => {
       try {
         await cache.put(request, response.clone())
       } catch {
-        // Static files remain available from the network.
+        // Full or disabled storage must not break online use.
       }
     }
     return response
