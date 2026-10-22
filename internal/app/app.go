@@ -991,7 +991,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 	if current.State != domain.RunQueued {
 		return context.Canceled
 	}
-	lane, skipped, err := a.Registry.WaitPick(runCtx, agent.Handle, override, func(busy []lanes.Skipped) {
+	lane, skipped, err := a.Registry.WaitPick(runCtx, agent.Handle, override, a.laneUnfit(mode), func(busy []lanes.Skipped) {
 		signalQueuedReady(ctx)
 		ids := make([]string, 0, len(busy))
 		for _, b := range busy {
@@ -1158,7 +1158,7 @@ func (a *App) attempt(ctx context.Context, m domain.Message, agent domain.Member
 			a.notice(ctx, channel.ID, "warn", fmt.Sprintf("You chose lane %s for this message, so @%s was not moved to another lane.", lane.ID, agent.Handle))
 		} else if retryOf == "" {
 			// Retry once, if another lane in the chain can take the work.
-			if _, left, perr := a.Registry.Pick(agent.Handle, ""); perr == nil || lanes.Busy(left) {
+			if _, left, perr := a.Registry.PickFit(agent.Handle, "", a.laneUnfit(mode)); perr == nil || lanes.Busy(left) {
 				// The retry answers for both runs; this one must not replay
 				// its failure after a restart.
 				if err := a.Runner.MarkFinalized(run.ID); err != nil {
@@ -1763,6 +1763,25 @@ func (a *App) summaryLane(ctx context.Context) (domain.Lane, error) {
 		}
 	}
 	return domain.Lane{}, errNoSummaryLane
+}
+
+// laneUnfit is the lane filter for a run in mode: a read run passes over
+// lanes whose CLI cannot run read-only, so a read persona with agy or kimi in
+// its chain falls through to a lane that can, or waits for one.
+func (a *App) laneUnfit(mode domain.RunMode) func(domain.Lane) string {
+	if mode != domain.RunRead {
+		return nil
+	}
+	return func(l domain.Lane) string {
+		adapter := a.Adapters[l.CLI]
+		if adapter == nil {
+			return "no adapter for " + l.CLI
+		}
+		if !readOnlyCapable(adapter) {
+			return l.CLI + " has no read-only mode"
+		}
+		return ""
+	}
 }
 
 // readOnlyCapable reports whether the adapter can build a read-only command.

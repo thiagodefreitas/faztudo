@@ -285,7 +285,11 @@ func (e *routineEngine) plan(ctx context.Context, r domain.Routine) (routinePlan
 	if allowed, _ := org.Gate(projects, departments, p.channel.Name, []domain.Member{agent}); len(allowed) == 0 {
 		return p, "@" + agent.Handle + " is not assigned to the project that owns #" + p.channel.Name
 	}
-	lane, left, err := a.Registry.Pick(agent.Handle, "")
+	mode := domain.RunRead
+	if agent.Agent != nil && agent.Agent.Mode != "" {
+		mode = agent.Agent.Mode
+	}
+	lane, left, err := a.Registry.PickFit(agent.Handle, "", a.laneUnfit(mode))
 	switch {
 	case err != nil && !lanes.Busy(left):
 		return p, "no lane is usable for @" + agent.Handle + " right now"

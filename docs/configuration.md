@@ -325,8 +325,10 @@ Both ship a switched-off daily debrief. They declare a `claude/default` and a
 `codex/default` lane; remove the ones you do not use.
 
 Supported `cli` values: `claude`, `codex`, `grok`, `kimi`, `agy`,
-`opencode`. Kimi and Antigravity have no read-only mode, so personas that
-use them must be `mode = "write"`. OpenCode's print mode produced no answer
+`opencode`. Kimi, Antigravity and OpenCode have no read-only mode. A read
+run passes over those lanes in its persona's chain, with a notice, and waits
+for a busy lane that can run read-only rather than failing; a read persona
+whose chain has no such lane cannot run. OpenCode's print mode produced no answer
 in testing (opencode 1.16.2); treat that lane as experimental.
 
 `conserve_at` is a per-lane percentage from 1 to 100. It defaults to 80.

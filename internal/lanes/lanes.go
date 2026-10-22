@@ -68,6 +68,13 @@ func New(lanes []LaneConfig, personas []PersonaConfig, app events.Appender) (*Re
 	return r, nil
 }
 func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error) {
+	return r.PickFit(persona, override, nil)
+}
+
+// PickFit is Pick with a filter: when unfit returns a reason for a lane, the
+// lane is skipped with that reason, as an exhausted one is. Read runs use it
+// to pass over CLIs that have no read-only mode.
+func (r *Registry) PickFit(persona, override string, unfit func(domain.Lane) string) (domain.Lane, []Skipped, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	p, ok := r.personas[persona]
@@ -98,7 +105,10 @@ func (r *Registry) Pick(persona, override string) (domain.Lane, []Skipped, error
 		l := r.lanes[id]
 		r.expireLocked(id, l, time.Now())
 		reason := ""
-		if l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable {
+		if unfit != nil {
+			reason = unfit(*l)
+		}
+		if reason == "" && (l.Health == domain.LaneExhausted || l.Health == domain.LaneUnavailable) {
 			reason = l.HealthReason
 			if reason == "" {
 				reason = string(l.Health)
@@ -136,13 +146,13 @@ var ErrBusy = errors.New("every usable lane is busy")
 // calls onWait once, the first time it has to wait, so the caller can tell
 // the channel the request is queued. Exhausted or unavailable lanes still
 // fail at once.
-func (r *Registry) WaitPick(ctx context.Context, persona, override string, onWait func([]Skipped)) (domain.Lane, []Skipped, error) {
+func (r *Registry) WaitPick(ctx context.Context, persona, override string, unfit func(domain.Lane) string, onWait func([]Skipped)) (domain.Lane, []Skipped, error) {
 	waited := false
 	for {
 		r.mu.Lock()
 		changed := r.changed
 		r.mu.Unlock()
-		lane, skipped, err := r.Pick(persona, override)
+		lane, skipped, err := r.PickFit(persona, override, unfit)
 		if err == nil || !onlyBusy(skipped) {
 			return lane, skipped, err
 		}

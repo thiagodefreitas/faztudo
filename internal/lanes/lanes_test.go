@@ -74,7 +74,7 @@ func TestWaitPickQueuesWhileBusy(t *testing.T) {
 	notified := make(chan []Skipped, 1)
 	got := make(chan error, 1)
 	go func() {
-		lane, _, err := r.WaitPick(context.Background(), "coder", "", func(s []Skipped) { notified <- s })
+		lane, _, err := r.WaitPick(context.Background(), "coder", "", nil, func(s []Skipped) { notified <- s })
 		if err == nil && lane.ID != "a" {
 			err = fmt.Errorf("picked %s", lane.ID)
 		}
@@ -112,7 +112,7 @@ func TestWaitPickFailsFastWhenExhausted(t *testing.T) {
 	r.Restore(domain.Lane{ID: "a", CLI: "codex", Capacity: 1, Health: domain.LaneExhausted, HealthReason: "quota"})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if _, _, err := r.WaitPick(ctx, "coder", "", nil); err == nil || errors.Is(err, context.DeadlineExceeded) {
+	if _, _, err := r.WaitPick(ctx, "coder", "", nil, nil); err == nil || errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("want immediate failure, got %v", err)
 	}
 }
