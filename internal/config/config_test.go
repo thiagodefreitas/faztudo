@@ -57,7 +57,7 @@ func TestConserveAt(t *testing.T) {
 
 func TestSandboxConfig(t *testing.T) {
 	c := Defaults()
-	if c.Runs.Sandbox != "required" || c.Runs.SandboxMemoryMax != "auto" || c.Runs.SandboxTasksMax != 512 {
+	if c.Runs.Sandbox != "required" || c.Runs.SandboxMemoryMax != "auto" || c.Runs.SandboxTasksMax != 4096 {
 		t.Fatalf("sandbox defaults: %+v", c.Runs)
 	}
 	c.Runs.SandboxReadOnly = []string{"relative/toolchain"}
