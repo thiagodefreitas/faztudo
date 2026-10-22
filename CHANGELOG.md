@@ -6,6 +6,58 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A calmer, lighter interface. Inter is bundled (48 KB, SIL OFL). Softer
+  borders, shadows and focus rings, tabular numbers, thin scrollbars, and a
+  System, Light, Dark theme button that follows the system by default.
+- Lane strip: plain text with small usage bars; only exhausted, conserve and
+  unavailable lanes stand out, and lanes past six fold into +N.
+- Sidebar: agents show a one-word state (Working, Waiting, Out of quota) and
+  the busy ones come first; a long list folds idle agents but keeps five in
+  view. Needs you is always there, and on phones More carries its count.
+- Chat: agent turns sit on a soft tint, people get colored initials, message
+  actions moved to a hover toolbar, filters are a quiet row, and compare
+  cards sit side by side with plain states. The message box has consistent
+  icon buttons and gets a full row on phones.
+- Home: a greeting with the date; Today items carry an avatar, a status pill
+  and one action (Answer, Review, Open), and empty sections fold away.
+- Tasks board, Lanes, Organization, Devices, Projects, Needs you and
+  Routines share one page header. Lane cards read at a glance, with a list
+  view, and say what to do next after an error.
+- Chats list: a preview with its author, time, unread count, a live dot
+  while an agent works, and All, Unread, Agents, Channels filters.
+- Office: 2D desks are readable at the default zoom, with tinted team zones,
+  status rings, a filtering legend and a searchable Jump to. 3D shows one
+  label stack per desk, hides labels that would collide, fits the room on a
+  phone, and stops drawing while nothing moves.
+- Pages load on demand and the shell is precached per build: the first
+  script is about 13 percent smaller and highlighted code languages load
+  only when used.
+- Runs: the default sandbox_tasks_max is 4096. Threads count as tasks, and
+  512 made go vet or a Node toolchain fail to fork on many-core machines.
+
+### Added
+
+- Profiles: click an avatar in the sidebar, members panel, a message or the
+  Organization page, or use ?profile=handle, to see what an agent is doing,
+  its lane chain, today's runs and cost, lessons, routines and computer.
+- Command palette groups results, lists recent picks first and gains Today,
+  the work pages, New task and Profile entries; ? opens a keyboard shortcuts
+  sheet.
+- Typing / in the message box lists the commands; mentioning an agent that
+  is not in the channel warns and offers Add to channel.
+- New channel picks its agents and default agent; an empty inbox offers to
+  create the first channel.
+
+### Fixed
+
+- A component's outline-none no longer loses to the global focus rule.
+- A missing file under /assets/ returns 404 instead of the app page, and
+  the service worker never caches HTML as a script.
+- Approval actions come first on phones, in reading and tab order alike.
+- A merge with no test command says No checks ran.
+
 ## [0.1.8] - 2026-10-22
 
 ### Added
