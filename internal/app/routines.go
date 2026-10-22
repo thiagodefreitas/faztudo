@@ -40,6 +40,7 @@ type routineEngine struct {
 	next    map[string]time.Time // routine handle to its next scheduled time
 	running map[string]bool      // routines with a run in flight
 	fired   map[string]bool      // trigger messages already handled
+	polled  map[string]time.Time // repository to its last poll this process
 	order   []string             // the fired keys, oldest first
 	day     string               // local date that started counts
 	started int                  // runs routines started on that date
@@ -52,7 +53,7 @@ func newRoutineEngine(a *App) *routineEngine {
 			loc = l
 		}
 	}
-	e := &routineEngine{app: a, loc: loc, now: time.Now, next: map[string]time.Time{}, running: map[string]bool{}, fired: map[string]bool{}}
+	e := &routineEngine{app: a, loc: loc, now: time.Now, next: map[string]time.Time{}, running: map[string]bool{}, fired: map[string]bool{}, polled: map[string]time.Time{}}
 	e.execute = func(ctx context.Context, m domain.Message, agent domain.Member) error {
 		return a.execute(ctx, m, agent, "")
 	}
@@ -135,6 +136,7 @@ func (e *routineEngine) tick(ctx context.Context, now time.Time) {
 			_ = e.start(ctx, r)
 		}
 	}
+	e.pollGitHub(ctx, now, list)
 }
 
 // onEvent starts the routines that watch the channel of a new message. A
@@ -316,26 +318,30 @@ func (e *routineEngine) start(ctx context.Context, r domain.Routine) error {
 	}
 	go func() {
 		defer e.release(r.Handle)
-		e.run(context.Background(), r, p)
+		e.run(context.Background(), r, p, "")
 	}()
 	return nil
 }
 
 // run posts the routine's prompt in its channel as the Director, with the
 // routine's handle on the message, and waits for the agent to finish.
-func (e *routineEngine) run(ctx context.Context, r domain.Routine, p routinePlan) {
+func (e *routineEngine) run(ctx context.Context, r domain.Routine, p routinePlan, data string) {
 	body := strings.TrimSpace(r.Prompt)
 	if body == "" {
 		body = "Write the daily debrief."
 	}
 	msg := domain.Message{ID: store.NewID(), ChannelID: p.channel.ID, AuthorID: p.human.ID, Body: "@" + p.agent.Handle + " " + body, Mentions: []string{p.agent.ID}, Routine: r.Handle, CreatedAt: time.Now().UTC()}
+	if data != "" {
+		e.app.setExtra(msg.ID, data)
+		defer e.app.clearExtra(msg.ID)
+	}
 	if r.Template == "debrief" {
 		facts, err := e.app.debriefFacts(ctx, e.now())
 		if err != nil {
 			e.record(ctx, r.Handle, domain.RoutineResult{At: e.now().UTC(), Status: "failed", Detail: "could not collect the facts: " + err.Error()})
 			return
 		}
-		e.app.setExtra(msg.ID, debriefIntro+"\n\n"+facts)
+		e.app.setExtra(msg.ID, debriefIntro+"\n\n"+facts+"\n\n"+data)
 		defer e.app.clearExtra(msg.ID)
 	}
 	if _, err := e.app.Store.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: p.channel.ID, Payload: msg}); err != nil {
@@ -427,6 +433,7 @@ func (e *routineEngine) List(ctx context.Context) ([]domain.Routine, error) {
 		}
 		list[i].NextRun = e.nextRun(list[i])
 	}
+	e.enrichGitHub(ctx, list)
 	return list, nil
 }
 
@@ -450,11 +457,16 @@ func (e *routineEngine) Create(ctx context.Context, in domain.RoutineInput, by s
 		return domain.Routine{}, domain.UserError{Message: "prompt must be 1 to 8000 characters"}
 	}
 	schedule := strings.Join(strings.Fields(in.Schedule), " ")
-	if schedule == "" {
-		return domain.Routine{}, domain.UserError{Message: "schedule required"}
+	trigger := strings.TrimSpace(in.Trigger)
+	if (schedule == "") == (trigger == "") {
+		return domain.Routine{}, domain.UserError{Message: "set exactly one of schedule and trigger"}
 	}
-	if _, err := cron.Parse(schedule); err != nil {
-		return domain.Routine{}, domain.UserError{Message: "schedule: " + err.Error()}
+	if schedule != "" {
+		if _, err := cron.Parse(schedule); err != nil {
+			return domain.Routine{}, domain.UserError{Message: "schedule: " + err.Error()}
+		}
+	} else if trigger != "message" && !githubTrigger(trigger) {
+		return domain.Routine{}, domain.UserError{Message: "unknown trigger " + trigger}
 	}
 	persona := strings.TrimPrefix(strings.TrimSpace(in.Persona), "@")
 	agent, err := e.app.Store.MemberByHandle(ctx, persona)
@@ -475,6 +487,15 @@ func (e *routineEngine) Create(ctx context.Context, in domain.RoutineInput, by s
 	}
 	if !found {
 		return domain.Routine{}, domain.UserError{Message: "channel #" + channel + " does not exist"}
+	}
+	if githubTrigger(trigger) {
+		projects, err := e.app.Store.Projects(ctx)
+		if err != nil {
+			return domain.Routine{}, err
+		}
+		if _, err := e.githubRepository(ctx, domain.Routine{Channel: channel}, channels, projects); err != nil {
+			return domain.Routine{}, domain.UserError{Message: err.Error()}
+		}
 	}
 	existing, err := e.app.Store.Routines(ctx)
 	if err != nil {
@@ -497,7 +518,7 @@ func (e *routineEngine) Create(ctx context.Context, in domain.RoutineInput, by s
 		handle = fmt.Sprintf("%s-%d", base, n)
 	}
 	now := e.now().UTC()
-	r := domain.Routine{Handle: handle, Name: name, Prompt: prompt, Persona: agent.Handle, Channel: channel, Schedule: schedule, Enabled: true, Source: "app", CreatedBy: by, CreatedAt: &now}
+	r := domain.Routine{Handle: handle, Name: name, Prompt: prompt, Persona: agent.Handle, Channel: channel, Schedule: schedule, Trigger: trigger, Enabled: true, Source: "app", CreatedBy: by, CreatedAt: &now}
 	if _, err := e.app.Store.Append(ctx, events.Draft{Type: events.RoutineUpdated, Actor: events.Human(by), Payload: r}); err != nil {
 		return domain.Routine{}, err
 	}

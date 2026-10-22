@@ -386,6 +386,7 @@ export type EventType =
   | "lesson.added"
   | "lesson.updated"
   | "lesson.removed"
+  | "routine.cursor"
   | "task.created"
   | "task.updated"
   | "handoff.created"
@@ -523,7 +524,7 @@ export interface Routine {
   persona: string
   channel: string
   schedule?: string
-  trigger?: "message"
+  trigger?: "message" | "ci_failed" | "issue_opened" | "pr_opened"
   template?: "debrief"
   enabled: boolean
   /** "config" for a routine in lanes.toml, "app" for one made in the app; only an app routine can be deleted. */
@@ -532,6 +533,8 @@ export interface Routine {
   created_at?: string
   next_run?: string
   last?: RoutineResult
+  last_poll?: string
+  repo?: string
 }
 
 export type RoutineSource = "config" | "app"
@@ -569,7 +572,8 @@ export interface RoutineCreate {
   prompt: string
   persona: string
   channel: string
-  schedule: string
+  schedule?: string
+  trigger?: "message" | "ci_failed" | "issue_opened" | "pr_opened"
 }
 
 export type AssignKind = "department" | "specialist"

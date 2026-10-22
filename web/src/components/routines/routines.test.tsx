@@ -59,6 +59,12 @@ function setup(routines: Routine[]) {
 }
 
 describe("RoutinesList", () => {
+  it("labels GitHub triggers and shows the last poll", () => {
+    setup([{ ...welcome, enabled: true, trigger: "ci_failed", repo: "owner/repo", last_poll: "2026-10-22T09:00:00Z" }])
+    const card = screen.getByRole("article", { name: "Welcome" })
+    expect(within(card).getByText("When CI fails on owner/repo")).toBeInTheDocument()
+    expect(within(card).getByText(/^Last poll:/)).toBeInTheDocument()
+  })
   it("lists each routine with when it runs, who runs it and how the last run ended", () => {
     setup([debrief, welcome])
     const card = screen.getByRole("article", { name: "Daily debrief" })

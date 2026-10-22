@@ -1006,6 +1006,17 @@ func (s *Store) Routines(ctx context.Context) ([]domain.Routine, error) {
 func (s *Store) Routine(ctx context.Context, handle string) (domain.Routine, error) {
 	return oneJSON[domain.Routine](ctx, s.db, "SELECT data FROM org WHERE kind='routine' AND handle=?", handle)
 }
+
+// RoutineCursor returns the newest cursor for a repository and trigger. The
+// event log is the source of truth, so a rebuild needs no separate projection.
+func (s *Store) RoutineCursor(ctx context.Context, repo, trigger string) (json.RawMessage, error) {
+	var raw json.RawMessage
+	err := s.rdb.QueryRowContext(ctx, "SELECT payload FROM events WHERE type=? AND json_extract(payload,'$.repo')=? AND json_extract(payload,'$.trigger')=? ORDER BY seq DESC LIMIT 1", events.RoutineCursor, repo, trigger).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return raw, err
+}
 func (s *Store) Lanes(ctx context.Context) ([]domain.Lane, error) {
 	return queryJSON[domain.Lane](ctx, s.db, "SELECT data FROM lanes ORDER BY id")
 }

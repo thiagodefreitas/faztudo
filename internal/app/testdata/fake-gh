@@ -1,0 +1,6 @@
+#!/bin/sh
+if [ "$1" = run ] && [ "$2" = view ]; then
+  cat "$FAKE_GH_JOBS"
+else
+  cat "$FAKE_GH_LIST"
+fi

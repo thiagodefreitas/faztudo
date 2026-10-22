@@ -45,6 +45,7 @@ collect_delegations = true     # one read-only follow-up after delegated results
 [routines]
 timezone = ""     # IANA name such as "Europe/Berlin"; empty uses this machine's zone
 max_per_day = 20  # routine runs started per local day, all routines together
+poll_interval = "5m" # GitHub event checks per repository; minimum 1m
 ```
 
 `max_upload_mb` (under `[server]`) caps one attached file. Files are stored
@@ -285,6 +286,13 @@ persona = "coder"
 channel = "general"
 trigger = "message"         # runs when a person posts in the channel
 prompt = "Say hello to anyone new."
+
+[[routine]]
+handle = "failed-ci"
+persona = "coder"
+channel = "engineering"
+trigger = "ci_failed"      # also issue_opened or pr_opened
+prompt = "Investigate the GitHub event and report what needs attention."
 ```
 
 - Set exactly one of `schedule` and `trigger`. A schedule has five fields
@@ -295,6 +303,15 @@ prompt = "Say hello to anyone new."
 - A trigger routine starts once for each new message a person posts in the
   channel as a top-level message. Messages from agents, routines and handoffs,
   and thread replies, never trigger anything.
+- GitHub triggers `ci_failed`, `issue_opened` and `pr_opened` poll with the
+  Director's signed-in `gh` CLI. The channel or its project needs a `repo_path`
+  that is a git checkout with a GitHub origin. There is no webhook or stored
+  GitHub token. The first successful poll establishes a cursor and runs nothing;
+  later polls consider new items. The cursor is kept in the event log across
+  restarts. If `gh` is missing or unauthenticated, the routine records a skipped
+  result. At most five items run per routine per poll; extra items get a notice.
+  Titles, authors, branches and URLs are passed as labeled, untrusted data;
+  issue and pull request bodies are not sent to the agent.
 - The routine posts its prompt in the channel as the Director, marked with the
   routine's handle, and the persona answers as for any message.
 - `template = "debrief"` gives the agent facts that faztudo collects from its own

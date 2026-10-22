@@ -30,7 +30,7 @@ way to the right agent.
 | Repeat this: "Repeat this" on a finished answer opens a dialog (request, persona, channel, schedule presets or a cron expression with the next run time) and saves a routine in the database; the Routines page shows where each one comes from and deletes the ones made in the app | built |
 | `faztudo init --template solo\|team\|empty` | built |
 | A lead or the Chief of Staff collecting delegated results into one combined answer | built; a read-only follow-up starts when the parent and all pieces finish, including failed, refused and never-started pieces; the follow-up uses the request budget; none for all-refused, retried or pre-version requests |
-| Routines for a trigger other than a new message (an issue, a failing CI run) | not built |
+| GitHub routine triggers for failing CI, new issues and new pull requests through the local `gh` CLI | built; one poll per repository interval, event-log cursors and five items per poll per routine |
 | Working groups, drag-to-assign, lane budgets shared across projects, deleting a project from the app | not built, next pass |
 | A project's `repo_path` choosing where runs happen | not built: runs use the channel's `repo_path` |
 
@@ -143,6 +143,14 @@ the next run in the time zone of your browser. App routines are stored in the
 database, run like the others, can be switched off, and can be deleted from the
 Routines page. A name that lanes.toml already uses is refused, and a routine
 added to the file later with the same handle replaces the app one.
+
+GitHub triggers (`ci_failed`, `issue_opened`, `pr_opened`) can be configured in
+lanes.toml or created through the routines API. The channel or its project
+needs a git checkout with a GitHub origin. Faztudo polls it with the Director's
+signed-in `gh` CLI, records a cursor on the first successful poll without
+running old items, and runs once for each later item, subject to the daily cap
+and lane guards. The Routines page shows the repository, last poll and result.
+Repeat this still creates scheduled routines only.
 
 ## Templates
 

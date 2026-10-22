@@ -163,13 +163,15 @@ interface Routine {
   persona: string;          // handle of the agent that runs it
   channel: string;          // channel name
   schedule?: string;        // five-field cron, in the configured time zone
-  trigger?: "message";      // runs when a person posts in the channel
+  trigger?: "message" | "ci_failed" | "issue_opened" | "pr_opened";
   template?: "debrief";
   enabled: boolean;
   source: "config" | "app"; // lanes.toml, or made in the app with Repeat this
   created_by?: ID;          // the human who made an app routine
   created_at?: string;
   next_run?: string;        // scheduled routines that are on
+  last_poll?: string;       // last successful GitHub poll
+  repo?: string;            // GitHub owner/repo for a GitHub trigger
   last?: { at: string; status: "ok" | "failed" | "skipped"; detail?: string; run_id?: ID };
 }
 
@@ -355,7 +357,7 @@ interface NoticeAction {
 | POST | `/api/v1/projects/{project}/assignments` | assign `{kind: "department" or "specialist", handle}` to the project with that handle; humans only (403 for an agent), 400 for an unknown handle, 404 for an unknown project; returns the `Project`; repeating it changes nothing |
 | DELETE | `/api/v1/projects/{project}/assignments/{kind}/{handle}` | remove an assignment; humans only; returns the `Project` |
 | GET | `/api/v1/routines` | `Routine[]` with the time of the next run |
-| POST | `/api/v1/routines` | humans only (403 for an agent). `{name, prompt, persona, channel, schedule}` makes a scheduled routine kept in the database, switched on, with `source: "app"`; returns the `Routine` (201). The handle comes from the name; a second routine with the same name gets `-2`, `-3`. 400 with the reason for an empty name or prompt, an invalid five-field cron expression, a persona that is not an agent, or a channel that does not exist or that the caller cannot see. 409 when the handle is one that lanes.toml defines |
+| POST | `/api/v1/routines` | humans only (403 for an agent). `{name, prompt, persona, channel, schedule}` or `{name, prompt, persona, channel, trigger}` makes a routine kept in the database, switched on, with `source: "app"`; returns the `Routine` (201). Triggers are `message`, `ci_failed`, `issue_opened`, `pr_opened`. GitHub triggers require a channel or project git checkout with a GitHub origin. The handle comes from the name; a second routine with the same name gets `-2`, `-3`. 400 for invalid input, an unknown persona, or a channel the caller cannot see. 409 when the handle is one that lanes.toml defines |
 | DELETE | `/api/v1/routines/{handle}` | humans only; removes a routine with `source: "app"` (204) and emits `routine.removed`. 409 `defined in lanes.toml` for a routine from the file, 404 for an unknown one |
 | PATCH | `/api/v1/routines/{handle}` | switch `{enabled}` on or off; humans only (403 for an agent), 404 for an unknown routine; returns the `Routine` |
 | GET | `/api/v1/tasks?channel_id=&project=` | `Task[]` by board order; `project` is a project handle (404 if unknown) and keeps the tasks of its channels |

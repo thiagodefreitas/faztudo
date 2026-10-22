@@ -82,6 +82,8 @@ type Routines struct {
 	Timezone string `toml:"timezone"`
 	// MaxPerDay caps the runs routines start in one local day.
 	MaxPerDay int `toml:"max_per_day"`
+	// PollInterval controls how often GitHub-triggered routines check for events.
+	PollInterval string `toml:"poll_interval"`
 }
 type Lane struct {
 	ID                  string  `toml:"id"`
@@ -188,7 +190,7 @@ func Defaults() Config {
 		Server:   Server{Listen: "127.0.0.1:7457", OpenBrowser: true, MaxUploadMB: 25},
 		LAN:      LAN{Enabled: false, Listen: "0.0.0.0:7458", CAListen: "0.0.0.0:7459"},
 		Runs:     Runs{DefaultTimeout: "30m", ContextMessages: 40, Sandbox: "required", SandboxMemoryMax: "auto", SandboxTasksMax: 512, SummaryEvery: 20, ContextLimitTokens: 128000, RequestMaxRuns: 6, RequestMaxPremium: 2},
-		Routines: Routines{MaxPerDay: 20},
+		Routines: Routines{MaxPerDay: 20, PollInterval: "5m"},
 	}
 }
 func Load(p Paths) (Config, error) {
@@ -248,6 +250,9 @@ func (c Config) Validate() error {
 	}
 	if c.Routines.MaxPerDay < 1 {
 		return errors.New("routines.max_per_day: must be positive")
+	}
+	if d, err := time.ParseDuration(c.Routines.PollInterval); err != nil || d < time.Minute {
+		return errors.New("routines.poll_interval: must be at least 1m")
 	}
 	for _, path := range c.Runs.SandboxReadOnly {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
@@ -413,7 +418,7 @@ func (c Config) validateRoutines(agents map[string]bool) error {
 			if _, err := cron.Parse(r.Schedule); err != nil {
 				return fmt.Errorf("routine[%d].schedule: %w", i, err)
 			}
-		case r.Trigger == "message":
+		case r.Trigger == "message", r.Trigger == "ci_failed", r.Trigger == "issue_opened", r.Trigger == "pr_opened":
 		case r.Trigger != "":
 			return fmt.Errorf("routine[%d].trigger: unknown trigger %q (use message)", i, r.Trigger)
 		default:

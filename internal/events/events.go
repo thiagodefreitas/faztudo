@@ -44,6 +44,7 @@ const (
 	HandoffCollected    Type = "handoff.collected"
 	RoutineUpdated      Type = "routine.updated"
 	RoutineRemoved      Type = "routine.removed"
+	RoutineCursor       Type = "routine.cursor"
 	TaskCreated         Type = "task.created"
 	TaskUpdated         Type = "task.updated"
 	CompareStarted      Type = "compare.started"

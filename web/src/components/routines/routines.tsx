@@ -26,6 +26,10 @@ const STATUS_LABEL: Record<RoutineStatus, string> = {
 function whenText(routine: Routine): string {
   if (routine.schedule) return describeSchedule(routine.schedule)
   if (routine.trigger === "message") return `When someone posts in #${routine.channel}`
+  const repo = routine.repo || `#${routine.channel}`
+  if (routine.trigger === "ci_failed") return `When CI fails on ${repo}`
+  if (routine.trigger === "issue_opened") return `When an issue opens on ${repo}`
+  if (routine.trigger === "pr_opened") return `When a pull request opens on ${repo}`
   return "No schedule or trigger"
 }
 
@@ -99,6 +103,7 @@ export function RoutinesList() {
                     </span>
                   </h3>
                   <p className="text-[13px] text-ink">{whenText(routine)}</p>
+                  {routine.last_poll && <p className="text-[12px] text-muted">Last poll: {nextText(routine.last_poll)}</p>}
                   <p className="mt-1 flex items-center gap-2 text-[12px] text-muted">
                     {persona && <AgentAvatar member={persona} size={20} decorative />}
                     <span className="truncate">

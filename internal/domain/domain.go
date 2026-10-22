@@ -404,6 +404,7 @@ type RoutineInput struct {
 	Persona  string `json:"persona"`
 	Channel  string `json:"channel"`
 	Schedule string `json:"schedule"`
+	Trigger  string `json:"trigger,omitempty"`
 }
 
 // Routine is a prompt that runs by itself: on a schedule (Schedule, a cron
@@ -427,4 +428,6 @@ type Routine struct {
 	CreatedAt *time.Time     `json:"created_at,omitempty"`
 	NextRun   *time.Time     `json:"next_run,omitempty"`
 	Last      *RoutineResult `json:"last,omitempty"`
+	LastPoll  *time.Time     `json:"last_poll,omitempty"`
+	Repo      string         `json:"repo,omitempty"`
 }

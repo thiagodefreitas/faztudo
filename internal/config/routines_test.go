@@ -41,11 +41,20 @@ func TestRoutinesAndChiefOfStaffValidate(t *testing.T) {
 		{"negative premium", func(c *Config) { c.Runs.RequestMaxPremium = -1 }},
 		{"zero routines per day", func(c *Config) { c.Routines.MaxPerDay = 0 }},
 		{"unknown time zone", func(c *Config) { c.Routines.Timezone = "Mars/Olympus" }},
+		{"short GitHub poll interval", func(c *Config) { c.Routines.PollInterval = "30s" }},
+		{"bad GitHub poll interval", func(c *Config) { c.Routines.PollInterval = "soon" }},
 	} {
 		c := routineBase()
 		tc.mutate(&c)
 		if c.Validate() == nil {
 			t.Errorf("%s: expected a validation error", tc.name)
+		}
+	}
+	for _, trigger := range []string{"ci_failed", "issue_opened", "pr_opened"} {
+		c := routineBase()
+		c.Lanes.Routine[1].Trigger = trigger
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: %v", trigger, err)
 		}
 	}
 }

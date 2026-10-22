@@ -29,7 +29,7 @@ export function applyEvent(qc: QueryClient, event: StreamEvent): void {
   if (event.type === "project.updated" || event.type === "department.updated") {
     void qc.invalidateQueries({ queryKey: qk.org })
   }
-  if (event.type === "routine.updated" || event.type === "routine.removed") {
+  if (event.type === "routine.updated" || event.type === "routine.removed" || event.type === "routine.cursor") {
     void qc.invalidateQueries({ queryKey: qk.routines })
   }
   if (event.type === "lesson.added" || event.type === "lesson.updated" || event.type === "lesson.removed") {

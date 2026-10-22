@@ -658,10 +658,13 @@ export class MockWorld {
   createRoutine(body: RoutineCreate): Result<Routine> {
     const name = body.name.trim()
     const prompt = body.prompt.trim()
-    const schedule = body.schedule.trim().replace(/\s+/g, " ")
+    const schedule = body.schedule?.trim().replace(/\s+/g, " ") ?? ""
+    const trigger = body.trigger ?? ""
     if (!name || name.length > 80) return err(400, "bad_request", "name must be 1 to 80 characters")
     if (!prompt) return err(400, "bad_request", "prompt must be 1 to 8000 characters")
-    if (schedule.split(" ").length !== 5) return err(400, "bad_request", "schedule: expected 5 fields")
+    if (Boolean(schedule) === Boolean(trigger)) return err(400, "bad_request", "set exactly one of schedule and trigger")
+    if (schedule && schedule.split(" ").length !== 5) return err(400, "bad_request", "schedule: expected 5 fields")
+    if (trigger && !["message", "ci_failed", "issue_opened", "pr_opened"].includes(trigger)) return err(400, "bad_request", "unknown trigger")
     const persona = this.members.find((item) => item.kind === "agent" && item.handle === body.persona.replace(/^@/, ""))
     if (!persona) return err(400, "bad_request", `agent @${body.persona} does not exist`)
     const channel = this.channels.find((item) => item.name.toLowerCase() === body.channel.replace(/^#/, "").toLowerCase())
@@ -678,7 +681,7 @@ export class MockWorld {
       prompt,
       persona: persona.handle,
       channel: channel.name,
-      schedule,
+      ...(schedule ? { schedule } : { trigger: trigger as Routine["trigger"] }),
       enabled: true,
       source: "app",
       created_by: this.me.id,
