@@ -14,7 +14,9 @@ import { healthBarClass, healthDotClass } from "./lane-chip"
 export const MAX_VISIBLE_LANES = 6
 
 // A lane that is out, near out, or unmeasured. These come first and stand out.
-const ATTENTION: ReadonlySet<LaneHealth> = new Set<LaneHealth>(["exhausted", "unavailable", "conserve", "unknown"])
+// Unknown is the normal state of a lane nothing measures yet (a plan with no
+// published limit), so it stays quiet; only real trouble is highlighted.
+const ATTENTION: ReadonlySet<LaneHealth> = new Set<LaneHealth>(["exhausted", "unavailable", "conserve"])
 
 const ATTENTION_CLASS: Record<LaneHealth, string> = {
   exhausted: "border-danger/30 bg-danger-soft text-danger",
@@ -26,13 +28,16 @@ const ATTENTION_CLASS: Record<LaneHealth, string> = {
 
 const TOOLTIP = "z-50 max-w-72 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[12px] leading-5 text-ink shadow-md"
 
-/** Lanes that need attention first (worst first), then the healthy ones by name. */
+/** Lanes that need attention first (worst first), then measured ones by name,
+ * then the ones nothing measures yet. */
 export function orderLanes(lanes: Lane[]): Lane[] {
   return lanes.slice().sort((a, b) => {
     const aa = ATTENTION.has(a.health)
     const bb = ATTENTION.has(b.health)
     if (aa !== bb) return aa ? -1 : 1
     if (aa && HEALTH_META[a.health].rank !== HEALTH_META[b.health].rank) return HEALTH_META[b.health].rank - HEALTH_META[a.health].rank
+    const au = a.health === "unknown"
+    if (au !== (b.health === "unknown")) return au ? 1 : -1
     return a.id.localeCompare(b.id)
   })
 }

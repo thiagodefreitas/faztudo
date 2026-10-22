@@ -72,10 +72,10 @@ describe("LaneGauges", () => {
     expect(screen.queryByRole("link", { name: /Lanes 1\/2/ })).not.toBeInTheDocument()
   })
 
-  it("puts lanes that need attention first, worst first, then the healthy ones", () => {
+  it("puts lanes that need attention first, worst first, then the healthy ones, unmeasured last", () => {
     const make = (id: string, health: Lane["health"]): Lane => ({ ...lanes[1], id, health })
     const order = orderLanes([make("a/ok", "available"), make("b/unknown", "unknown"), make("c/low", "conserve"), make("d/out", "exhausted"), make("0/ok", "available")])
-    expect(order.map((lane) => lane.id)).toEqual(["d/out", "c/low", "b/unknown", "0/ok", "a/ok"])
+    expect(order.map((lane) => lane.id)).toEqual(["d/out", "c/low", "0/ok", "a/ok", "b/unknown"])
   })
 
   it("highlights a lane that needs attention and names its health in words", async () => {

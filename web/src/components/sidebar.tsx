@@ -67,6 +67,9 @@ const LANE_MEANING: Record<LaneHealth, string> = {
 
 // More agents than this and the idle ones fold under "Show all".
 export const AGENT_FOLD_AT = 8
+// A folded list still shows at least this many agents, idle ones first in
+// configured order, so a quiet day does not leave the section empty.
+export const AGENT_MIN_SHOWN = 5
 
 const STATUS_LABEL = {
   open: "",
@@ -161,7 +164,9 @@ export function WorkspaceNav({ onNavigate }: { onNavigate?: () => void }) {
     const dm = meId ? findDirect(all, meId, member.id) : undefined
     return dm ? pathname === `/c/${dm.id}` : false
   }
-  const hiddenAgents = foldAgents && !showAllAgents ? orderedAgents.filter((member) => activity.get(member.id) === "idle" && !isOpenChat(member)) : []
+  const foldable = foldAgents && !showAllAgents ? orderedAgents.filter((member) => activity.get(member.id) === "idle" && !isOpenChat(member)) : []
+  const keepIdle = Math.max(0, AGENT_MIN_SHOWN - (orderedAgents.length - foldable.length))
+  const hiddenAgents = foldable.slice(keepIdle)
   const visibleAgents = orderedAgents.filter((member) => !hiddenAgents.includes(member))
   // A DM whose peer is no longer a member still deserves a row.
   const orphans = all.filter((channel) => isDirect(channel) && !directPeer(channel, meId, members.data ?? []))

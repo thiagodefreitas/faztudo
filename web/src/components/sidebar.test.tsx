@@ -249,11 +249,13 @@ describe("WorkspaceNav", () => {
     const many = Array.from({ length: AGENT_FOLD_AT + 2 }, (_, i) => agent(i + 1))
     await setup({ members: [ada, coder, ...many] })
     await screen.findByText("Coder")
-    expect(screen.queryByText("Bot 1")).not.toBeInTheDocument()
-    const more = screen.getByRole("button", { name: `Show all (${many.length})` })
+    // At least AGENT_MIN_SHOWN agents stay visible: Coder and the first four bots.
+    expect(screen.getByText("Bot 4")).toBeInTheDocument()
+    expect(screen.queryByText("Bot 5")).not.toBeInTheDocument()
+    const more = screen.getByRole("button", { name: `Show all (${many.length - 4})` })
     expect(more).toHaveAttribute("aria-expanded", "false")
     await user.click(more)
-    expect(screen.getByText("Bot 1")).toBeInTheDocument()
+    expect(screen.getByText("Bot 5")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Show fewer" })).toBeInTheDocument()
   })
 
