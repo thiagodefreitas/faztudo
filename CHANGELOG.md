@@ -22,8 +22,8 @@ All notable changes are listed here. The format follows
   are short.
 - Approval rules: Always merge changes like this here on a merge card
   creates a rule for the channel, with path globs and a line cap. A rule
-  needs a channel test command that passed, never applies to a run a
-  routine started, never passes dot paths, build and lock files, scripts,
+  needs a channel test command that passed, applies only to a run your own
+  message started (never a routine's, nor one an agent passed on), never passes dot paths, build and lock files, scripts,
   executables, symlinks or submodules, and never pushes.
 - Cost per run: All work cards show tokens and estimated cost when known,
   and the Lanes page sums today's tokens and cost per lane with how many
@@ -51,6 +51,11 @@ All notable changes are listed here. The format follows
   you.
 - Database migrations from 012 on run in order, each once.
 - Listing routines is for humans only: an agent token gets 403.
+
+### Fixed
+
+- A channel page went blank in Chromium where the browser's on-device
+  speech check crashed the page; dictation no longer makes that check.
 
 ## [0.1.7] - 2026-10-20
 
