@@ -52,7 +52,7 @@ describe("buildToday needs", () => {
 describe("buildToday finished", () => {
   it("keeps runs that ended after the seen time, grouped by channel with failures first", () => {
     const runs = [
-      run("r1", { started_at: at(now - 20 * min), ended_at: at(now - 10 * min), mode: "write" }),
+      run("r1", { started_at: at(now - 20 * min), ended_at: at(now - 10 * min), mode: "write", approval_option: "merge" }),
       run("r2", { started_at: at(now - 30 * min), ended_at: at(now - 25 * min), state: "failed", failure_reason: "verification failed" }),
       run("r3", { channel_id: "ops", started_at: at(now - 8 * min), ended_at: at(now - 5 * min), mode: "read" }),
       run("r4", { started_at: at(now - 3 * 60 * min), ended_at: at(now - 2 * 60 * min) }),
@@ -76,9 +76,11 @@ describe("buildToday finished", () => {
       run("r1", { ended_at: at(now - 5 * min), mode: "write", approval_option: "merge" }),
       run("r2", { ended_at: at(now - 4 * min), mode: "write", approval_option: "keep" }),
       run("r3", { ended_at: at(now - 3 * min), mode: "write", approval_option: "discard" }),
+      run("r4", { ended_at: at(now - 2 * min), mode: "write" }),
     ]
     const outcomes = buildToday({ ...base, runs }).finished[0]?.items.map((item) => [item.run.id, item.outcome])
     expect(outcomes).toEqual([
+      ["r4", "no_changes"],
       ["r3", "discarded"],
       ["r2", "kept"],
       ["r1", "merged"],

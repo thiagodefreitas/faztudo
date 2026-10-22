@@ -15,7 +15,7 @@ import (
 
 func TestApprovalRuleMatcher(t *testing.T) {
 	rule := domain.ApprovalRule{ChannelID: "dev", Persona: "coder", Paths: []string{"src/**"}, MaxLines: 50}
-	run := domain.Run{ChannelID: "dev", Mode: domain.RunWrite, State: domain.RunWaitingApproval, Verification: &domain.Verification{OK: true}, DiffStat: &domain.DiffStat{Files: 1, Insertions: 20, Deletions: 4}}
+	run := domain.Run{ChannelID: "dev", Mode: domain.RunWrite, State: domain.RunWaitingApproval, Verification: &domain.Verification{OK: true, Detail: "diff exists and verification passed"}, DiffStat: &domain.DiffStat{Files: 1, Insertions: 20, Deletions: 4}}
 	for _, tc := range []struct {
 		name   string
 		mutate func(*domain.ApprovalRule, *domain.Run, *[]changedPath)
@@ -25,6 +25,7 @@ func TestApprovalRuleMatcher(t *testing.T) {
 		{"wrong persona", func(r *domain.ApprovalRule, _ *domain.Run, _ *[]changedPath) { r.Persona = "reviewer" }, false},
 		{"too many lines", func(r *domain.ApprovalRule, _ *domain.Run, _ *[]changedPath) { r.MaxLines = 23 }, false},
 		{"failed checks", func(_ *domain.ApprovalRule, r *domain.Run, _ *[]changedPath) { r.Verification.OK = false }, false},
+		{"no test command", func(_ *domain.ApprovalRule, r *domain.Run, _ *[]changedPath) { r.Verification.Detail = "diff exists" }, false},
 		{"protected", func(_ *domain.ApprovalRule, _ *domain.Run, files *[]changedPath) {
 			*files = append(*files, changedPath{name: "src/package.json"})
 		}, false},
@@ -45,10 +46,13 @@ func TestApprovalRuleMatcher(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{".github/workflows/ci.yml", "scripts/build.sh", "a/go.mod", "x/file.lock", ".git/config"} {
+	for _, name := range []string{".github/workflows/ci.yml", "scripts/build.sh", "a/go.mod", "x/file.lock", ".git/config", ".envrc", "web/.npmrc", ".yarnrc.yml", ".husky/pre-commit", ".vscode/tasks.json"} {
 		if !protectedApprovalPath(name) {
 			t.Errorf("unprotected %s", name)
 		}
+	}
+	if protectedApprovalPath("src/.gitignore") {
+		t.Error(".gitignore should pass")
 	}
 }
 
@@ -58,7 +62,8 @@ func TestApprovalRuleAutoMergeAndFailedMerge(t *testing.T) {
 		branchChanged bool
 		lineCap       bool
 		symlink       bool
-	}{{name: "merge"}, {name: "failed merge", branchChanged: true}, {name: "fresh line cap", lineCap: true}, {name: "symlink", symlink: true}} {
+		routine       bool
+	}{{name: "merge"}, {name: "failed merge", branchChanged: true}, {name: "fresh line cap", lineCap: true}, {name: "symlink", symlink: true}, {name: "routine run", routine: true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newTaskFixture(t)
 			ctx := context.Background()
@@ -111,8 +116,15 @@ func TestApprovalRuleAutoMergeAndFailedMerge(t *testing.T) {
 			if tc.branchChanged {
 				testGit(t, repo, "checkout", "-b", "other")
 			}
+			trigger := domain.Message{ID: "request", ChannelID: channel.ID, AuthorID: f.human.ID, Body: "@coder change it", CreatedAt: time.Now().UTC()}
+			if tc.routine {
+				trigger.Routine = "pr-watch"
+			}
+			if _, err := f.s.Append(ctx, events.Draft{Type: events.MessagePosted, Actor: events.System, ChannelID: channel.ID, Payload: trigger}); err != nil {
+				t.Fatal(err)
+			}
 			started := time.Now().UTC()
-			run := domain.Run{ID: "rule-run", ChannelID: channel.ID, TriggerMessageID: "request", AgentID: f.coder.ID, Mode: domain.RunWrite, State: domain.RunWaitingApproval, Worktree: w.Path, BaseCommit: w.BaseCommit, ChannelBranch: "main", StartedAt: &started, DiffStat: &stat, Verification: &domain.Verification{OK: true}}
+			run := domain.Run{ID: "rule-run", ChannelID: channel.ID, TriggerMessageID: "request", AgentID: f.coder.ID, Mode: domain.RunWrite, State: domain.RunWaitingApproval, Worktree: w.Path, BaseCommit: w.BaseCommit, ChannelBranch: "main", StartedAt: &started, DiffStat: &stat, Verification: &domain.Verification{OK: true, Detail: "diff exists and verification passed"}}
 			if tc.lineCap {
 				run.DiffStat = &domain.DiffStat{Files: stat.Files, Insertions: 0}
 			}
@@ -127,7 +139,7 @@ func TestApprovalRuleAutoMergeAndFailedMerge(t *testing.T) {
 				t.Fatalf("approvals %+v %v", approvals, err)
 			}
 			want := domain.ApprovalResolved
-			if tc.branchChanged || tc.lineCap || tc.symlink {
+			if tc.branchChanged || tc.lineCap || tc.symlink || tc.routine {
 				want = domain.ApprovalPending
 			}
 			if approvals[0].State != want {

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,9 @@ type suggestOut struct {
 	ID        string `json:"id"`
 	Remaining int    `json:"remaining"`
 }
+
+// htmlMarkup finds an HTML tag or comment start. A plain "a < b" passes.
+var htmlMarkup = regexp.MustCompile(`<(!--|/?[A-Za-z])`)
 
 // scoutRun reports whether the grant's run was started by a routine whose
 // template is "scout". It looks at the trigger message of the run on the
@@ -63,6 +67,10 @@ func (h *Handler) suggest(ctx context.Context, grant Grant, in suggestIn) (sugge
 		return suggestOut{}, errors.New("title longer than 120 characters")
 	case utf8.RuneCountInString(detail) > maxSuggestionDetail:
 		return suggestOut{}, errors.New("detail longer than 2000 characters")
+	case htmlMarkup.MatchString(title) || htmlMarkup.MatchString(detail):
+		// The inbox hides raw HTML, but a task made from the suggestion would
+		// pass it to an agent: text the Director never saw.
+		return suggestOut{}, errors.New("no HTML tags or comments in a suggestion; write plain markdown")
 	}
 	evidence := make([]string, 0, len(in.Evidence))
 	for _, item := range in.Evidence {

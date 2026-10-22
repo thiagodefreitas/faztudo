@@ -8,7 +8,7 @@ export const OPEN_KEY = "faztudo.today.open"
 /** How far back the first visit looks. */
 export const FIRST_VISIT_MS = 12 * 60 * 60 * 1000
 
-export type Outcome = "failed" | "waiting" | "merged" | "kept" | "discarded" | "answer" | "cancelled"
+export type Outcome = "failed" | "waiting" | "merged" | "kept" | "discarded" | "no_changes" | "answer" | "cancelled"
 
 export interface NeedItem {
   kind: "approval" | "question"
@@ -117,7 +117,9 @@ function outcomeOf(run: Run): Outcome | undefined {
       if (run.mode !== "write") return "answer"
       if (run.approval_option === "keep") return "kept"
       if (run.approval_option === "discard") return "discarded"
-      return "merged"
+      if (run.approval_option === "merge") return "merged"
+      // A done write run with no decision found nothing to change.
+      return "no_changes"
     default:
       return undefined
   }

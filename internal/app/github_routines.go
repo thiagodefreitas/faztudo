@@ -232,7 +232,32 @@ func (e *routineEngine) pollGitHubTrigger(ctx context.Context, now time.Time, re
 			}
 		}
 	}
+	// Claim every routine before the cursor moves: if one is still busy with
+	// an earlier item, leave the cursor where it is so the new items wait for
+	// the next poll instead of being lost.
+	if !first && len(fresh) > 0 {
+		var claimed []string
+		for _, r := range routines {
+			if !e.claim(r.Handle) {
+				for _, h := range claimed {
+					e.release(h)
+				}
+				for _, r := range routines {
+					e.record(ctx, r.Handle, domain.RoutineResult{At: now.UTC(), Status: "skipped", Detail: fmt.Sprintf("%d new GitHub items wait: a routine is still running", len(fresh))})
+				}
+				return
+			}
+			claimed = append(claimed, r.Handle)
+		}
+	}
 	if _, err := e.app.Store.Append(ctx, events.Draft{Type: events.RoutineCursor, Actor: events.System, Payload: latest}); err != nil {
+		if !first {
+			for _, r := range routines {
+				if len(fresh) > 0 {
+					e.release(r.Handle)
+				}
+			}
+		}
 		return
 	}
 	if first || len(fresh) == 0 {
@@ -254,11 +279,7 @@ func (e *routineEngine) pollGitHubTrigger(ctx context.Context, now time.Time, re
 			}
 			e.app.notice(ctx, channelsForRoutine(ctx, e.app.Store, r.Channel).ID, "warn", message)
 		}
-		if !e.claim(r.Handle) {
-			e.record(ctx, r.Handle, domain.RoutineResult{At: now.UTC(), Status: "skipped", Detail: "routine is already running"})
-			continue
-		}
-		go e.runGitHubItems(r, selected)
+		go e.runGitHubItems(r, selected) // claimed above, released when done
 	}
 }
 

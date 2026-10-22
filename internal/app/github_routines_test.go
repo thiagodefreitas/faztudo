@@ -208,3 +208,25 @@ func TestGitHubCursorTracksAllIDsAtSameSecond(t *testing.T) {
 		t.Fatal("missed a later failure with a smaller run ID")
 	}
 }
+
+// A routine still busy with an earlier item must not lose the new ones: the
+// cursor stays put and the next poll runs them.
+func TestGitHubItemsWaitWhileRoutineIsBusy(t *testing.T) {
+	f, list, _ := githubFixture(t, "issue_opened")
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Second)
+	githubRows(t, list, "issue_opened", at.Add(-time.Hour), 1)
+	routines, _ := f.s.Routines(ctx)
+	f.e.pollGitHub(ctx, at, routines)
+	githubRows(t, list, "issue_opened", at, 2)
+	if !f.e.claim("watch") {
+		t.Fatal("could not hold the routine")
+	}
+	f.e.pollGitHub(ctx, at.Add(5*time.Minute), routines)
+	if got := f.count(); got != 0 {
+		t.Fatalf("busy routine ran %d items", got)
+	}
+	f.e.release("watch")
+	f.e.pollGitHub(ctx, at.Add(10*time.Minute), routines)
+	f.waitRan(t, 2)
+}

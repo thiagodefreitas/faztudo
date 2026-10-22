@@ -40,6 +40,10 @@ func (noRoutines) Create(context.Context, domain.RoutineInput, string) (domain.R
 func (noRoutines) Delete(context.Context, string, string) error { return store.ErrNotFound }
 
 func (a *API) routines(w http.ResponseWriter, r *http.Request) {
+	// Routines carry prompts, channels and repositories, private ones too.
+	if !humanOnly(w, r, "read routines") {
+		return
+	}
 	list, err := a.Routines.List(r.Context())
 	if err != nil {
 		failErr(w, err)

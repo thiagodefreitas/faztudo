@@ -18,6 +18,7 @@ const OUTCOME: Record<Outcome, { label: string; className: string }> = {
   merged: { label: "merged", className: "bg-ok-soft text-ok" },
   kept: { label: "kept", className: "bg-sidebar text-muted" },
   discarded: { label: "discarded", className: "bg-sidebar text-muted" },
+  no_changes: { label: "no changes", className: "bg-sidebar text-muted" },
   answer: { label: "read answer", className: "bg-sidebar text-muted" },
   cancelled: { label: "cancelled", className: "bg-sidebar text-muted" },
 }

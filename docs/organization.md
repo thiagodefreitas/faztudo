@@ -166,7 +166,7 @@ docs that contradict the code.
 
 What the scout cannot do:
 
-- It does not create tasks, messages or approvals. A suggestion is a record in
+- The suggest tool creates nothing but a suggestion. A suggestion is a record in
   the **Suggestions** section of the inbox and nothing else.
 - It runs in read mode, on a lane with a read-only mode. A persona with
   `mode = "write"` is refused when lanes.toml loads and when the routine runs.

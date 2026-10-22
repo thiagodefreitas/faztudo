@@ -50,7 +50,7 @@ coverage.*
 /faztudo
 
 # ---- node / web ----
-node_modules/
+node_modules
 web/dist/
 web/.vite/
 site/dist/

@@ -14,7 +14,7 @@ const min = 60_000
 const at = (ago: number) => new Date(Date.now() - ago * min).toISOString()
 
 const runs: Run[] = [
-  { id: "r1", channel_id: "dev", trigger_message_id: "m", agent_id: "coder", lane_id: "codex/default", mode: "write", state: "done", started_at: at(30), ended_at: at(20) },
+  { id: "r1", channel_id: "dev", trigger_message_id: "m", agent_id: "coder", lane_id: "codex/default", mode: "write", state: "done", approval_option: "merge", started_at: at(30), ended_at: at(20) },
   { id: "r2", channel_id: "dev", trigger_message_id: "m", agent_id: "coder", lane_id: "claude/opus", mode: "read", state: "failed", started_at: at(15), ended_at: at(14), failure_reason: "verification failed" },
   { id: "r3", channel_id: "dev", trigger_message_id: "m", agent_id: "coder", lane_id: "codex/default", mode: "write", state: "running", started_at: at(2) },
 ]

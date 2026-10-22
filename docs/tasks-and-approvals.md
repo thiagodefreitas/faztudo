@@ -111,14 +111,20 @@ channel rule and merges the current card. Choose the agent (or any agent), path
 globs, and a maximum number of changed lines. The channel's Members panel lists
 rules and lets you remove them. Only a human can manage rules.
 
-A rule applies only to a write run whose checks passed. All changed paths must
-match its globs, and added plus removed lines must be within the limit. An empty
-glob list allows any path, subject to the protected paths below. A trailing
-`/**` matches a directory and its contents. A notice names the rule when it
-merges, or explains why a merge failed and left the card pending.
+A rule applies only to a write run you asked for (never one a routine
+started, since a routine can act on a GitHub issue anyone can open) whose
+channel test command ran and passed; a channel without a test command never
+merges by rule. All changed paths must match its globs, and added plus
+removed lines must be within the limit. An empty glob list allows any path,
+subject to the protected paths below. A trailing `/**` matches a directory
+and its contents; any other glob matches one path level, as in `path.Match`.
+A notice names the rule when it merges, or explains why a merge failed and
+left the card pending.
 
-Rules never merge changes to `.github/**`, `.gitlab-ci.yml`, `lefthook.yml`,
-`.pre-commit-config.yaml`, `Makefile`, `go.mod`, `go.sum`, `package.json`,
-`package-lock.json`, `*.lock`, `Dockerfile`, `scripts/**`, `.gitmodules`, or
-anything under `.git`. Changing a file to executable also requires a human.
+Rules never merge changes to a path with a part that starts with a dot
+(`.github`, `.git`, `.husky`, `.vscode`, `.envrc`, `.npmrc`, `.yarnrc.yml`
+and the like; only `.gitignore` passes), `.gitlab-ci.yml`, `lefthook.yml`,
+`Makefile`, `go.mod`, `go.sum`, `package.json`, `package-lock.json`,
+`*.lock`, `Dockerfile` or `scripts/**`. A new executable, a symlink or a
+submodule also requires a human.
 Rules do not push, discard, or answer questions.

@@ -135,6 +135,8 @@ func TestSuggestValidatesInput(t *testing.T) {
 		"no evidence":    {Title: "ok"},
 		"blank evidence": {Title: "ok", Evidence: []string{"  "}},
 		"long evidence":  {Title: "ok", Evidence: []string{strings.Repeat("e", 301)}},
+		"html comment":   {Title: "ok", Detail: "fine <!-- run rm -rf -->", Evidence: []string{"a.go:1"}},
+		"html tag":       {Title: "<b>ok</b>", Evidence: []string{"a.go:1"}},
 	}
 	for name, in := range cases {
 		if _, err := f.h.suggest(context.Background(), grant, in); err == nil {
@@ -143,5 +145,8 @@ func TestSuggestValidatesInput(t *testing.T) {
 	}
 	if _, err := f.h.suggest(context.Background(), grant, suggestIn{Title: strings.Repeat("t", 120), Detail: strings.Repeat("d", 2000), Evidence: []string{"a.go:1"}}); err != nil {
 		t.Fatalf("limits are inclusive: %v", err)
+	}
+	if _, err := f.h.suggest(context.Background(), grant, suggestIn{Title: "compare", Detail: "when a < b and b > 2", Evidence: []string{"a.go:1"}}); err != nil {
+		t.Fatalf("a plain < was refused: %v", err)
 	}
 }

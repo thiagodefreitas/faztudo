@@ -21,8 +21,16 @@ type changedPath struct {
 func protectedApprovalPath(name string) bool {
 	name = strings.TrimPrefix(name, "./")
 	base := path.Base(name)
-	if name == ".git" || strings.HasPrefix(name, ".git/") || name == ".github" || strings.HasPrefix(name, ".github/") || name == "scripts" || strings.HasPrefix(name, "scripts/") {
+	if name == "scripts" || strings.HasPrefix(name, "scripts/") {
 		return true
+	}
+	// Any dot path is protected: .git, .github, .husky, .vscode, .envrc,
+	// .npmrc and .yarnrc.yml are read or run by tools on the Director's
+	// machine or in CI. Only .gitignore passes.
+	for _, part := range strings.Split(name, "/") {
+		if strings.HasPrefix(part, ".") && part != ".gitignore" {
+			return true
+		}
 	}
 	switch base {
 	case ".gitlab-ci.yml", "lefthook.yml", ".pre-commit-config.yaml", "Makefile", "go.mod", "go.sum", "package.json", "package-lock.json", "Dockerfile", ".gitmodules":
@@ -41,7 +49,7 @@ func approvalPathMatches(glob, name string) bool {
 }
 
 func approvalRuleMatches(rule domain.ApprovalRule, run domain.Run, persona string, changed []changedPath) bool {
-	if run.Mode != domain.RunWrite || run.ChannelID != rule.ChannelID || run.State != domain.RunWaitingApproval || run.Verification == nil || !run.Verification.OK || run.DiffStat == nil || len(changed) == 0 {
+	if run.Mode != domain.RunWrite || run.ChannelID != rule.ChannelID || run.State != domain.RunWaitingApproval || run.Verification == nil || !run.Verification.OK || !strings.Contains(run.Verification.Detail, "verification passed") || run.DiffStat == nil || len(changed) == 0 {
 		return false
 	}
 	if rule.Persona != "" && rule.Persona != persona {
@@ -118,6 +126,11 @@ func (a *App) applyApprovalRule(ctx context.Context, run domain.Run, persona str
 	if err != nil || len(rules) == 0 {
 		return
 	}
+	// A rule covers work the Director asked for. A routine run may come from
+	// a GitHub issue or pull request anyone can open, so it always waits.
+	if trigger, err := a.Store.Message(ctx, run.TriggerMessageID); err != nil || trigger.Routine != "" {
+		return
+	}
 	changed, stat, err := a.changedApprovalPaths(ctx, run)
 	if err != nil {
 		a.notice(ctx, run.ChannelID, "warn", "Approval rule inspection failed: "+err.Error())
@@ -134,7 +147,12 @@ func (a *App) applyApprovalRule(ctx context.Context, run domain.Run, persona str
 		}
 		note, err := a.ResolveApproval(ctx, approval, "merge", "")
 		if err == nil {
-			_, err = a.Store.ResolveApproval(ctx, approval.ID, "merge", "Merged by rule "+rule.ID[:8]+". "+note, "system")
+			if _, rerr := a.Store.ResolveApproval(ctx, approval.ID, "merge", "Merged by rule "+rule.ID[:8]+". "+note, "system"); rerr != nil {
+				// The merge happened; only recording it failed. Merge on the
+				// card again records it without merging twice.
+				a.notice(ctx, run.ChannelID, "warn", "Rule "+rule.ID[:8]+" merged this run, but the card could not be updated: "+rerr.Error()+". Choose Merge on the card to record it.")
+				return
+			}
 		}
 		if err != nil {
 			a.notice(ctx, run.ChannelID, "warn", "Rule "+rule.ID[:8]+" could not merge: "+err.Error()+". The approval is still pending.")

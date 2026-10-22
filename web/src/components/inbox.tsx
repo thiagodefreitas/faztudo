@@ -136,10 +136,10 @@ export function InboxPage() {
           </Menu.Root>
         )}
       </section>
-      <SuggestionsSection />
       <div className="relative min-h-0 flex-1">
         <div ref={scroller} className="h-full overflow-y-auto border-t border-line" data-testid="inbox-list">
           <TodayBrief />
+          <SuggestionsSection />
           {channels.isPending && <p className="px-4 py-6 text-[13px] text-muted">Loading chats</p>}
           {!channels.isPending && items.length === 0 && <p className="px-4 py-6 text-[13px] text-muted">No channels yet.</p>}
           <ul>
