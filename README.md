@@ -29,6 +29,11 @@ This is what you get:
   approvals inbox for every pending decision.
 - Agents that see each other's work: each prompt lists the runs in progress
   and the pinned rules, and each run keeps the exact context it was given.
+- A morning brief, lessons you teach each agent, routines from a good run or
+  from CI and GitHub events, a read-only scout that files suggestions, and
+  approval rules for the small merges you would always accept.
+- Tokens and estimated cost per run, dictation, and agent messages to other
+  people that wait for your Send.
 - Projects with settings, archiving and a daily digest, and team channels.
 - Write runs sandboxed with bubblewrap, and refused when the sandbox cannot
   start.
@@ -56,7 +61,7 @@ The full list is in the [changelog](CHANGELOG.md).
   <a href="docs/images/inbox-phone.png">phone inbox</a>
 </p>
 
-> **Status: alpha, version 0.1.7.** The chat, runs, approvals, tasks,
+> **Status: alpha, version 0.1.8.** The chat, runs, approvals, tasks,
 > projects, Lanes dashboard, Office and LAN mode for phones work today, and
 > faztudo is built inside itself. Expect rough edges and changing formats.
 > Issues and ideas are welcome. See the [roadmap](docs/roadmap.md).

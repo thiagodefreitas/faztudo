@@ -19,7 +19,7 @@ hero:
 import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
 
 <div class="fz-status">
-  <strong>Alpha, version 0.1.7.</strong> Chat, runs, approvals, tasks,
+  <strong>Alpha, version 0.1.8.</strong> Chat, runs, approvals, tasks,
   projects, compare mode, the Lanes dashboard, the 2D and 3D office and phone
   access over your LAN work today. Install it from the
   <a href="https://github.com/thiagodefreitas/faztudo/releases">releases page</a>.
@@ -66,23 +66,33 @@ Every agent has a desk. In 3D they are characters that act out what they are doi
   <img src="/faztudo/images/office-3d.png" alt="The 3D office: each agent is a character at its desk, built from its avatar, with a raised-hand card where an approval waits, a task board and a lane strip" />
 </div>
 
-## What is new in 0.1.7
+## What is new in 0.1.8
+
+- **A morning brief.** The home page starts with what needs you, what
+  finished or failed since your last visit, what runs now and which lanes
+  are short.
+- **Agents keep your corrections.** Teach a persona from any answer; the
+  lesson joins its later runs, shows in the Context tab, and stays yours to
+  edit or delete.
+- **Fewer clicks, not less control.** Repeat a good run on a schedule,
+  let a rule merge small changes of a kind you chose (never CI, build or
+  lock files, never a push), and let a read-only scout file suggestions
+  that wait for you.
+- **Routines that react.** A failing CI run, a new issue or a new pull
+  request can start a routine.
+- **Costs in view and a voice.** Runs show tokens and estimated cost, and
+  the message box takes dictation.
+- **Nothing leaves without you.** Agent messages to a Signal group wait for
+  Send, and a message in the transcript can no longer pose as yours.
+
+## Earlier: 0.1.7
 
 - **See what an agent was given.** A run's Context tab shows the exact
-  prompt, section by section with sizes: the channel summary, the other
-  work in progress, the pins, the transcript, the request and the
-  instructions.
+  prompt, section by section with sizes.
 - **All work in one place.** The Tasks page has an All work view of every
-  run of the last day, including mentions and delegations, with who handed
-  each one out.
-- **An office that fits the screen.** The 2D office lays out its rooms to
-  fill the window, and each working desk shows what it works on.
-- **Summaries and lanes that work.** Channel summaries never ran before:
-  their prompt was too long for one command-line argument. Lanes that ran
-  out of quota come back at their reset time, and a lane that just ran
-  cleanly shows as available.
-- **Private channels stay private.** Runs of a private channel, with their
-  output, diffs and prompts, are hidden from members outside it.
+  run of the last day.
+- **Summaries and lanes that work, and private channels that stay
+  private.**
 
 ## Earlier: 0.1.5 and 0.1.6
 

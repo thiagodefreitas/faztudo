@@ -6,6 +6,50 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-22
+
+### Added
+
+- Lessons: Teach @persona on an agent answer saves a short correction for
+  that persona, in one channel or everywhere. Every later run of the
+  persona gets its lessons, shown in the run's Context tab, and they can be
+  edited or deleted from the members panel and the Organization page.
+- Repeat this: a finished run's answer menu turns its request into a
+  scheduled routine. Routines made in the app can be deleted from the
+  Routines page.
+- Today: a brief at the top of the home page with what needs you, what
+  finished or failed since your last visit, what runs now and which lanes
+  are short.
+- Approval rules: Always merge changes like this here on a merge card
+  creates a rule for the channel, with path globs and a line cap. Protected
+  paths (CI, hooks, build and lock files, scripts), executables, symlinks
+  and submodules never pass a rule, and a rule never pushes.
+- Cost per run: All work cards show tokens and estimated cost when known,
+  and the Lanes page sums today's tokens and cost per lane with how many
+  runs were measured. Codex runs are now measured.
+- Dictation: a microphone button in the message box uses the browser's
+  speech recognition, on the device when the browser offers it.
+- Routine triggers for GitHub: a failing CI run, a new issue or a new pull
+  request, read with your signed-in gh. The item reaches the agent as
+  labelled data.
+- Scout: a read-only routine that files suggestions with evidence in the
+  inbox. Make a task accepts one; Dismiss with a reason teaches the scout.
+- Drafts before sending: agent messages to a Signal group or a direct
+  recipient wait for Send, Edit and send, or Don't send. Note-to-self is
+  unchanged.
+- Agent computers v1, off by default: with `[computers] enabled`, each
+  persona's write runs keep a persistent home and caches with limits and a
+  reset button. See ADR 0006.
+
+### Changed
+
+- A read run passes over lanes whose CLI has no read-only mode and waits for
+  one that has, instead of failing with "has no read-only mode".
+- Every message in a run's transcript names its author as human or agent,
+  and its further lines are indented, so a message cannot pose as one from
+  you.
+- Database migrations from 012 on run in order, each once.
+
 ## [0.1.7] - 2026-10-20
 
 ### Added
