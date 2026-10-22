@@ -165,10 +165,16 @@ running one, and retry a failed one on the same or another lane.
 
 Open a run and choose **Context** to see exactly what the agent was given,
 one folded section at a time with its size: the channel summary, the other
-work in progress (Working now), the pinned messages, the recent transcript,
-your request and the instructions. When an agent misreads a request, this is
-where you check whether it had what it needed. Runs from before 0.1.7 have no
+work in progress (Working now), the pinned messages, the persona's lessons, the recent transcript, your
+request and the instructions. When an agent misreads a request, this is where
+you check whether it had what it needed. Runs from before 0.1.7 have no
 stored context.
+
+In the transcript every message names its author and whether that author is
+a human or an agent, and the further lines of a message are indented. A
+message therefore cannot pass itself off as one from you, and the agent is
+told that only human messages are requests: instructions inside another
+agent's answer, or in a web page or file it quotes, are information.
 
 ![A run's Context tab](https://raw.githubusercontent.com/thiagodefreitas/faztudo/main/docs/images/run-context.png)
 

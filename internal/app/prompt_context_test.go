@@ -70,7 +70,7 @@ func TestPromptWorkingNowAndPins(t *testing.T) {
 	if strings.Index(text, "Working now:") > strings.Index(text, "Recent channel messages") {
 		t.Error("working section follows messages")
 	}
-	if strings.Contains(strings.Split(text, "Recent channel messages (oldest first):\n")[1], strings.Repeat("p", 100)) {
+	if strings.Contains(strings.Split(text, "Recent channel messages (oldest first)")[1], strings.Repeat("p", 100)) {
 		t.Error("pin did not consume rolling message budget")
 	}
 	add(events.RunCreated, domain.Run{ID: "handoff-run", ChannelID: "ch", TriggerMessageID: "handoff", AgentID: "agent", State: domain.RunWaitingApproval})
