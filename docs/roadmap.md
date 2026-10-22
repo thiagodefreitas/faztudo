@@ -31,17 +31,17 @@ order we build them; each has an issue in the "Daily use" milestone.
 
 | # | item | builds on | state |
 | :--- | :--- | :--- | :--- |
-| 1 | Lessons: tell an agent "remember this" on an answer; the lesson joins every later run of that persona, shows in the run's Context tab, and can be edited or deleted | prompt sections, Context tab | in progress |
-| 2 | Repeat this: turn a finished run into a scheduled routine from its card | routines | in progress |
-| 3 | Today: a brief at the top of the inbox with what needs you, what finished or failed since your last visit, what runs now and which lanes are short | inbox, runs, lanes | in progress |
-| 4 | Approval rules: Allow once, Always here or Never on a card, and rules per channel or persona (for example, merge docs-only changes that passed verification). Off by default; a rule never pushes | approvals | next |
-| 5 | Cost per run on All work and the Lanes page | usage readers | next |
-| 6 | Untrusted content marked in the prompt: bridge messages, files and web results are labelled for the agent and in the Context tab | prompt sections, bridges | next |
-| 7 | Dictation in the message box, with the browser's speech recognition first and a local model later | composer | next |
-| 8 | Drafts before sending: anything an agent sends through a bridge waits as an approval card | bridges, approvals | later |
-| 9 | Routine triggers for a failing CI run and a new issue or pull request | routines | later |
-| 10 | A read-only scout: a routine that reads the repository, CI and issues and files suggestions in the inbox; accepting one makes a task | routines, triggers, tasks | later |
-| 11 | Agent computers (see M4): a persistent sandbox per agent or team, logins stay on your machine | sandbox, worktrees | later |
+| 1 | Lessons: tell an agent "remember this" on an answer; the lesson joins every later run of that persona, shows in the run's Context tab, and can be edited or deleted | prompt sections, Context tab | built |
+| 2 | Repeat this: turn a finished run into a scheduled routine from its card | routines | built |
+| 3 | Today: a brief at the top of the inbox with what needs you, what finished or failed since your last visit, what runs now and which lanes are short | inbox, runs, lanes | built |
+| 4 | Approval rules: Allow once, Always here or Never on a card, and rules per channel or persona (for example, merge docs-only changes that passed verification). Off by default; a rule never pushes | approvals | built |
+| 5 | Cost per run on All work and the Lanes page | usage readers | built |
+| 6 | Untrusted content marked in the prompt: every transcript message names its author as human or agent and cannot forge another speaker, and GitHub data is labelled as data | prompt sections, bridges | built |
+| 7 | Dictation in the message box, with the browser's speech recognition first and a local model later | composer | built |
+| 8 | Drafts before sending: anything an agent sends through a bridge waits as an approval card | bridges, approvals | in progress |
+| 9 | Routine triggers for a failing CI run and a new issue or pull request | routines | built |
+| 10 | A read-only scout: a routine that reads the repository, CI and issues and files suggestions in the inbox; accepting one makes a task | routines, triggers, tasks | in progress |
+| 11 | Agent computers (see M4 and [ADR 0006](adr/0006-agent-computers.md)): a persistent sandbox per agent, logins stay on your machine | sandbox, worktrees | in progress |
 
 ## M0 Foundation
 
